@@ -1,0 +1,20 @@
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - unconvert
+    - unparam
+    - copyloopvar
+    - errorlint
+    - forcetypeassert
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
