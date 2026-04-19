@@ -1,7 +1,9 @@
 # Sriracha — Claude Instructions
 
 ## Module
-`go.sriracha.dev`, Go 1.23+. Only external runtime dep: `golang.org/x/text`. Tests use `github.com/stretchr/testify`.
+
+`go.sriracha.dev`, Go 1.23+. External runtime deps should be carefully considered. Tests use
+`github.com/stretchr/testify`.
 
 ## Package layout
 ```

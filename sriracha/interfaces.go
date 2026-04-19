@@ -33,7 +33,8 @@ type TokenIndexer interface {
 type IndexStorage interface {
 	// Put stores a value under key.
 	Put(ctx context.Context, key string, value []byte) error
-	// Get retrieves the value for key. Returns nil, nil if not found.
+	// Get retrieves the value for key.
+	// Returns nil, sriracha.ErrNotFound if the key does not exist.
 	Get(ctx context.Context, key string) ([]byte, error)
 	// Scan iterates all keys with the given prefix.
 	Scan(ctx context.Context, prefix string, fn func(key string, value []byte) error) error

@@ -1,6 +1,12 @@
 package sriracha
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
+
+// ErrNotFound is returned by IndexStorage.Get when the key does not exist.
+var ErrNotFound = errors.New("not found")
 
 // ErrorCode identifies the class of a Sriracha error.
 type ErrorCode int
