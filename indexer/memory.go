@@ -41,7 +41,10 @@ func (s *MemoryStorage) Get(ctx context.Context, key string) ([]byte, error) {
 	if !ok {
 		return nil, sriracha.ErrNotFound
 	}
-	src := v.([]byte)
+	src, ok := v.([]byte)
+	if !ok {
+		return nil, sriracha.ErrNotFound
+	}
 	cp := make([]byte, len(src))
 	copy(cp, src)
 	return cp, nil
@@ -53,7 +56,10 @@ func (s *MemoryStorage) Scan(ctx context.Context, prefix string, fn func(key str
 	}
 	var keys []string
 	s.data.Range(func(k, _ any) bool {
-		ks := k.(string)
+		ks, ok := k.(string)
+		if !ok {
+			return true
+		}
 		if strings.HasPrefix(ks, prefix) {
 			keys = append(keys, ks)
 		}
@@ -105,5 +111,9 @@ func (s *MemoryStorage) LoadCheckpoint(ctx context.Context) (string, error) {
 	if !ok {
 		return "", nil
 	}
-	return v.(string), nil
+	tok, ok := v.(string)
+	if !ok {
+		return "", nil
+	}
+	return tok, nil
 }

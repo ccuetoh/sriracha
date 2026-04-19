@@ -211,10 +211,6 @@ func (idx *Indexer) Match(ctx context.Context, tr sriracha.TokenRecord, cfg srir
 	cfg.Threshold = cmp.Or(cfg.Threshold, DefaultThreshold)
 	cfg.MaxResults = cmp.Or(cfg.MaxResults, DefaultMaxResults)
 
-	if cfg.MaxResults == 0 {
-		cfg.MaxResults = 1
-	}
-
 	if tr.FieldSetVersion != idx.fs.Version {
 		return nil, sriracha.ErrFieldSetIncompatible(tr.FieldSetVersion, idx.fs.Version)
 	}
