@@ -93,27 +93,35 @@ func TestTokenizeRecord_DifferentSecret(t *testing.T) {
 	assert.NotEqual(t, tr1.Payload, tr2.Payload, "different secrets produced identical payloads")
 }
 
-func TestValidateTokenRecord_TamperedPayload(t *testing.T) {
+func TestValidateTokenRecord(t *testing.T) {
 	t.Parallel()
-	tok := newTok(t, "secret")
-	rec := sriracha.RawRecord{sriracha.FieldNameGiven: "John"}
-	fs := deterministicFS(sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
 
-	tr, err := tok.TokenizeRecord(rec, fs)
-	require.NoError(t, err)
-	tr.Payload[0] ^= 0xff
-	assert.Error(t, ValidateTokenRecord(tr), "expected checksum mismatch error for tampered payload")
-}
-
-func TestValidateTokenRecord_Valid(t *testing.T) {
-	t.Parallel()
-	tok := newTok(t, "secret")
-	rec := sriracha.RawRecord{sriracha.FieldNameGiven: "John"}
-	fs := deterministicFS(sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
-
-	tr, err := tok.TokenizeRecord(rec, fs)
-	require.NoError(t, err)
-	assert.NoError(t, ValidateTokenRecord(tr), "expected nil error for valid token")
+	cases := []struct {
+		name    string
+		tamper  bool
+		wantErr bool
+	}{
+		{"valid token", false, false},
+		{"tampered payload", true, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tok := newTok(t, "secret")
+			rec := sriracha.RawRecord{sriracha.FieldNameGiven: "John"}
+			fs := deterministicFS(sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
+			tr, err := tok.TokenizeRecord(rec, fs)
+			require.NoError(t, err)
+			if tc.tamper {
+				tr.Payload[0] ^= 0xff
+			}
+			if tc.wantErr {
+				assert.Error(t, ValidateTokenRecord(tr), "expected checksum mismatch error for tampered payload")
+			} else {
+				assert.NoError(t, ValidateTokenRecord(tr), "expected nil error for valid token")
+			}
+		})
+	}
 }
 
 func TestTokenizeRecord_MissingRequired(t *testing.T) {
@@ -175,44 +183,44 @@ func TestTokenizeRecordBloom_NormalizationError(t *testing.T) {
 
 // Note: the spec suggests "John" vs "Jon" but both are short (3-4 chars),
 // yielding very few bigrams/trigrams and unreliable Dice scores.
-// "Christopher" vs "Cristopher" tests the same property with more ngrams.
-func TestTokenizeRecordBloom_SimilarNames(t *testing.T) {
+// "Christopher" vs "Cristopher" tests the similar-names property with more ngrams.
+func TestTokenizeRecordBloom_NameSimilarity(t *testing.T) {
 	t.Parallel()
-	tok := newTok(t, "secret")
-	fs := bloomFS(sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
 
-	tr1, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: "Christopher"}, fs)
-	require.NoError(t, err)
-	tr2, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: "Cristopher"}, fs)
-	require.NoError(t, err)
+	cases := []struct {
+		name      string
+		nameA     string
+		nameB     string
+		wantAbove bool
+		threshold float64
+	}{
+		{"similar names (typo)", "Christopher", "Cristopher", true, 0.80},
+		{"dissimilar names", "John", "Maria", false, 0.30},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tok := newTok(t, "secret")
+			fs := bloomFS(sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
 
-	bs1, err := bitset.FromBytes(tr1.Payload)
-	require.NoError(t, err)
-	bs2, err := bitset.FromBytes(tr2.Payload)
-	require.NoError(t, err)
+			tr1, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: tc.nameA}, fs)
+			require.NoError(t, err)
+			tr2, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: tc.nameB}, fs)
+			require.NoError(t, err)
 
-	d := dice(t, bs1, bs2)
-	t.Logf("Dice(Christopher, Cristopher) = %.4f", d)
-	assert.Greater(t, d, 0.80, "Dice(Christopher, Cristopher) = %.4f, expected > 0.80", d)
-}
+			bs1, err := bitset.FromBytes(tr1.Payload)
+			require.NoError(t, err)
+			bs2, err := bitset.FromBytes(tr2.Payload)
+			require.NoError(t, err)
 
-func TestTokenizeRecordBloom_DissimilarNames(t *testing.T) {
-	t.Parallel()
-	tok := newTok(t, "secret")
-	fs := bloomFS(sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
-
-	tr1, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: "John"}, fs)
-	require.NoError(t, err)
-	tr2, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: "Maria"}, fs)
-	require.NoError(t, err)
-
-	bs1, err := bitset.FromBytes(tr1.Payload)
-	require.NoError(t, err)
-	bs2, err := bitset.FromBytes(tr2.Payload)
-	require.NoError(t, err)
-
-	d := dice(t, bs1, bs2)
-	assert.Less(t, d, 0.30, "Dice(John, Maria) = %.4f, expected < 0.30", d)
+			d := dice(t, bs1, bs2)
+			if tc.wantAbove {
+				assert.Greater(t, d, tc.threshold, "Dice(%s, %s) = %.4f, expected > %.2f", tc.nameA, tc.nameB, d, tc.threshold)
+			} else {
+				assert.Less(t, d, tc.threshold, "Dice(%s, %s) = %.4f, expected < %.2f", tc.nameA, tc.nameB, d, tc.threshold)
+			}
+		})
+	}
 }
 
 func TestTokenizeRecordBloom_MissingOptionalZeroFilter(t *testing.T) {

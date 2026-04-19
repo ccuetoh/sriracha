@@ -74,32 +74,66 @@ func syncSource(t *testing.T, delta map[string]sriracha.RawRecord) *mocksriracha
 func TestNew(t *testing.T) {
 	t.Parallel()
 
-	t.Run("nil storage", func(t *testing.T) {
-		t.Parallel()
-		_, err := New(nil, testFS(), testSecret())
-		require.Error(t, err)
-	})
-
-	t.Run("empty secret", func(t *testing.T) {
-		t.Parallel()
-		_, err := New(NewMemoryStorage(), testFS(), []byte{})
-		require.Error(t, err)
-	})
-
-	t.Run("invalid fieldset", func(t *testing.T) {
-		t.Parallel()
-		fs := testFS()
-		fs.Version = ""
-		_, err := New(NewMemoryStorage(), fs, testSecret())
-		require.Error(t, err)
-	})
-
-	t.Run("valid", func(t *testing.T) {
-		t.Parallel()
-		idx, err := New(NewMemoryStorage(), testFS(), testSecret())
-		require.NoError(t, err)
-		assert.NotNil(t, idx)
-	})
+	cases := []struct {
+		name        string
+		makeStorage func(*testing.T) sriracha.IndexStorage
+		fs          sriracha.FieldSet
+		secret      []byte
+		wantErr     bool
+	}{
+		{
+			name:        "nil storage",
+			makeStorage: func(*testing.T) sriracha.IndexStorage { return nil },
+			fs:          testFS(),
+			secret:      testSecret(),
+			wantErr:     true,
+		},
+		{
+			name:        "empty secret",
+			makeStorage: func(*testing.T) sriracha.IndexStorage { return NewMemoryStorage() },
+			fs:          testFS(),
+			secret:      []byte{},
+			wantErr:     true,
+		},
+		{
+			name:        "invalid fieldset",
+			makeStorage: func(*testing.T) sriracha.IndexStorage { return NewMemoryStorage() },
+			fs:          func() sriracha.FieldSet { fs := testFS(); fs.Version = ""; return fs }(),
+			secret:      testSecret(),
+			wantErr:     true,
+		},
+		{
+			name:        "valid",
+			makeStorage: func(*testing.T) sriracha.IndexStorage { return NewMemoryStorage() },
+			fs:          testFS(),
+			secret:      testSecret(),
+			wantErr:     false,
+		},
+		{
+			name: "malformed stats",
+			makeStorage: func(t *testing.T) sriracha.IndexStorage {
+				t.Helper()
+				m := NewMemoryStorage()
+				require.NoError(t, m.Put(context.Background(), "stats:v1", []byte("not-json")))
+				return m
+			},
+			fs:      testFS(),
+			secret:  testSecret(),
+			wantErr: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			idx, err := New(tc.makeStorage(t), tc.fs, tc.secret)
+			if tc.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.NotNil(t, idx)
+			}
+		})
+	}
 
 	t.Run("loads existing stats", func(t *testing.T) {
 		t.Parallel()
@@ -121,14 +155,6 @@ func TestNew(t *testing.T) {
 		storage.EXPECT().Get(mock.Anything, "stats:v1").Return(nil, sentinel)
 		_, err := New(storage, testFS(), testSecret())
 		require.ErrorIs(t, err, sentinel)
-	})
-
-	t.Run("stats malformed json", func(t *testing.T) {
-		t.Parallel()
-		mem := NewMemoryStorage()
-		require.NoError(t, mem.Put(context.Background(), "stats:v1", []byte("not-json")))
-		_, err := New(mem, testFS(), testSecret())
-		require.Error(t, err)
 	})
 }
 
@@ -161,13 +187,14 @@ func TestNewDefault(t *testing.T) {
 	})
 }
 
-func TestMemoryStorage(t *testing.T) {
-	t.Parallel()
+// runStorageContract verifies the common IndexStorage contract for any implementation.
+func runStorageContract(t *testing.T, makeStorage func(*testing.T) sriracha.IndexStorage) {
+	t.Helper()
 	ctx := context.Background()
 
 	t.Run("put and get", func(t *testing.T) {
 		t.Parallel()
-		s := NewMemoryStorage()
+		s := makeStorage(t)
 		require.NoError(t, s.Put(ctx, "k", []byte("v")))
 		val, err := s.Get(ctx, "k")
 		require.NoError(t, err)
@@ -176,7 +203,7 @@ func TestMemoryStorage(t *testing.T) {
 
 	t.Run("get missing key returns ErrNotFound", func(t *testing.T) {
 		t.Parallel()
-		s := NewMemoryStorage()
+		s := makeStorage(t)
 		val, err := s.Get(ctx, "absent")
 		require.ErrorIs(t, err, sriracha.ErrNotFound)
 		assert.Nil(t, val)
@@ -184,7 +211,7 @@ func TestMemoryStorage(t *testing.T) {
 
 	t.Run("delete existing", func(t *testing.T) {
 		t.Parallel()
-		s := NewMemoryStorage()
+		s := makeStorage(t)
 		require.NoError(t, s.Put(ctx, "k", []byte("v")))
 		require.NoError(t, s.Delete(ctx, "k"))
 		val, err := s.Get(ctx, "k")
@@ -194,13 +221,13 @@ func TestMemoryStorage(t *testing.T) {
 
 	t.Run("delete missing is no-op", func(t *testing.T) {
 		t.Parallel()
-		s := NewMemoryStorage()
+		s := makeStorage(t)
 		require.NoError(t, s.Delete(ctx, "absent"))
 	})
 
 	t.Run("scan prefix", func(t *testing.T) {
 		t.Parallel()
-		s := NewMemoryStorage()
+		s := makeStorage(t)
 		require.NoError(t, s.Put(ctx, "foo:1", []byte("a")))
 		require.NoError(t, s.Put(ctx, "foo:2", []byte("b")))
 		require.NoError(t, s.Put(ctx, "bar:1", []byte("c")))
@@ -209,12 +236,12 @@ func TestMemoryStorage(t *testing.T) {
 			keys = append(keys, k)
 			return nil
 		}))
-		assert.Equal(t, []string{"foo:1", "foo:2"}, keys)
+		assert.ElementsMatch(t, []string{"foo:1", "foo:2"}, keys)
 	})
 
 	t.Run("scan order", func(t *testing.T) {
 		t.Parallel()
-		s := NewMemoryStorage()
+		s := makeStorage(t)
 		require.NoError(t, s.Put(ctx, "p:z", []byte("z")))
 		require.NoError(t, s.Put(ctx, "p:a", []byte("a")))
 		require.NoError(t, s.Put(ctx, "p:m", []byte("m")))
@@ -226,18 +253,9 @@ func TestMemoryStorage(t *testing.T) {
 		assert.Equal(t, []string{"p:a", "p:m", "p:z"}, keys)
 	})
 
-	t.Run("scan error propagation", func(t *testing.T) {
-		t.Parallel()
-		s := NewMemoryStorage()
-		require.NoError(t, s.Put(ctx, "p:1", []byte("v")))
-		sentinel := errors.New("stop")
-		err := s.Scan(ctx, "p:", func(_ string, _ []byte) error { return sentinel })
-		assert.ErrorIs(t, err, sentinel)
-	})
-
 	t.Run("checkpoint roundtrip", func(t *testing.T) {
 		t.Parallel()
-		s := NewMemoryStorage()
+		s := makeStorage(t)
 		require.NoError(t, s.SaveCheckpoint(ctx, "tok123"))
 		cp, err := s.LoadCheckpoint(ctx)
 		require.NoError(t, err)
@@ -246,7 +264,7 @@ func TestMemoryStorage(t *testing.T) {
 
 	t.Run("empty checkpoint", func(t *testing.T) {
 		t.Parallel()
-		s := NewMemoryStorage()
+		s := makeStorage(t)
 		cp, err := s.LoadCheckpoint(ctx)
 		require.NoError(t, err)
 		assert.Equal(t, "", cp)
@@ -254,9 +272,9 @@ func TestMemoryStorage(t *testing.T) {
 
 	t.Run("context canceled", func(t *testing.T) {
 		t.Parallel()
+		s := makeStorage(t)
 		cctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		s := NewMemoryStorage()
 		require.Error(t, s.Put(cctx, "k", []byte("v")))
 		_, err := s.Get(cctx, "k")
 		require.Error(t, err)
@@ -269,7 +287,7 @@ func TestMemoryStorage(t *testing.T) {
 
 	t.Run("scan context canceled mid-iteration", func(t *testing.T) {
 		t.Parallel()
-		s := NewMemoryStorage()
+		s := makeStorage(t)
 		bg := context.Background()
 		require.NoError(t, s.Put(bg, "p:1", []byte("a")))
 		require.NoError(t, s.Put(bg, "p:2", []byte("b")))
@@ -285,6 +303,24 @@ func TestMemoryStorage(t *testing.T) {
 			return nil
 		})
 		require.Error(t, err)
+	})
+}
+
+func TestMemoryStorage(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	runStorageContract(t, func(t *testing.T) sriracha.IndexStorage {
+		return NewMemoryStorage()
+	})
+
+	t.Run("scan error propagation", func(t *testing.T) {
+		t.Parallel()
+		s := NewMemoryStorage()
+		require.NoError(t, s.Put(ctx, "p:1", []byte("v")))
+		sentinel := errors.New("stop")
+		err := s.Scan(ctx, "p:", func(_ string, _ []byte) error { return sentinel })
+		assert.ErrorIs(t, err, sentinel)
 	})
 
 	t.Run("scan skips checkpoint key", func(t *testing.T) {
@@ -314,82 +350,8 @@ func TestBadgerStorage(t *testing.T) {
 		return s
 	}
 
-	t.Run("put and get", func(t *testing.T) {
-		t.Parallel()
-		s := newBadger(t)
-		require.NoError(t, s.Put(ctx, "k", []byte("v")))
-		val, err := s.Get(ctx, "k")
-		require.NoError(t, err)
-		assert.Equal(t, []byte("v"), val)
-	})
-
-	t.Run("get missing key returns ErrNotFound", func(t *testing.T) {
-		t.Parallel()
-		s := newBadger(t)
-		val, err := s.Get(ctx, "absent")
-		require.ErrorIs(t, err, sriracha.ErrNotFound)
-		assert.Nil(t, val)
-	})
-
-	t.Run("delete existing", func(t *testing.T) {
-		t.Parallel()
-		s := newBadger(t)
-		require.NoError(t, s.Put(ctx, "k", []byte("v")))
-		require.NoError(t, s.Delete(ctx, "k"))
-		val, err := s.Get(ctx, "k")
-		require.ErrorIs(t, err, sriracha.ErrNotFound)
-		assert.Nil(t, val)
-	})
-
-	t.Run("delete missing is no-op", func(t *testing.T) {
-		t.Parallel()
-		s := newBadger(t)
-		require.NoError(t, s.Delete(ctx, "absent"))
-	})
-
-	t.Run("scan prefix", func(t *testing.T) {
-		t.Parallel()
-		s := newBadger(t)
-		require.NoError(t, s.Put(ctx, "foo:1", []byte("a")))
-		require.NoError(t, s.Put(ctx, "foo:2", []byte("b")))
-		require.NoError(t, s.Put(ctx, "bar:1", []byte("c")))
-		var keys []string
-		require.NoError(t, s.Scan(ctx, "foo:", func(k string, _ []byte) error {
-			keys = append(keys, k)
-			return nil
-		}))
-		assert.ElementsMatch(t, []string{"foo:1", "foo:2"}, keys)
-	})
-
-	t.Run("scan order", func(t *testing.T) {
-		t.Parallel()
-		s := newBadger(t)
-		require.NoError(t, s.Put(ctx, "p:z", []byte("z")))
-		require.NoError(t, s.Put(ctx, "p:a", []byte("a")))
-		require.NoError(t, s.Put(ctx, "p:m", []byte("m")))
-		var keys []string
-		require.NoError(t, s.Scan(ctx, "p:", func(k string, _ []byte) error {
-			keys = append(keys, k)
-			return nil
-		}))
-		assert.Equal(t, []string{"p:a", "p:m", "p:z"}, keys)
-	})
-
-	t.Run("checkpoint roundtrip", func(t *testing.T) {
-		t.Parallel()
-		s := newBadger(t)
-		require.NoError(t, s.SaveCheckpoint(ctx, "tok456"))
-		cp, err := s.LoadCheckpoint(ctx)
-		require.NoError(t, err)
-		assert.Equal(t, "tok456", cp)
-	})
-
-	t.Run("empty checkpoint", func(t *testing.T) {
-		t.Parallel()
-		s := newBadger(t)
-		cp, err := s.LoadCheckpoint(ctx)
-		require.NoError(t, err)
-		assert.Equal(t, "", cp)
+	runStorageContract(t, func(t *testing.T) sriracha.IndexStorage {
+		return newBadger(t)
 	})
 
 	t.Run("size bytes non-negative", func(t *testing.T) {
@@ -406,21 +368,6 @@ func TestBadgerStorage(t *testing.T) {
 		s, err := OpenBadgerInMemory()
 		require.NoError(t, err)
 		require.NoError(t, s.Close())
-	})
-
-	t.Run("context canceled", func(t *testing.T) {
-		t.Parallel()
-		s := newBadger(t)
-		cctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		require.Error(t, s.Put(cctx, "k", []byte("v")))
-		_, err := s.Get(cctx, "k")
-		require.Error(t, err)
-		require.Error(t, s.Scan(cctx, "k", func(string, []byte) error { return nil }))
-		require.Error(t, s.Delete(cctx, "k"))
-		require.Error(t, s.SaveCheckpoint(cctx, "tok"))
-		_, err = s.LoadCheckpoint(cctx)
-		require.Error(t, err)
 	})
 
 	t.Run("put batch and get each", func(t *testing.T) {
@@ -473,6 +420,92 @@ func TestRebuild(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, idx *Indexer, sentinel error) sriracha.RecordSource
+	}{
+		{
+			name: "source error",
+			setup: func(t *testing.T, _ *Indexer, sentinel error) sriracha.RecordSource {
+				t.Helper()
+				src := mocksriracha.NewMockRecordSource(t)
+				src.EXPECT().Scan(mock.Anything, mock.Anything).Return(sentinel)
+				return src
+			},
+		},
+		{
+			name: "storage scan error",
+			setup: func(t *testing.T, idx *Indexer, sentinel error) sriracha.RecordSource {
+				t.Helper()
+				storage := mocksriracha.NewMockIndexStorage(t)
+				storage.EXPECT().Scan(mock.Anything, "det:", mock.Anything).Return(sentinel)
+				idx.storage = storage
+				return mocksriracha.NewMockRecordSource(t)
+			},
+		},
+		{
+			name: "storage delete error",
+			setup: func(t *testing.T, idx *Indexer, sentinel error) sriracha.RecordSource {
+				t.Helper()
+				storage := mocksriracha.NewMockIndexStorage(t)
+				storage.EXPECT().Scan(mock.Anything, "det:", mock.Anything).RunAndReturn(
+					func(_ context.Context, _ string, fn func(string, []byte) error) error {
+						return fn("det:somekey", nil)
+					})
+				storage.EXPECT().Scan(mock.Anything, "prob:", mock.Anything).Return(nil)
+				storage.EXPECT().Scan(mock.Anything, "meta:", mock.Anything).Return(nil)
+				storage.EXPECT().Delete(mock.Anything, "det:somekey").Return(sentinel)
+				idx.storage = storage
+				return mocksriracha.NewMockRecordSource(t)
+			},
+		},
+		{
+			name: "save stats error",
+			setup: func(t *testing.T, idx *Indexer, sentinel error) sriracha.RecordSource {
+				t.Helper()
+				storage := mocksriracha.NewMockIndexStorage(t)
+				storage.EXPECT().Scan(mock.Anything, "det:", mock.Anything).Return(nil)
+				storage.EXPECT().Scan(mock.Anything, "prob:", mock.Anything).Return(nil)
+				storage.EXPECT().Scan(mock.Anything, "meta:", mock.Anything).Return(nil)
+				storage.EXPECT().Put(mock.Anything, "stats:v1", mock.Anything).Return(sentinel)
+				idx.storage = storage
+				src := mocksriracha.NewMockRecordSource(t)
+				src.EXPECT().Scan(mock.Anything, mock.Anything).Return(nil)
+				return src
+			},
+		},
+		{
+			name: "index record error",
+			setup: func(t *testing.T, idx *Indexer, sentinel error) sriracha.RecordSource {
+				t.Helper()
+				storage := mocksriracha.NewMockIndexStorage(t)
+				storage.EXPECT().Scan(mock.Anything, "det:", mock.Anything).Return(nil)
+				storage.EXPECT().Scan(mock.Anything, "prob:", mock.Anything).Return(nil)
+				storage.EXPECT().Scan(mock.Anything, "meta:", mock.Anything).Return(nil)
+				storage.EXPECT().Put(mock.Anything, mock.MatchedBy(func(k string) bool {
+					return strings.HasPrefix(k, "det:")
+				}), mock.Anything).Return(sentinel)
+				idx.storage = storage
+				src := mocksriracha.NewMockRecordSource(t)
+				src.EXPECT().Scan(mock.Anything, mock.Anything).RunAndReturn(
+					func(_ context.Context, fn func(string, sriracha.RawRecord) error) error {
+						return fn("r1", sriracha.RawRecord{sriracha.FieldNameGiven: "Alice", sriracha.FieldNameFamily: "Smith"})
+					})
+				return src
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sentinel := errors.New("sentinel")
+			idx := newTestIndexer(t)
+			src := tc.setup(t, idx, sentinel)
+			err := idx.Rebuild(ctx, src)
+			require.ErrorIs(t, err, sentinel)
+		})
+	}
+
 	t.Run("empty source", func(t *testing.T) {
 		t.Parallel()
 		idx := newTestIndexer(t)
@@ -514,82 +547,6 @@ func TestRebuild(t *testing.T) {
 		assert.Equal(t, int64(2), idx.Stats().RecordCount)
 	})
 
-	t.Run("source error", func(t *testing.T) {
-		t.Parallel()
-		idx := newTestIndexer(t)
-		src := mocksriracha.NewMockRecordSource(t)
-		src.EXPECT().Scan(mock.Anything, mock.Anything).Return(errors.New("scan failed"))
-		err := idx.Rebuild(ctx, src)
-		require.Error(t, err)
-	})
-
-	t.Run("storage scan error", func(t *testing.T) {
-		t.Parallel()
-		sentinel := errors.New("scan fail")
-		idx := newTestIndexer(t)
-		storage := mocksriracha.NewMockIndexStorage(t)
-		storage.EXPECT().Scan(mock.Anything, "det:", mock.Anything).Return(sentinel)
-		idx.storage = storage
-		src := mocksriracha.NewMockRecordSource(t)
-		err := idx.Rebuild(ctx, src)
-		require.ErrorIs(t, err, sentinel)
-	})
-
-	t.Run("storage delete error", func(t *testing.T) {
-		t.Parallel()
-		sentinel := errors.New("delete fail")
-		idx := newTestIndexer(t)
-		storage := mocksriracha.NewMockIndexStorage(t)
-		storage.EXPECT().Scan(mock.Anything, "det:", mock.Anything).RunAndReturn(
-			func(_ context.Context, _ string, fn func(string, []byte) error) error {
-				return fn("det:somekey", nil)
-			})
-		storage.EXPECT().Scan(mock.Anything, "prob:", mock.Anything).Return(nil)
-		storage.EXPECT().Scan(mock.Anything, "meta:", mock.Anything).Return(nil)
-		storage.EXPECT().Delete(mock.Anything, "det:somekey").Return(sentinel)
-		idx.storage = storage
-		src := mocksriracha.NewMockRecordSource(t)
-		err := idx.Rebuild(ctx, src)
-		require.ErrorIs(t, err, sentinel)
-	})
-
-	t.Run("save stats error", func(t *testing.T) {
-		t.Parallel()
-		sentinel := errors.New("put fail")
-		idx := newTestIndexer(t)
-		storage := mocksriracha.NewMockIndexStorage(t)
-		storage.EXPECT().Scan(mock.Anything, "det:", mock.Anything).Return(nil)
-		storage.EXPECT().Scan(mock.Anything, "prob:", mock.Anything).Return(nil)
-		storage.EXPECT().Scan(mock.Anything, "meta:", mock.Anything).Return(nil)
-		storage.EXPECT().Put(mock.Anything, "stats:v1", mock.Anything).Return(sentinel)
-		idx.storage = storage
-		src := mocksriracha.NewMockRecordSource(t)
-		src.EXPECT().Scan(mock.Anything, mock.Anything).Return(nil)
-		err := idx.Rebuild(ctx, src)
-		require.ErrorIs(t, err, sentinel)
-	})
-
-	t.Run("index record error", func(t *testing.T) {
-		t.Parallel()
-		sentinel := errors.New("put fail")
-		idx := newTestIndexer(t)
-		storage := mocksriracha.NewMockIndexStorage(t)
-		storage.EXPECT().Scan(mock.Anything, "det:", mock.Anything).Return(nil)
-		storage.EXPECT().Scan(mock.Anything, "prob:", mock.Anything).Return(nil)
-		storage.EXPECT().Scan(mock.Anything, "meta:", mock.Anything).Return(nil)
-		storage.EXPECT().Put(mock.Anything, mock.MatchedBy(func(k string) bool {
-			return strings.HasPrefix(k, "det:")
-		}), mock.Anything).Return(sentinel)
-		idx.storage = storage
-		src := mocksriracha.NewMockRecordSource(t)
-		src.EXPECT().Scan(mock.Anything, mock.Anything).RunAndReturn(
-			func(_ context.Context, fn func(string, sriracha.RawRecord) error) error {
-				return fn("r1", sriracha.RawRecord{sriracha.FieldNameGiven: "Alice", sriracha.FieldNameFamily: "Smith"})
-			})
-		err := idx.Rebuild(ctx, src)
-		require.ErrorIs(t, err, sentinel)
-	})
-
 	t.Run("rebuild twice with badger uses transactor", func(t *testing.T) {
 		t.Parallel()
 		s, err := OpenBadgerInMemory()
@@ -609,6 +566,85 @@ func TestRebuild(t *testing.T) {
 func TestSync(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
+
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, idx *Indexer, sentinel error) sriracha.IncrementalRecordSource
+	}{
+		{
+			name: "storage error",
+			setup: func(t *testing.T, _ *Indexer, sentinel error) sriracha.IncrementalRecordSource {
+				t.Helper()
+				src := mocksriracha.NewMockIncrementalRecordSource(t)
+				src.EXPECT().ScanSince(mock.Anything, mock.Anything, mock.Anything).Return(sentinel)
+				return src
+			},
+		},
+		{
+			name: "load checkpoint error",
+			setup: func(t *testing.T, idx *Indexer, sentinel error) sriracha.IncrementalRecordSource {
+				t.Helper()
+				storage := mocksriracha.NewMockIndexStorage(t)
+				storage.EXPECT().LoadCheckpoint(mock.Anything).Return("", sentinel)
+				idx.storage = storage
+				return mocksriracha.NewMockIncrementalRecordSource(t)
+			},
+		},
+		{
+			name: "save checkpoint error",
+			setup: func(t *testing.T, idx *Indexer, sentinel error) sriracha.IncrementalRecordSource {
+				t.Helper()
+				storage := mocksriracha.NewMockIndexStorage(t)
+				storage.EXPECT().LoadCheckpoint(mock.Anything).Return("", nil)
+				storage.EXPECT().SaveCheckpoint(mock.Anything, mock.Anything).Return(sentinel)
+				idx.storage = storage
+				src := mocksriracha.NewMockIncrementalRecordSource(t)
+				src.EXPECT().ScanSince(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+				return src
+			},
+		},
+		{
+			name: "index record put error during sync",
+			setup: func(t *testing.T, idx *Indexer, sentinel error) sriracha.IncrementalRecordSource {
+				t.Helper()
+				storage := mocksriracha.NewMockIndexStorage(t)
+				storage.EXPECT().LoadCheckpoint(mock.Anything).Return("", nil)
+				storage.EXPECT().Get(mock.Anything, "meta:r1").Return(nil, sriracha.ErrNotFound)
+				storage.EXPECT().Put(mock.Anything, mock.Anything, mock.Anything).Return(sentinel)
+				idx.storage = storage
+				src := mocksriracha.NewMockIncrementalRecordSource(t)
+				src.EXPECT().ScanSince(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+					func(_ context.Context, _ string, fn func(string, sriracha.RawRecord) error) error {
+						return fn("r1", sriracha.RawRecord{sriracha.FieldNameGiven: "Alice", sriracha.FieldNameFamily: "Smith"})
+					})
+				return src
+			},
+		},
+		{
+			name: "save stats error",
+			setup: func(t *testing.T, idx *Indexer, sentinel error) sriracha.IncrementalRecordSource {
+				t.Helper()
+				storage := mocksriracha.NewMockIndexStorage(t)
+				storage.EXPECT().LoadCheckpoint(mock.Anything).Return("", nil)
+				storage.EXPECT().SaveCheckpoint(mock.Anything, mock.Anything).Return(nil)
+				storage.EXPECT().Put(mock.Anything, "stats:v1", mock.Anything).Return(sentinel)
+				idx.storage = storage
+				src := mocksriracha.NewMockIncrementalRecordSource(t)
+				src.EXPECT().ScanSince(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+				return src
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sentinel := errors.New("sentinel")
+			idx := newTestIndexer(t)
+			src := tc.setup(t, idx, sentinel)
+			err := idx.Sync(ctx, src)
+			require.ErrorIs(t, err, sentinel)
+		})
+	}
 
 	t.Run("new records", func(t *testing.T) {
 		t.Parallel()
@@ -698,41 +734,6 @@ func TestSync(t *testing.T) {
 		assert.NotEmpty(t, cp2)
 	})
 
-	t.Run("storage error", func(t *testing.T) {
-		t.Parallel()
-		idx := newTestIndexer(t)
-		src := mocksriracha.NewMockIncrementalRecordSource(t)
-		src.EXPECT().ScanSince(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("scan error"))
-		err := idx.Sync(ctx, src)
-		require.Error(t, err)
-	})
-
-	t.Run("load checkpoint error", func(t *testing.T) {
-		t.Parallel()
-		sentinel := errors.New("cp load fail")
-		idx := newTestIndexer(t)
-		storage := mocksriracha.NewMockIndexStorage(t)
-		storage.EXPECT().LoadCheckpoint(mock.Anything).Return("", sentinel)
-		idx.storage = storage
-		src := mocksriracha.NewMockIncrementalRecordSource(t)
-		err := idx.Sync(ctx, src)
-		require.ErrorIs(t, err, sentinel)
-	})
-
-	t.Run("save checkpoint error", func(t *testing.T) {
-		t.Parallel()
-		sentinel := errors.New("cp save fail")
-		idx := newTestIndexer(t)
-		storage := mocksriracha.NewMockIndexStorage(t)
-		storage.EXPECT().LoadCheckpoint(mock.Anything).Return("", nil)
-		storage.EXPECT().SaveCheckpoint(mock.Anything, mock.Anything).Return(sentinel)
-		idx.storage = storage
-		src := mocksriracha.NewMockIncrementalRecordSource(t)
-		src.EXPECT().ScanSince(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		err := idx.Sync(ctx, src)
-		require.ErrorIs(t, err, sentinel)
-	})
-
 	t.Run("delete error during sync nil record", func(t *testing.T) {
 		t.Parallel()
 		mem := NewMemoryStorage()
@@ -788,41 +789,6 @@ func TestSync(t *testing.T) {
 				return fn("r1", sriracha.RawRecord{sriracha.FieldNameGiven: "Alison", sriracha.FieldNameFamily: "Smith"})
 			})
 		err = idx.Sync(ctx, src)
-		require.ErrorIs(t, err, sentinel)
-	})
-
-	t.Run("index record put error during sync", func(t *testing.T) {
-		t.Parallel()
-		sentinel := errors.New("put fail")
-		idx := newTestIndexer(t)
-		storage := mocksriracha.NewMockIndexStorage(t)
-		storage.EXPECT().LoadCheckpoint(mock.Anything).Return("", nil)
-		storage.EXPECT().Get(mock.Anything, "meta:r1").Return(nil, sriracha.ErrNotFound)
-		storage.EXPECT().Put(mock.Anything, mock.Anything, mock.Anything).Return(sentinel)
-		idx.storage = storage
-
-		src := mocksriracha.NewMockIncrementalRecordSource(t)
-		src.EXPECT().ScanSince(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-			func(_ context.Context, _ string, fn func(string, sriracha.RawRecord) error) error {
-				return fn("r1", sriracha.RawRecord{sriracha.FieldNameGiven: "Alice", sriracha.FieldNameFamily: "Smith"})
-			})
-		err := idx.Sync(ctx, src)
-		require.Error(t, err)
-	})
-
-	t.Run("save stats error", func(t *testing.T) {
-		t.Parallel()
-		sentinel := errors.New("put fail")
-		idx := newTestIndexer(t)
-		storage := mocksriracha.NewMockIndexStorage(t)
-		storage.EXPECT().LoadCheckpoint(mock.Anything).Return("", nil)
-		storage.EXPECT().SaveCheckpoint(mock.Anything, mock.Anything).Return(nil)
-		storage.EXPECT().Put(mock.Anything, "stats:v1", mock.Anything).Return(sentinel)
-		idx.storage = storage
-
-		src := mocksriracha.NewMockIncrementalRecordSource(t)
-		src.EXPECT().ScanSince(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		err := idx.Sync(ctx, src)
 		require.ErrorIs(t, err, sentinel)
 	})
 
@@ -1172,39 +1138,50 @@ func TestScoreProbabilistic(t *testing.T) {
 	fieldBytes := fieldFilterBytes(fs.BloomParams.SizeBits)
 	totalBytes := len(fs.Fields) * fieldBytes
 
-	t.Run("identical payloads give 1.0", func(t *testing.T) {
-		t.Parallel()
-		payload := make([]byte, totalBytes)
-		payload[0] = 0xFF
-		score, err := scoreProbabilistic(payload, payload, fs, sriracha.MatchConfig{})
-		require.NoError(t, err)
-		assert.InDelta(t, 1.0, score, 1e-9)
-	})
-
-	t.Run("zero vs zero field is skipped", func(t *testing.T) {
-		t.Parallel()
-		payload := make([]byte, totalBytes)
-		payload[fieldBytes] = 0xFF
-		score, err := scoreProbabilistic(payload, payload, fs, sriracha.MatchConfig{})
-		require.NoError(t, err)
-		assert.InDelta(t, 1.0, score, 1e-9)
-	})
-
-	t.Run("all fields absent gives 0.0", func(t *testing.T) {
-		t.Parallel()
-		payload := make([]byte, totalBytes)
-		score, err := scoreProbabilistic(payload, payload, fs, sriracha.MatchConfig{})
-		require.NoError(t, err)
-		assert.Equal(t, 0.0, score)
-	})
-
-	t.Run("payload length mismatch error", func(t *testing.T) {
-		t.Parallel()
-		short := make([]byte, fieldBytes)
-		full := make([]byte, totalBytes)
-		_, err := scoreProbabilistic(short, full, fs, sriracha.MatchConfig{})
-		require.ErrorIs(t, err, sriracha.ErrIndexCorrupted(""))
-	})
+	cases := []struct {
+		name        string
+		setupQuery  func() []byte
+		setupStored func() []byte
+		wantScore   float64
+		wantErr     bool
+	}{
+		{
+			name:        "identical payloads give 1.0",
+			setupQuery:  func() []byte { p := make([]byte, totalBytes); p[0] = 0xFF; return p },
+			setupStored: func() []byte { p := make([]byte, totalBytes); p[0] = 0xFF; return p },
+			wantScore:   1.0,
+		},
+		{
+			name:        "zero vs zero field is skipped",
+			setupQuery:  func() []byte { p := make([]byte, totalBytes); p[fieldBytes] = 0xFF; return p },
+			setupStored: func() []byte { p := make([]byte, totalBytes); p[fieldBytes] = 0xFF; return p },
+			wantScore:   1.0,
+		},
+		{
+			name:        "all fields absent gives 0.0",
+			setupQuery:  func() []byte { return make([]byte, totalBytes) },
+			setupStored: func() []byte { return make([]byte, totalBytes) },
+			wantScore:   0.0,
+		},
+		{
+			name:        "payload length mismatch error",
+			setupQuery:  func() []byte { return make([]byte, fieldBytes) },
+			setupStored: func() []byte { return make([]byte, totalBytes) },
+			wantErr:     true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			score, err := scoreProbabilistic(tc.setupQuery(), tc.setupStored(), fs, sriracha.MatchConfig{})
+			if tc.wantErr {
+				require.ErrorIs(t, err, sriracha.ErrIndexCorrupted(""))
+				return
+			}
+			require.NoError(t, err)
+			assert.InDelta(t, tc.wantScore, score, 1e-9)
+		})
+	}
 }
 
 func TestFieldFilterBytes(t *testing.T) {
@@ -1287,21 +1264,58 @@ func TestDeleteRecord(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, idx *Indexer, sentinel error)
+	}{
+		{
+			name: "get error",
+			setup: func(t *testing.T, idx *Indexer, sentinel error) {
+				t.Helper()
+				storage := mocksriracha.NewMockIndexStorage(t)
+				storage.EXPECT().Get(mock.Anything, "meta:r1").Return(nil, sentinel)
+				idx.storage = storage
+			},
+		},
+		{
+			name: "delete det error",
+			setup: func(t *testing.T, idx *Indexer, sentinel error) {
+				t.Helper()
+				storage := mocksriracha.NewMockIndexStorage(t)
+				storage.EXPECT().Get(mock.Anything, "meta:r1").Return(
+					[]byte(`{"det_key":"det:abc","prob_key":"prob:test-v1:r1"}`), nil)
+				storage.EXPECT().Delete(mock.Anything, "det:abc").Return(sentinel)
+				idx.storage = storage
+			},
+		},
+		{
+			name: "delete prob error",
+			setup: func(t *testing.T, idx *Indexer, sentinel error) {
+				t.Helper()
+				storage := mocksriracha.NewMockIndexStorage(t)
+				storage.EXPECT().Get(mock.Anything, "meta:r1").Return(
+					[]byte(`{"det_key":"det:abc","prob_key":"prob:test-v1:r1"}`), nil)
+				storage.EXPECT().Delete(mock.Anything, "det:abc").Return(nil)
+				storage.EXPECT().Delete(mock.Anything, "prob:test-v1:r1").Return(sentinel)
+				idx.storage = storage
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sentinel := errors.New("sentinel")
+			idx := newTestIndexer(t)
+			tc.setup(t, idx, sentinel)
+			err := idx.deleteRecord(ctx, "r1")
+			require.ErrorIs(t, err, sentinel)
+		})
+	}
+
 	t.Run("nonexistent is no-op", func(t *testing.T) {
 		t.Parallel()
 		idx := newTestIndexer(t)
 		require.NoError(t, idx.deleteRecord(ctx, "ghost"))
-	})
-
-	t.Run("get error", func(t *testing.T) {
-		t.Parallel()
-		sentinel := errors.New("get fail")
-		idx := newTestIndexer(t)
-		storage := mocksriracha.NewMockIndexStorage(t)
-		storage.EXPECT().Get(mock.Anything, "meta:r1").Return(nil, sentinel)
-		idx.storage = storage
-		err := idx.deleteRecord(ctx, "r1")
-		require.ErrorIs(t, err, sentinel)
 	})
 
 	t.Run("malformed meta json", func(t *testing.T) {
@@ -1310,33 +1324,6 @@ func TestDeleteRecord(t *testing.T) {
 		require.NoError(t, idx.storage.Put(ctx, "meta:r1", []byte("not-json")))
 		err := idx.deleteRecord(ctx, "r1")
 		require.Error(t, err)
-	})
-
-	t.Run("delete det error", func(t *testing.T) {
-		t.Parallel()
-		sentinel := errors.New("delete fail")
-		idx := newTestIndexer(t)
-		storage := mocksriracha.NewMockIndexStorage(t)
-		storage.EXPECT().Get(mock.Anything, "meta:r1").Return(
-			[]byte(`{"det_key":"det:abc","prob_key":"prob:test-v1:r1"}`), nil)
-		storage.EXPECT().Delete(mock.Anything, "det:abc").Return(sentinel)
-		idx.storage = storage
-		err := idx.deleteRecord(ctx, "r1")
-		require.ErrorIs(t, err, sentinel)
-	})
-
-	t.Run("delete prob error", func(t *testing.T) {
-		t.Parallel()
-		sentinel := errors.New("delete fail")
-		idx := newTestIndexer(t)
-		storage := mocksriracha.NewMockIndexStorage(t)
-		storage.EXPECT().Get(mock.Anything, "meta:r1").Return(
-			[]byte(`{"det_key":"det:abc","prob_key":"prob:test-v1:r1"}`), nil)
-		storage.EXPECT().Delete(mock.Anything, "det:abc").Return(nil)
-		storage.EXPECT().Delete(mock.Anything, "prob:test-v1:r1").Return(sentinel)
-		idx.storage = storage
-		err := idx.deleteRecord(ctx, "r1")
-		require.ErrorIs(t, err, sentinel)
 	})
 
 	t.Run("existing removes all three keys", func(t *testing.T) {

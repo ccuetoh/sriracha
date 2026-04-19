@@ -79,49 +79,46 @@ func TestSetIsSet(t *testing.T) {
 func TestAnd(t *testing.T) {
 	t.Parallel()
 
-	t.Run("overlapping bits", func(t *testing.T) {
-		t.Parallel()
-		a := New(128)
-		b := New(128)
-		mustSet(t, a, 0, 1, 2)
-		mustSet(t, b, 1, 2, 3)
-		c, err := And(a, b)
-		require.NoError(t, err, "And should not error")
-		mustNotSet(t, c, 0)
-		mustIsSet(t, c, 1, 2)
-		mustNotSet(t, c, 3)
-	})
-
-	t.Run("cross-word boundary", func(t *testing.T) {
-		t.Parallel()
-		a := New(128)
-		b := New(128)
-		mustSet(t, a, 64, 65)
-		mustSet(t, b, 65, 66)
-		got, err := And(a, b)
-		require.NoError(t, err, "And should not error")
-		mustIsSet(t, got, 65)
-		mustNotSet(t, got, 64)
-		mustNotSet(t, got, 66)
-		assert.Equal(t, 1, Popcount(got), "expected popcount 1")
-	})
-
-	t.Run("and of zero bitsets is zero", func(t *testing.T) {
-		t.Parallel()
-		a := New(64)
-		b := New(64)
-		c, err := And(a, b)
-		require.NoError(t, err, "And should not error")
-		assert.Equal(t, 0, Popcount(c), "AND of two zero bitsets should be zero")
-	})
-
-	t.Run("different-size bitsets return error", func(t *testing.T) {
-		t.Parallel()
-		a := New(64)
-		b := New(128)
-		_, err := And(a, b)
-		assert.Error(t, err, "And on different-size bitsets should return error")
-	})
+	cases := []struct {
+		name       string
+		nbits      int
+		aBits      []int
+		bBits      []int
+		wantSet    []int
+		wantNotSet []int
+		wantErr    bool
+	}{
+		{"overlapping bits", 128, []int{0, 1, 2}, []int{1, 2, 3}, []int{1, 2}, []int{0, 3}, false},
+		{"cross-word boundary", 128, []int{64, 65}, []int{65, 66}, []int{65}, []int{64, 66}, false},
+		{"and of zero bitsets is zero", 64, nil, nil, nil, nil, false},
+		{"different-size bitsets return error", -1, nil, nil, nil, nil, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var a, b *Bitset
+			if tc.wantErr {
+				a = New(64)
+				b = New(128)
+			} else {
+				a = New(tc.nbits)
+				b = New(tc.nbits)
+				mustSet(t, a, tc.aBits...)
+				mustSet(t, b, tc.bBits...)
+			}
+			c, err := And(a, b)
+			if tc.wantErr {
+				assert.Error(t, err, "And on different-size bitsets should return error")
+				return
+			}
+			require.NoError(t, err, "And should not error")
+			mustIsSet(t, c, tc.wantSet...)
+			mustNotSet(t, c, tc.wantNotSet...)
+			if len(tc.wantSet) == 0 {
+				assert.Equal(t, 0, Popcount(c), "AND of two zero bitsets should be zero")
+			}
+		})
+	}
 }
 
 func TestPopcount(t *testing.T) {

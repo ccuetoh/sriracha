@@ -78,50 +78,33 @@ func TestMustParsePath_Panics(t *testing.T) {
 func TestParseFieldPath(t *testing.T) {
 	t.Parallel()
 
-	t.Run("valid", func(t *testing.T) {
-		t.Parallel()
-
-		fp, err := ParseFieldPath("sriracha::name::given")
-		require.NoError(t, err)
-		assert.Equal(t, "sriracha", fp.Org(), "Org()")
-		assert.Equal(t, "name", fp.Namespace(), "Namespace()")
-		assert.Equal(t, "given", fp.LocalName(), "LocalName()")
-		assert.Equal(t, "sriracha::name::given", fp.String(), "String()")
-	})
-
-	t.Run("custom org", func(t *testing.T) {
-		t.Parallel()
-
-		fp, err := ParseFieldPath("myorg::identifier::employee_id")
-		require.NoError(t, err)
-		assert.Equal(t, "myorg", fp.Org(), "Org()")
-	})
-
-	t.Run("missing third component", func(t *testing.T) {
-		t.Parallel()
-
-		_, err := ParseFieldPath("sriracha::name")
-		assert.Error(t, err, "expected error for path with only 2 components")
-	})
-
-	t.Run("empty org", func(t *testing.T) {
-		t.Parallel()
-
-		_, err := ParseFieldPath("::name::given")
-		assert.Error(t, err, "expected error for empty org")
-	})
-
-	t.Run("empty string", func(t *testing.T) {
-		t.Parallel()
-
-		_, err := ParseFieldPath("")
-		assert.Error(t, err, "expected error for empty string")
-	})
-
-	t.Run("empty namespace", func(t *testing.T) {
-		t.Parallel()
-
-		_, err := ParseFieldPath("sriracha::::given")
-		assert.Error(t, err, "expected error for empty namespace")
-	})
+	cases := []struct {
+		name      string
+		input     string
+		wantErr   bool
+		wantOrg   string
+		wantNS    string
+		wantLocal string
+	}{
+		{"valid", "sriracha::name::given", false, "sriracha", "name", "given"},
+		{"custom org", "myorg::identifier::employee_id", false, "myorg", "identifier", "employee_id"},
+		{"missing third component", "sriracha::name", true, "", "", ""},
+		{"empty org", "::name::given", true, "", "", ""},
+		{"empty string", "", true, "", "", ""},
+		{"empty namespace", "sriracha::::given", true, "", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fp, err := ParseFieldPath(tc.input)
+			if tc.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantOrg, fp.Org(), "Org()")
+			assert.Equal(t, tc.wantNS, fp.Namespace(), "Namespace()")
+			assert.Equal(t, tc.wantLocal, fp.LocalName(), "LocalName()")
+		})
+	}
 }
