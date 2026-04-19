@@ -8,7 +8,7 @@ import (
 
 	"go.sriracha.dev/internal/bitset"
 	"go.sriracha.dev/normalize"
-	sriracha "go.sriracha.dev/sriracha"
+	"go.sriracha.dev/sriracha"
 )
 
 // TokenizeRecordBloom tokenizes a RawRecord in probabilistic (Bloom filter) mode.
@@ -30,6 +30,7 @@ func (t *Tokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.F
 			payload = append(payload, zeroFilter.ToBytes()...)
 			continue
 		}
+
 		normalized, err := normalize.Normalize(raw, spec.Path)
 		if err != nil {
 			return sriracha.TokenRecord{}, fmt.Errorf("token: normalization failed for field %q: %w", spec.Path, err)
@@ -40,31 +41,36 @@ func (t *Tokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.F
 		}
 		payload = append(payload, filter.ToBytes()...)
 	}
-	checksum := sha256.Sum256(payload)
+
 	return sriracha.TokenRecord{
 		FieldSetVersion: fs.Version,
 		Mode:            sriracha.Probabilistic,
+		Algo:            sriracha.AlgoBloomV1,
 		Payload:         payload,
-		Checksum:        checksum,
+		Checksum:        sha256.Sum256(payload),
 	}, nil
 }
 
 // tokenizeFieldBloom returns a Bloom filter bitset for a single normalized field value.
 // For each n-gram, cfg.HashCount HMAC-SHA256 outputs determine bit positions to set.
 func (t *Tokenizer) tokenizeFieldBloom(normalizedValue string, path sriracha.FieldPath, cfg sriracha.BloomConfig) (*bitset.Bitset, error) {
-	b := bitset.New(int(cfg.SizeBits))
-	grams := ngrams(normalizedValue, cfg.NgramSizes)
-	pathStr := path.String()
+	var (
+		b       = bitset.New(int(cfg.SizeBits))
+		grams   = ngrams(normalizedValue, cfg.NgramSizes)
+		pathStr = path.String()
+	)
+
 	for _, g := range grams {
 		for i := range cfg.HashCount {
 			suffix := fmt.Sprintf("%d", i)
-			h := hmacSum(t.Secret, []byte(g+pathStr+suffix))
+			h := hmacSum(t.secret, []byte(g+pathStr+suffix))
 			pos := int(binary.BigEndian.Uint64(h[:8]) % uint64(cfg.SizeBits))
 			if err := b.Set(pos); err != nil {
 				return nil, fmt.Errorf("token: bloom set failed: %w", err)
 			}
 		}
 	}
+
 	return b, nil
 }
 

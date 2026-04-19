@@ -1,6 +1,7 @@
 package indexer
 
 import (
+	"cmp"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -14,6 +15,18 @@ import (
 	"go.sriracha.dev/internal/bitset"
 	"go.sriracha.dev/sriracha"
 	"go.sriracha.dev/token"
+)
+
+const (
+	EntryPrefixDeterministic = "det:"
+	EntryPrefixProbabilistic = "prob:"
+	EntryPrefixMeta          = "meta:"
+	EntryPrefixStats         = "stats:"
+
+	DefaultThreshold  = 0.85
+	DefaultMaxResults = 1
+
+	StatsVersion = "v1"
 )
 
 // StorageSizer is an optional interface for IndexStorage implementations
@@ -54,17 +67,21 @@ func New(storage sriracha.IndexStorage, fs sriracha.FieldSet, secret []byte) (*I
 	if storage == nil {
 		return nil, sriracha.ErrInternalError("storage must not be nil")
 	}
+
 	tok, err := token.New(secret)
 	if err != nil {
 		return nil, err
 	}
+
 	if err := fieldset.Validate(fs); err != nil {
 		return nil, err
 	}
+
 	idx := &Indexer{tok: tok, fs: fs, storage: storage}
 	if err := idx.loadStats(context.Background()); err != nil {
 		return nil, err
 	}
+
 	return idx, nil
 }
 
@@ -75,11 +92,13 @@ func NewDefault(dir string, fs sriracha.FieldSet, secret []byte) (*Indexer, erro
 	if err != nil {
 		return nil, err
 	}
+
 	idx, err := New(s, fs, secret)
 	if err != nil {
 		_ = s.Close()
 		return nil, err
 	}
+
 	return idx, nil
 }
 
@@ -88,24 +107,29 @@ func (idx *Indexer) Close() error {
 	if c, ok := idx.storage.(io.Closer); ok {
 		return c.Close()
 	}
+
 	return nil
 }
 
 // Stats returns current index statistics.
 // If the storage implements StorageSizer, IndexSizeBytes is populated.
 func (idx *Indexer) Stats() sriracha.IndexStats {
-	s := idx.stats
 	if sizer, ok := idx.storage.(StorageSizer); ok {
 		bytes, _ := sizer.SizeBytes(context.Background())
-		s.IndexSizeBytes = bytes
+		idx.stats.IndexSizeBytes = bytes
 	}
-	return s
+
+	return idx.stats
 }
 
 // Rebuild reindexes all records from src, clearing the existing index first.
 func (idx *Indexer) Rebuild(ctx context.Context, src sriracha.RecordSource) error {
 	var toDelete []string
-	for _, prefix := range []string{"det:", "prob:", "meta:"} {
+	for _, prefix := range []string{
+		EntryPrefixDeterministic,
+		EntryPrefixProbabilistic,
+		EntryPrefixMeta,
+	} {
 		if err := idx.storage.Scan(ctx, prefix, func(key string, _ []byte) error {
 			toDelete = append(toDelete, key)
 			return nil
@@ -131,6 +155,7 @@ func (idx *Indexer) Rebuild(ctx context.Context, src sriracha.RecordSource) erro
 		if err := idx.indexRecord(ctx, id, r); err != nil {
 			return err
 		}
+
 		counter++
 		return nil
 	}); err != nil {
@@ -154,15 +179,19 @@ func (idx *Indexer) Sync(ctx context.Context, src sriracha.IncrementalRecordSour
 			if err := idx.deleteRecord(ctx, id); err != nil {
 				return err
 			}
+
 			idx.stats.RecordCount--
 			return nil
 		}
+
 		if err := idx.deleteRecord(ctx, id); err != nil {
 			return err
 		}
+
 		if err := idx.indexRecord(ctx, id, r); err != nil {
 			return err
 		}
+
 		idx.stats.RecordCount++
 		return nil
 	}); err != nil {
@@ -172,21 +201,24 @@ func (idx *Indexer) Sync(ctx context.Context, src sriracha.IncrementalRecordSour
 	if err := idx.storage.SaveCheckpoint(ctx, time.Now().UTC().Format(time.RFC3339)); err != nil {
 		return err
 	}
+
 	idx.stats.LastSync = time.Now()
 	return idx.saveStats(ctx)
 }
 
 // Match searches the index for candidates matching tr under cfg.
 func (idx *Indexer) Match(ctx context.Context, tr sriracha.TokenRecord, cfg sriracha.MatchConfig) ([]sriracha.Candidate, error) {
-	if cfg.Threshold == 0 {
-		cfg.Threshold = 0.85
-	}
+	cfg.Threshold = cmp.Or(cfg.Threshold, DefaultThreshold)
+	cfg.MaxResults = cmp.Or(cfg.MaxResults, DefaultMaxResults)
+
 	if cfg.MaxResults == 0 {
 		cfg.MaxResults = 1
 	}
+
 	if tr.FieldSetVersion != idx.fs.Version {
 		return nil, sriracha.ErrFieldSetIncompatible(tr.FieldSetVersion, idx.fs.Version)
 	}
+
 	switch tr.Mode {
 	case sriracha.Deterministic:
 		return idx.matchDeterministic(ctx, tr)
@@ -198,14 +230,15 @@ func (idx *Indexer) Match(ctx context.Context, tr sriracha.TokenRecord, cfg srir
 }
 
 func (idx *Indexer) matchDeterministic(ctx context.Context, tr sriracha.TokenRecord) ([]sriracha.Candidate, error) {
-	key := "det:" + hex.EncodeToString(tr.Payload)
-	val, err := idx.storage.Get(ctx, key)
+	val, err := idx.storage.Get(ctx, EntryPrefixDeterministic+hex.EncodeToString(tr.Payload))
 	if err != nil {
 		if errors.Is(err, sriracha.ErrNotFound) {
 			return nil, nil
 		}
+
 		return nil, err
 	}
+
 	return []sriracha.Candidate{{RecordID: string(val), Confidence: 1.0}}, nil
 }
 
@@ -216,21 +249,24 @@ func (idx *Indexer) matchProbabilistic(ctx context.Context, tr sriracha.TokenRec
 		return nil, sriracha.ErrIndexCorrupted("query payload length mismatch")
 	}
 
-	scanPrefix := "prob:" + idx.fs.Version + ":"
+	scanPrefix := EntryPrefixProbabilistic + idx.fs.Version + ":"
 	var candidates []sriracha.Candidate
 
 	if err := idx.storage.Scan(ctx, scanPrefix, func(key string, storedPayload []byte) error {
 		if len(storedPayload) != len(tr.Payload) {
 			return sriracha.ErrIndexCorrupted("stored payload length mismatch")
 		}
+
 		recordID := key[len(scanPrefix):]
 		conf, err := scoreProbabilistic(tr.Payload, storedPayload, idx.fs, cfg)
 		if err != nil {
 			return err
 		}
+
 		if conf >= float64(cfg.Threshold) {
 			candidates = append(candidates, sriracha.Candidate{RecordID: recordID, Confidence: conf})
 		}
+
 		return nil
 	}); err != nil {
 		return nil, err
@@ -239,9 +275,11 @@ func (idx *Indexer) matchProbabilistic(ctx context.Context, tr sriracha.TokenRec
 	sort.Slice(candidates, func(i, j int) bool {
 		return candidates[i].Confidence > candidates[j].Confidence
 	})
+
 	if int(cfg.MaxResults) < len(candidates) {
 		candidates = candidates[:cfg.MaxResults]
 	}
+
 	return candidates, nil
 }
 
@@ -261,6 +299,7 @@ func scoreProbabilistic(query, stored []byte, fs sriracha.FieldSet, cfg sriracha
 		if err != nil {
 			return 0, err
 		}
+
 		bsS, err := bitset.FromBytes(stored[start:end])
 		if err != nil {
 			return 0, err
@@ -276,6 +315,7 @@ func scoreProbabilistic(query, stored []byte, fs sriracha.FieldSet, cfg sriracha
 		if err != nil {
 			return 0, err
 		}
+
 		popInter := bitset.Popcount(inter)
 		dice := (2.0 * float64(popInter)) / float64(popQ+popS)
 
@@ -287,6 +327,7 @@ func scoreProbabilistic(query, stored []byte, fs sriracha.FieldSet, cfg sriracha
 	if denominator == 0 {
 		return 0, nil
 	}
+
 	return numerator / denominator, nil
 }
 
@@ -310,14 +351,15 @@ func (idx *Indexer) indexRecord(ctx context.Context, id string, r sriracha.RawRe
 	if err != nil {
 		return err
 	}
+
 	probTR, err := idx.tok.TokenizeRecordBloom(r, idx.fs)
 	if err != nil {
 		return err
 	}
 
-	detKey := "det:" + hex.EncodeToString(detTR.Payload)
-	probKey := "prob:" + idx.fs.Version + ":" + id
-	metaKey := "meta:" + id
+	detKey := EntryPrefixDeterministic + hex.EncodeToString(detTR.Payload)
+	probKey := EntryPrefixProbabilistic + idx.fs.Version + ":" + id
+	metaKey := EntryPrefixMeta + id
 
 	meta := storedMeta{DetKey: detKey, ProbKey: probKey}
 	metaBytes, err := json.Marshal(meta)
@@ -333,17 +375,15 @@ func (idx *Indexer) indexRecord(ctx context.Context, id string, r sriracha.RawRe
 		})
 	}
 
-	if err := idx.storage.Put(ctx, detKey, []byte(id)); err != nil {
-		return err
-	}
-	if err := idx.storage.Put(ctx, probKey, probTR.Payload); err != nil {
-		return err
-	}
-	return idx.storage.Put(ctx, metaKey, metaBytes)
+	return errors.Join(
+		idx.storage.Put(ctx, detKey, []byte(id)),
+		idx.storage.Put(ctx, probKey, probTR.Payload),
+		idx.storage.Put(ctx, metaKey, metaBytes),
+	)
 }
 
 func (idx *Indexer) deleteRecord(ctx context.Context, id string) error {
-	metaKey := "meta:" + id
+	metaKey := EntryPrefixMeta + id
 	metaBytes, err := idx.storage.Get(ctx, metaKey)
 	if err != nil {
 		if errors.Is(err, sriracha.ErrNotFound) {
@@ -351,20 +391,21 @@ func (idx *Indexer) deleteRecord(ctx context.Context, id string) error {
 		}
 		return err
 	}
+
 	var meta storedMeta
 	if err := json.Unmarshal(metaBytes, &meta); err != nil {
 		return err
 	}
+
 	if tx, ok := idx.storage.(Transactor); ok {
 		return tx.DeleteBatch(ctx, []string{meta.DetKey, meta.ProbKey, metaKey})
 	}
-	if err := idx.storage.Delete(ctx, meta.DetKey); err != nil {
-		return err
-	}
-	if err := idx.storage.Delete(ctx, meta.ProbKey); err != nil {
-		return err
-	}
-	return idx.storage.Delete(ctx, metaKey)
+
+	return errors.Join(
+		idx.storage.Delete(ctx, meta.DetKey),
+		idx.storage.Delete(ctx, meta.ProbKey),
+		idx.storage.Delete(ctx, metaKey),
+	)
 }
 
 func (idx *Indexer) saveStats(ctx context.Context) error {
@@ -377,21 +418,24 @@ func (idx *Indexer) saveStats(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return idx.storage.Put(ctx, "stats:v1", data)
+
+	return idx.storage.Put(ctx, EntryPrefixStats+StatsVersion, data)
 }
 
 func (idx *Indexer) loadStats(ctx context.Context) error {
-	data, err := idx.storage.Get(ctx, "stats:v1")
+	data, err := idx.storage.Get(ctx, EntryPrefixStats+StatsVersion)
 	if err != nil {
 		if errors.Is(err, sriracha.ErrNotFound) {
 			return nil
 		}
 		return err
 	}
+
 	var ps persistedStats
 	if err := json.Unmarshal(data, &ps); err != nil {
 		return err
 	}
+
 	idx.stats.RecordCount = ps.RecordCount
 	idx.stats.LastRebuild = ps.LastRebuild
 	idx.stats.LastSync = ps.LastSync

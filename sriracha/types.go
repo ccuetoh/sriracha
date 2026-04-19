@@ -6,8 +6,10 @@ import "time"
 type MatchMode int
 
 const (
-	Deterministic MatchMode = 1
-	Probabilistic MatchMode = 2
+	Deterministic    MatchMode = 1
+	Probabilistic    MatchMode = 2
+	AlgoBloomV1                = "bloomv1"
+	AlgoHMACSHA256V1           = "hmacsha256v1"
 )
 
 // RawRecord is the input type institutions populate before tokenization.
@@ -18,6 +20,7 @@ type RawRecord map[FieldPath]string
 type TokenRecord struct {
 	FieldSetVersion string
 	Mode            MatchMode
+	Algo            string
 	Payload         []byte
 	Checksum        [32]byte
 }

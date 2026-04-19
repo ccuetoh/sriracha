@@ -95,10 +95,12 @@ func normalizeCountry(s string) (string, error) {
 	if utf8.RuneCountInString(upper) != 2 {
 		return "", fmt.Errorf("country code must be 2 characters, got %q", s)
 	}
+
 	for _, r := range upper {
 		if r > 127 || !unicode.IsLetter(r) {
 			return "", fmt.Errorf("country code must be 2 ASCII letters, got %q", s)
 		}
 	}
+
 	return upper, nil
 }

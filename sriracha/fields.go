@@ -38,6 +38,7 @@ func ParseFieldPath(s string) (FieldPath, error) {
 	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
 		return FieldPath{}, fmt.Errorf("fieldpath: invalid path %q: must be <org>::<namespace>::<name>", s)
 	}
+
 	return FieldPath{raw: s, org: parts[0], namespace: parts[1], localName: parts[2]}, nil
 }
 
@@ -49,6 +50,7 @@ func MustParsePath(s string) FieldPath {
 	if err != nil {
 		panic(err)
 	}
+
 	return fp
 }
 

@@ -485,6 +485,12 @@ func TestRebuild(t *testing.T) {
 				storage.EXPECT().Put(mock.Anything, mock.MatchedBy(func(k string) bool {
 					return strings.HasPrefix(k, "det:")
 				}), mock.Anything).Return(sentinel)
+				storage.EXPECT().Put(mock.Anything, mock.MatchedBy(func(k string) bool {
+					return strings.HasPrefix(k, "prob:")
+				}), mock.Anything).Return(nil)
+				storage.EXPECT().Put(mock.Anything, mock.MatchedBy(func(k string) bool {
+					return strings.HasPrefix(k, "meta:")
+				}), mock.Anything).Return(nil)
 				idx.storage = storage
 				src := mocksriracha.NewMockRecordSource(t)
 				src.EXPECT().Scan(mock.Anything, mock.Anything).RunAndReturn(
@@ -781,6 +787,10 @@ func TestSync(t *testing.T) {
 		storage.EXPECT().Delete(mock.Anything, mock.MatchedBy(func(k string) bool {
 			return strings.HasPrefix(k, "det:")
 		})).Return(sentinel)
+		storage.EXPECT().Delete(mock.Anything, mock.MatchedBy(func(k string) bool {
+			return strings.HasPrefix(k, "prob:")
+		})).Return(nil)
+		storage.EXPECT().Delete(mock.Anything, "meta:r1").Return(nil)
 		idx.storage = storage
 
 		src := mocksriracha.NewMockIncrementalRecordSource(t)
@@ -1285,6 +1295,8 @@ func TestDeleteRecord(t *testing.T) {
 				storage.EXPECT().Get(mock.Anything, "meta:r1").Return(
 					[]byte(`{"det_key":"det:abc","prob_key":"prob:test-v1:r1"}`), nil)
 				storage.EXPECT().Delete(mock.Anything, "det:abc").Return(sentinel)
+				storage.EXPECT().Delete(mock.Anything, "prob:test-v1:r1").Return(nil)
+				storage.EXPECT().Delete(mock.Anything, "meta:r1").Return(nil)
 				idx.storage = storage
 			},
 		},
@@ -1297,6 +1309,7 @@ func TestDeleteRecord(t *testing.T) {
 					[]byte(`{"det_key":"det:abc","prob_key":"prob:test-v1:r1"}`), nil)
 				storage.EXPECT().Delete(mock.Anything, "det:abc").Return(nil)
 				storage.EXPECT().Delete(mock.Anything, "prob:test-v1:r1").Return(sentinel)
+				storage.EXPECT().Delete(mock.Anything, "meta:r1").Return(nil)
 				idx.storage = storage
 			},
 		},

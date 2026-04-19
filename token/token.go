@@ -4,24 +4,26 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
+	"errors"
 	"fmt"
 
 	"go.sriracha.dev/normalize"
-	sriracha "go.sriracha.dev/sriracha"
+	"go.sriracha.dev/sriracha"
 )
 
 // Tokenizer produces TokenRecords from RawRecords using a shared secret.
 type Tokenizer struct {
-	Secret []byte
+	secret []byte
 }
 
 // New creates a Tokenizer with the given HMAC secret.
 // Returns an error if secret is empty.
 func New(secret []byte) (*Tokenizer, error) {
 	if len(secret) == 0 {
-		return nil, fmt.Errorf("token: secret must not be empty")
+		return nil, errors.New("token: secret must not be empty")
 	}
-	return &Tokenizer{Secret: secret}, nil
+
+	return &Tokenizer{secret: secret}, nil
 }
 
 // TokenizeRecord tokenizes a RawRecord in deterministic mode (HMAC-SHA256 per field).
@@ -45,12 +47,13 @@ func (t *Tokenizer) TokenizeRecord(record sriracha.RawRecord, fs sriracha.FieldS
 		fieldToken := t.tokenizeField(normalized, spec.Path)
 		buf = append(buf, fieldToken...)
 	}
-	checksum := sha256.Sum256(buf)
+
 	return sriracha.TokenRecord{
 		FieldSetVersion: fs.Version,
 		Mode:            sriracha.Deterministic,
+		Algo:            sriracha.AlgoHMACSHA256V1,
 		Payload:         buf,
-		Checksum:        checksum,
+		Checksum:        sha256.Sum256(buf),
 	}, nil
 }
 
@@ -59,15 +62,16 @@ func (t *Tokenizer) TokenizeRecord(record sriracha.RawRecord, fs sriracha.FieldS
 func ValidateTokenRecord(tr sriracha.TokenRecord) error {
 	expected := sha256.Sum256(tr.Payload)
 	if subtle.ConstantTimeCompare(expected[:], tr.Checksum[:]) != 1 {
-		return fmt.Errorf("token: checksum mismatch")
+		return errors.New("token: checksum mismatch")
 	}
+
 	return nil
 }
 
 // tokenizeField computes a 32-byte HMAC-SHA256 token for a single normalized field value.
 // The field path is included to prevent cross-field collisions.
 func (t *Tokenizer) tokenizeField(normalizedValue string, path sriracha.FieldPath) []byte {
-	h := hmac.New(sha256.New, t.Secret)
+	h := hmac.New(sha256.New, t.secret)
 	h.Write([]byte(normalizedValue + ":" + path.String()))
 	return h.Sum(nil)
 }

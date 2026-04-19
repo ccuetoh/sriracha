@@ -31,6 +31,7 @@ var defaultV01 = sriracha.FieldSet{
 func DefaultFieldSet() sriracha.FieldSet {
 	fields := make([]sriracha.FieldSpec, len(defaultV01.Fields))
 	copy(fields, defaultV01.Fields)
+
 	return sriracha.FieldSet{
 		Version:     defaultV01.Version,
 		Fields:      fields,

@@ -264,7 +264,7 @@ func TestParseIntSafe(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.s, func(t *testing.T) {
 			t.Parallel()
-			got := parseIntSafe(tc.s)
+			got := parseSemverIntSafe(tc.s)
 			assert.Equal(t, tc.want, got)
 		})
 	}
