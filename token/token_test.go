@@ -172,6 +172,14 @@ func TestTokenizeRecord_NormalizationError(t *testing.T) {
 	assert.Error(t, err, "expected normalization error for invalid date")
 }
 
+func TestTokenizeRecordBloom_MissingRequired(t *testing.T) {
+	t.Parallel()
+	tok := newTok(t, "secret")
+	fs := bloomFS(sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
+	_, err := tok.TokenizeRecordBloom(sriracha.RawRecord{}, fs)
+	assert.Error(t, err, "expected error for missing required field")
+}
+
 func TestTokenizeRecordBloom_NormalizationError(t *testing.T) {
 	t.Parallel()
 	tok := newTok(t, "secret")
