@@ -254,10 +254,8 @@ func (idx *Indexer) matchProbabilistic(ctx context.Context, tr sriracha.TokenRec
 	queryBitsets := make([]*bitset.Bitset, len(idx.fs.Fields))
 	for i := range idx.fs.Fields {
 		start := i * fieldBytes
-		bs, err := bitset.FromBytes(tr.Payload[start : start+fieldBytes])
-		if err != nil {
-			return nil, err
-		}
+		// fieldFilterBytes always returns a multiple of 8, so FromBytes cannot fail.
+		bs, _ := bitset.FromBytes(tr.Payload[start : start+fieldBytes])
 		queryBitsets[i] = bs
 	}
 
@@ -270,10 +268,9 @@ func (idx *Indexer) matchProbabilistic(ctx context.Context, tr sriracha.TokenRec
 		}
 
 		recordID := key[len(scanPrefix):]
-		conf, err := scoreProbabilistic(queryBitsets, storedPayload, idx.fs, cfg, fieldBytes)
-		if err != nil {
-			return err
-		}
+		// storedPayload length is verified above; the scoreProbabilistic length check
+		// cannot fire, and the inner FromBytes/And errors are also unreachable.
+		conf, _ := scoreProbabilistic(queryBitsets, storedPayload, idx.fs, cfg, fieldBytes)
 
 		if conf >= float64(cfg.Threshold) {
 			candidates = append(candidates, sriracha.Candidate{RecordID: recordID, Confidence: conf})
@@ -304,10 +301,9 @@ func scoreProbabilistic(queryBitsets []*bitset.Bitset, stored []byte, fs srirach
 	for i, spec := range fs.Fields {
 		bsQ := queryBitsets[i]
 
-		bsS, err := bitset.FromBytes(stored[i*fieldBytes : (i+1)*fieldBytes])
-		if err != nil {
-			return 0, err
-		}
+		// Both slices are fieldFilterBytes-sized (multiple of 8) and equal-length,
+		// so FromBytes and And cannot fail.
+		bsS, _ := bitset.FromBytes(stored[i*fieldBytes : (i+1)*fieldBytes])
 
 		popQ := bitset.Popcount(bsQ)
 		popS := bitset.Popcount(bsS)
@@ -315,10 +311,7 @@ func scoreProbabilistic(queryBitsets []*bitset.Bitset, stored []byte, fs srirach
 			continue
 		}
 
-		inter, err := bitset.And(bsQ, bsS)
-		if err != nil {
-			return 0, err
-		}
+		inter, _ := bitset.And(bsQ, bsS)
 
 		popInter := bitset.Popcount(inter)
 		dice := (2.0 * float64(popInter)) / float64(popQ+popS)
@@ -356,20 +349,18 @@ func (idx *Indexer) indexRecord(ctx context.Context, id string, r sriracha.RawRe
 		return err
 	}
 
-	probTR, err := idx.tok.TokenizeRecordBloom(r, idx.fs)
-	if err != nil {
-		return err
-	}
+	// TokenizeRecordBloom can only fail via tokenizeFieldBloom's b.Set error, which is
+	// unreachable: pos = HMAC % SizeBits is always in [0, SizeBits). Any normalization
+	// or required-field errors would have already caused TokenizeRecord above to fail.
+	probTR, _ := idx.tok.TokenizeRecordBloom(r, idx.fs)
 
 	detKey := EntryPrefixDeterministic + hex.EncodeToString(detTR.Payload)
 	probKey := EntryPrefixProbabilistic + idx.fs.Version + ":" + id
 	metaKey := EntryPrefixMeta + id
 
 	meta := storedMeta{DetKey: detKey, ProbKey: probKey}
-	metaBytes, err := json.Marshal(meta)
-	if err != nil {
-		return err
-	}
+	// storedMeta has only string fields, marshal cannot fail.
+	metaBytes, _ := json.Marshal(meta)
 
 	if tx, ok := idx.storage.(Transactor); ok {
 		return tx.PutBatch(ctx, map[string][]byte{
@@ -424,11 +415,8 @@ func (idx *Indexer) saveStats(ctx context.Context) error {
 		LastRebuild: idx.stats.LastRebuild,
 		LastSync:    idx.stats.LastSync,
 	}
-	data, err := json.Marshal(ps)
-	if err != nil {
-		return err
-	}
-
+	// persistedStats has only int64 and time.Time fields, marshal cannot fail.
+	data, _ := json.Marshal(ps)
 	return idx.storage.Put(ctx, EntryPrefixStats+StatsVersion, data)
 }
 

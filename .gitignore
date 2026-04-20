@@ -12,6 +12,7 @@
 # Go test output
 *.out
 *.test
+coverage.html
 
 # OS
 .DS_Store

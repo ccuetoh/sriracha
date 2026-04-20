@@ -337,6 +337,27 @@ func TestMemoryStorage(t *testing.T) {
 		}))
 		assert.Equal(t, []string{"k:1"}, keys)
 	})
+
+	t.Run("get checkpoint key returns not found", func(t *testing.T) {
+		t.Parallel()
+		s := NewMemoryStorage()
+		// SaveCheckpoint stores a string under memCheckpointKey; Get expects []byte,
+		// so the type assertion fails and ErrNotFound is returned.
+		require.NoError(t, s.SaveCheckpoint(ctx, "tok"))
+		_, err := s.Get(ctx, memCheckpointKey)
+		require.ErrorIs(t, err, sriracha.ErrNotFound)
+	})
+
+	t.Run("load checkpoint after byte put returns empty", func(t *testing.T) {
+		t.Parallel()
+		s := NewMemoryStorage()
+		// Put stores []byte under memCheckpointKey; LoadCheckpoint expects a string,
+		// so the type assertion fails and the empty string is returned.
+		require.NoError(t, s.Put(ctx, memCheckpointKey, []byte("x")))
+		cp, err := s.LoadCheckpoint(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, "", cp)
+	})
 }
 
 func TestBadgerStorage(t *testing.T) {
@@ -415,6 +436,40 @@ func TestBadgerStorage(t *testing.T) {
 		cancel()
 		require.Error(t, s.DeleteBatch(cctx, []string{"k"}))
 	})
+
+	t.Run("get with empty key returns error", func(t *testing.T) {
+		t.Parallel()
+		s := newBadger(t)
+		// Badger returns ErrEmptyKey for txn.Get(""), which is not ErrKeyNotFound,
+		// so it falls through to the non-ErrKeyNotFound error branch.
+		_, err := s.Get(ctx, "")
+		require.Error(t, err)
+	})
+
+	t.Run("put batch with empty key returns error", func(t *testing.T) {
+		t.Parallel()
+		s := newBadger(t)
+		// Badger returns ErrEmptyKey for txn.Set("", ...) inside PutBatch.
+		err := s.PutBatch(ctx, map[string][]byte{"": []byte("v")})
+		require.Error(t, err)
+	})
+
+	t.Run("delete batch with empty key returns error", func(t *testing.T) {
+		t.Parallel()
+		s := newBadger(t)
+		// Badger returns ErrEmptyKey for txn.Delete("") inside DeleteBatch.
+		err := s.DeleteBatch(ctx, []string{""})
+		require.Error(t, err)
+	})
+
+	t.Run("scan fn error propagation", func(t *testing.T) {
+		t.Parallel()
+		s := newBadger(t)
+		require.NoError(t, s.Put(ctx, "p:1", []byte("v")))
+		sentinel := errors.New("fn error")
+		err := s.Scan(ctx, "p:", func(_ string, _ []byte) error { return sentinel })
+		require.ErrorIs(t, err, sentinel)
+	})
 }
 
 func TestRebuild(t *testing.T) {
@@ -476,7 +531,7 @@ func TestRebuild(t *testing.T) {
 			},
 		},
 		{
-			name: "index record error",
+			name: "index record det put error",
 			setup: func(t *testing.T, idx *Indexer, sentinel error) sriracha.RecordSource {
 				t.Helper()
 				storage := mocksriracha.NewMockIndexStorage(t)
@@ -496,6 +551,42 @@ func TestRebuild(t *testing.T) {
 				return src
 			},
 		},
+		{
+			name: "index record prob put error",
+			setup: func(t *testing.T, idx *Indexer, sentinel error) sriracha.RecordSource {
+				t.Helper()
+				storage := mocksriracha.NewMockIndexStorage(t)
+				storage.EXPECT().Scan(mock.Anything, "det:", mock.Anything).Return(nil)
+				storage.EXPECT().Scan(mock.Anything, "prob:", mock.Anything).Return(nil)
+				storage.EXPECT().Scan(mock.Anything, "meta:", mock.Anything).Return(nil)
+				// Sequential: det Put succeeds, prob Put fails → meta Put not attempted.
+				storage.EXPECT().Put(mock.Anything, mock.MatchedBy(func(k string) bool {
+					return strings.HasPrefix(k, "det:")
+				}), mock.Anything).Return(nil)
+				storage.EXPECT().Put(mock.Anything, mock.MatchedBy(func(k string) bool {
+					return strings.HasPrefix(k, "prob:")
+				}), mock.Anything).Return(sentinel)
+				idx.storage = storage
+				src := mocksriracha.NewMockRecordSource(t)
+				src.EXPECT().Scan(mock.Anything, mock.Anything).RunAndReturn(
+					func(_ context.Context, fn func(string, sriracha.RawRecord) error) error {
+						return fn("r1", sriracha.RawRecord{sriracha.FieldNameGiven: "Alice", sriracha.FieldNameFamily: "Smith"})
+					})
+				return src
+			},
+		},
+		{
+			name: "transactor delete batch error",
+			setup: func(t *testing.T, idx *Indexer, sentinel error) sriracha.RecordSource {
+				t.Helper()
+				mem := NewMemoryStorage()
+				require.NoError(t, mem.Put(context.Background(), "det:foo", []byte("r1")))
+				idx.storage = &transactorStorage{MemoryStorage: mem, deleteBatchErr: sentinel}
+				// Rebuild fails at DeleteBatch before reaching src.Scan, so use a
+				// plain sliceSource instead of a mock that would assert Scan is called.
+				return &sliceSource{}
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -507,6 +598,23 @@ func TestRebuild(t *testing.T) {
 			require.ErrorIs(t, err, sentinel)
 		})
 	}
+
+	t.Run("tokenize det error", func(t *testing.T) {
+		t.Parallel()
+		// A date field rejects non-ISO-8601 values; this triggers the TokenizeRecord
+		// error path inside indexRecord.
+		fs := sriracha.FieldSet{
+			Version: "date-v1",
+			Fields:  []sriracha.FieldSpec{{Path: sriracha.FieldDateBirth, Required: false, Weight: 1.0}},
+			BloomParams: sriracha.DefaultBloomConfig(),
+		}
+		idx, err := New(NewMemoryStorage(), fs, testSecret())
+		require.NoError(t, err)
+		err = idx.Rebuild(ctx, scanSource(t, map[string]sriracha.RawRecord{
+			"r1": {sriracha.FieldDateBirth: "not-a-date"},
+		}))
+		require.Error(t, err)
+	})
 
 	t.Run("empty source", func(t *testing.T) {
 		t.Parallel()
@@ -1295,6 +1403,22 @@ func BenchmarkMatchProbabilistic(b *testing.B) {
 	for range b.N {
 		_, _ = idx.Match(ctx, tr, cfg)
 	}
+}
+
+// transactorStorage wraps MemoryStorage and adds configurable Transactor behavior
+// for testing code paths that require both IndexStorage and Transactor.
+type transactorStorage struct {
+	*MemoryStorage
+	putBatchErr    error
+	deleteBatchErr error
+}
+
+func (s *transactorStorage) PutBatch(_ context.Context, _ map[string][]byte) error {
+	return s.putBatchErr
+}
+
+func (s *transactorStorage) DeleteBatch(_ context.Context, _ []string) error {
+	return s.deleteBatchErr
 }
 
 // sliceSource is a minimal RecordSource backed by a static map.
