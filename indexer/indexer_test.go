@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"go.sriracha.dev/internal/bitset"
 	mocksriracha "go.sriracha.dev/mock/sriracha"
 	"go.sriracha.dev/sriracha"
 )
@@ -482,15 +483,10 @@ func TestRebuild(t *testing.T) {
 				storage.EXPECT().Scan(mock.Anything, "det:", mock.Anything).Return(nil)
 				storage.EXPECT().Scan(mock.Anything, "prob:", mock.Anything).Return(nil)
 				storage.EXPECT().Scan(mock.Anything, "meta:", mock.Anything).Return(nil)
+				// Sequential: det Put fails → prob and meta Puts are not attempted.
 				storage.EXPECT().Put(mock.Anything, mock.MatchedBy(func(k string) bool {
 					return strings.HasPrefix(k, "det:")
 				}), mock.Anything).Return(sentinel)
-				storage.EXPECT().Put(mock.Anything, mock.MatchedBy(func(k string) bool {
-					return strings.HasPrefix(k, "prob:")
-				}), mock.Anything).Return(nil)
-				storage.EXPECT().Put(mock.Anything, mock.MatchedBy(func(k string) bool {
-					return strings.HasPrefix(k, "meta:")
-				}), mock.Anything).Return(nil)
 				idx.storage = storage
 				src := mocksriracha.NewMockRecordSource(t)
 				src.EXPECT().Scan(mock.Anything, mock.Anything).RunAndReturn(
@@ -784,13 +780,10 @@ func TestSync(t *testing.T) {
 		storage := mocksriracha.NewMockIndexStorage(t)
 		storage.EXPECT().LoadCheckpoint(mock.Anything).Return("", nil)
 		storage.EXPECT().Get(mock.Anything, "meta:r1").Return(metaBytes, nil)
+		// Sequential: det Delete fails → prob and meta deletes are not attempted.
 		storage.EXPECT().Delete(mock.Anything, mock.MatchedBy(func(k string) bool {
 			return strings.HasPrefix(k, "det:")
 		})).Return(sentinel)
-		storage.EXPECT().Delete(mock.Anything, mock.MatchedBy(func(k string) bool {
-			return strings.HasPrefix(k, "prob:")
-		})).Return(nil)
-		storage.EXPECT().Delete(mock.Anything, "meta:r1").Return(nil)
 		idx.storage = storage
 
 		src := mocksriracha.NewMockIncrementalRecordSource(t)
@@ -800,6 +793,36 @@ func TestSync(t *testing.T) {
 			})
 		err = idx.Sync(ctx, src)
 		require.ErrorIs(t, err, sentinel)
+	})
+
+	t.Run("update preserves record count", func(t *testing.T) {
+		t.Parallel()
+		idx := newTestIndexer(t)
+		require.NoError(t, idx.Rebuild(ctx, scanSource(t, map[string]sriracha.RawRecord{
+			"r1": {sriracha.FieldNameGiven: "Alice", sriracha.FieldNameFamily: "Smith"},
+		})))
+		assert.Equal(t, int64(1), idx.Stats().RecordCount)
+
+		// Syncing an update to r1 must not change the count.
+		require.NoError(t, idx.Sync(ctx, syncSource(t, map[string]sriracha.RawRecord{
+			"r1": {sriracha.FieldNameGiven: "Alison", sriracha.FieldNameFamily: "Smith"},
+		})))
+		assert.Equal(t, int64(1), idx.Stats().RecordCount)
+	})
+
+	t.Run("delete non-existent does not decrement count", func(t *testing.T) {
+		t.Parallel()
+		idx := newTestIndexer(t)
+		require.NoError(t, idx.Rebuild(ctx, scanSource(t, map[string]sriracha.RawRecord{
+			"r1": {sriracha.FieldNameGiven: "Alice", sriracha.FieldNameFamily: "Smith"},
+		})))
+		assert.Equal(t, int64(1), idx.Stats().RecordCount)
+
+		// Syncing a deletion for a record not in the index must not decrement.
+		require.NoError(t, idx.Sync(ctx, syncSource(t, map[string]sriracha.RawRecord{
+			"ghost": nil,
+		})))
+		assert.Equal(t, int64(1), idx.Stats().RecordCount)
 	})
 
 	t.Run("sync delete with badger uses transactor", func(t *testing.T) {
@@ -1148,6 +1171,19 @@ func TestScoreProbabilistic(t *testing.T) {
 	fieldBytes := fieldFilterBytes(fs.BloomParams.SizeBits)
 	totalBytes := len(fs.Fields) * fieldBytes
 
+	// parseQueryBitsets converts a raw payload into the pre-parsed slice that
+	// scoreProbabilistic now expects (mirrors the logic in matchProbabilistic).
+	parseQueryBitsets := func(t *testing.T, payload []byte) []*bitset.Bitset {
+		t.Helper()
+		bss := make([]*bitset.Bitset, len(fs.Fields))
+		for i := range fs.Fields {
+			bs, err := bitset.FromBytes(payload[i*fieldBytes : (i+1)*fieldBytes])
+			require.NoError(t, err)
+			bss[i] = bs
+		}
+		return bss
+	}
+
 	cases := []struct {
 		name        string
 		setupQuery  func() []byte
@@ -1174,16 +1210,19 @@ func TestScoreProbabilistic(t *testing.T) {
 			wantScore:   0.0,
 		},
 		{
-			name:        "payload length mismatch error",
-			setupQuery:  func() []byte { return make([]byte, fieldBytes) },
-			setupStored: func() []byte { return make([]byte, totalBytes) },
+			name:        "stored payload length mismatch error",
+			setupQuery:  func() []byte { return make([]byte, totalBytes) },
+			setupStored: func() []byte { return make([]byte, fieldBytes) }, // too short
 			wantErr:     true,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			score, err := scoreProbabilistic(tc.setupQuery(), tc.setupStored(), fs, sriracha.MatchConfig{})
+			query := tc.setupQuery()
+			stored := tc.setupStored()
+			queryBitsets := parseQueryBitsets(t, query)
+			score, err := scoreProbabilistic(queryBitsets, stored, fs, sriracha.MatchConfig{}, fieldBytes)
 			if tc.wantErr {
 				require.ErrorIs(t, err, sriracha.ErrIndexCorrupted(""))
 				return
@@ -1211,6 +1250,73 @@ func TestFieldFilterBytes(t *testing.T) {
 			assert.Equal(t, tc.want, fieldFilterBytes(tc.sizeBits))
 		})
 	}
+}
+
+// benchRecords is a set of realistic PII records used for benchmarks.
+var benchRecords = map[string]sriracha.RawRecord{
+	"r1": {sriracha.FieldNameGiven: "Alice", sriracha.FieldNameFamily: "Smith"},
+	"r2": {sriracha.FieldNameGiven: "Bob", sriracha.FieldNameFamily: "Jones"},
+	"r3": {sriracha.FieldNameGiven: "Charlie", sriracha.FieldNameFamily: "Brown"},
+	"r4": {sriracha.FieldNameGiven: "Diana", sriracha.FieldNameFamily: "Prince"},
+	"r5": {sriracha.FieldNameGiven: "Edward", sriracha.FieldNameFamily: "Norton"},
+}
+
+func BenchmarkRebuild(b *testing.B) {
+	ctx := context.Background()
+	for range b.N {
+		b.StopTimer()
+		idx, _ := New(NewMemoryStorage(), testFS(), testSecret())
+		src := &sliceSource{records: benchRecords}
+		b.StartTimer()
+		_ = idx.Rebuild(ctx, src)
+	}
+}
+
+func BenchmarkMatchDeterministic(b *testing.B) {
+	ctx := context.Background()
+	idx, _ := New(NewMemoryStorage(), testFS(), testSecret())
+	_ = idx.Rebuild(ctx, &sliceSource{records: benchRecords})
+	rec := benchRecords["r1"]
+	tr, _ := idx.tok.TokenizeRecord(rec, idx.fs)
+	b.ResetTimer()
+	for range b.N {
+		_, _ = idx.Match(ctx, tr, sriracha.MatchConfig{})
+	}
+}
+
+func BenchmarkMatchProbabilistic(b *testing.B) {
+	ctx := context.Background()
+	idx, _ := New(NewMemoryStorage(), testFS(), testSecret())
+	_ = idx.Rebuild(ctx, &sliceSource{records: benchRecords})
+	rec := benchRecords["r1"]
+	tr, _ := idx.tok.TokenizeRecordBloom(rec, idx.fs)
+	cfg := sriracha.MatchConfig{Threshold: 0.5, MaxResults: 10}
+	b.ResetTimer()
+	for range b.N {
+		_, _ = idx.Match(ctx, tr, cfg)
+	}
+}
+
+// sliceSource is a minimal RecordSource backed by a static map.
+type sliceSource struct {
+	records map[string]sriracha.RawRecord
+}
+
+func (s *sliceSource) Scan(_ context.Context, fn func(string, sriracha.RawRecord) error) error {
+	for id, r := range s.records {
+		if err := fn(id, r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *sliceSource) Fetch(_ context.Context, id string) (sriracha.RawRecord, error) {
+	r, ok := s.records[id]
+	if !ok {
+		return nil, sriracha.ErrNotFound
+	}
+	return r, nil
 }
 
 func TestStats(t *testing.T) {
@@ -1294,9 +1400,8 @@ func TestDeleteRecord(t *testing.T) {
 				storage := mocksriracha.NewMockIndexStorage(t)
 				storage.EXPECT().Get(mock.Anything, "meta:r1").Return(
 					[]byte(`{"det_key":"det:abc","prob_key":"prob:test-v1:r1"}`), nil)
+				// Sequential: first Delete fails → no further deletes attempted.
 				storage.EXPECT().Delete(mock.Anything, "det:abc").Return(sentinel)
-				storage.EXPECT().Delete(mock.Anything, "prob:test-v1:r1").Return(nil)
-				storage.EXPECT().Delete(mock.Anything, "meta:r1").Return(nil)
 				idx.storage = storage
 			},
 		},
@@ -1307,9 +1412,9 @@ func TestDeleteRecord(t *testing.T) {
 				storage := mocksriracha.NewMockIndexStorage(t)
 				storage.EXPECT().Get(mock.Anything, "meta:r1").Return(
 					[]byte(`{"det_key":"det:abc","prob_key":"prob:test-v1:r1"}`), nil)
+				// Sequential: det succeeds, prob fails → meta delete not attempted.
 				storage.EXPECT().Delete(mock.Anything, "det:abc").Return(nil)
 				storage.EXPECT().Delete(mock.Anything, "prob:test-v1:r1").Return(sentinel)
-				storage.EXPECT().Delete(mock.Anything, "meta:r1").Return(nil)
 				idx.storage = storage
 			},
 		},
@@ -1320,7 +1425,7 @@ func TestDeleteRecord(t *testing.T) {
 			sentinel := errors.New("sentinel")
 			idx := newTestIndexer(t)
 			tc.setup(t, idx, sentinel)
-			err := idx.deleteRecord(ctx, "r1")
+			_, err := idx.deleteRecord(ctx, "r1")
 			require.ErrorIs(t, err, sentinel)
 		})
 	}
@@ -1328,14 +1433,16 @@ func TestDeleteRecord(t *testing.T) {
 	t.Run("nonexistent is no-op", func(t *testing.T) {
 		t.Parallel()
 		idx := newTestIndexer(t)
-		require.NoError(t, idx.deleteRecord(ctx, "ghost"))
+		found, err := idx.deleteRecord(ctx, "ghost")
+		require.NoError(t, err)
+		assert.False(t, found, "deleteRecord on non-existent record should return found=false")
 	})
 
 	t.Run("malformed meta json", func(t *testing.T) {
 		t.Parallel()
 		idx := newTestIndexer(t)
 		require.NoError(t, idx.storage.Put(ctx, "meta:r1", []byte("not-json")))
-		err := idx.deleteRecord(ctx, "r1")
+		_, err := idx.deleteRecord(ctx, "r1")
 		require.Error(t, err)
 	})
 
@@ -1359,7 +1466,9 @@ func TestDeleteRecord(t *testing.T) {
 		assert.Len(t, probKeys, 1)
 		assert.Len(t, metaKeys, 1)
 
-		require.NoError(t, idx.deleteRecord(ctx, "r1"))
+		found, err := idx.deleteRecord(ctx, "r1")
+		require.NoError(t, err)
+		assert.True(t, found, "deleteRecord on existing record should return found=true")
 
 		detKeys, probKeys, metaKeys = nil, nil, nil
 		_ = mem.Scan(ctx, "det:", func(k string, _ []byte) error { detKeys = append(detKeys, k); return nil })

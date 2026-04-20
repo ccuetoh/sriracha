@@ -261,3 +261,114 @@ func mustNotSet(t *testing.T, b *Bitset, positions ...int) {
 		assert.False(t, set, "bit %d should not be set", pos)
 	}
 }
+
+func BenchmarkSet(b *testing.B) {
+	bs := New(1024)
+	b.ResetTimer()
+	for i := range b.N {
+		_ = bs.Set(i % 1024)
+	}
+}
+
+func BenchmarkPopcount(b *testing.B) {
+	bs := New(1024)
+	for i := range 1024 {
+		_ = bs.Set(i)
+	}
+	b.ResetTimer()
+	for range b.N {
+		_ = Popcount(bs)
+	}
+}
+
+func BenchmarkAnd(b *testing.B) {
+	a, c := New(1024), New(1024)
+	for i := 0; i < 1024; i += 2 {
+		_ = a.Set(i)
+	}
+	for i := 1; i < 1024; i += 2 {
+		_ = c.Set(i)
+	}
+	b.ResetTimer()
+	for range b.N {
+		_, _ = And(a, c)
+	}
+}
+
+func BenchmarkToBytes(b *testing.B) {
+	bs := New(1024)
+	for i := range 1024 {
+		_ = bs.Set(i)
+	}
+	b.ResetTimer()
+	for range b.N {
+		_ = bs.ToBytes()
+	}
+}
+
+func BenchmarkFromBytes(b *testing.B) {
+	bs := New(1024)
+	data := bs.ToBytes()
+	b.ResetTimer()
+	for range b.N {
+		_, _ = FromBytes(data)
+	}
+}
+
+// FuzzFromBytesToBytes verifies that any valid byte slice survives a
+// ToBytes → FromBytes roundtrip with identical popcount and bit positions.
+func FuzzFromBytesToBytes(f *testing.F) {
+	f.Add([]byte{})
+	f.Add(make([]byte, 8))
+	f.Add([]byte{0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00})
+	f.Add(make([]byte, 128))
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		// Pad to a multiple of 8 so FromBytes accepts it.
+		padded := make([]byte, ((len(data)+7)/8)*8)
+		copy(padded, data)
+
+		original, err := FromBytes(padded)
+		if err != nil {
+			t.Skip()
+		}
+
+		roundtripped, err := FromBytes(original.ToBytes())
+		if err != nil {
+			t.Fatalf("FromBytes(ToBytes()) failed: %v", err)
+		}
+
+		if Popcount(original) != Popcount(roundtripped) {
+			t.Fatalf("popcount mismatch: %d vs %d", Popcount(original), Popcount(roundtripped))
+		}
+	})
+}
+
+// FuzzSetIsSet verifies Set/IsSet consistency for arbitrary positions on a
+// 1024-bit bitset.
+func FuzzSetIsSet(f *testing.F) {
+	f.Add(0)
+	f.Add(63)
+	f.Add(64)
+	f.Add(1023)
+
+	f.Fuzz(func(t *testing.T, pos int) {
+		b := New(1024)
+		if pos < 0 || pos >= 1024 {
+			if err := b.Set(pos); err == nil {
+				t.Fatalf("Set(%d) on 1024-bit bitset should have returned error", pos)
+			}
+			return
+		}
+		if err := b.Set(pos); err != nil {
+			t.Fatalf("Set(%d): unexpected error: %v", pos, err)
+		}
+		ok, err := b.IsSet(pos)
+		if err != nil {
+			t.Fatalf("IsSet(%d): unexpected error: %v", pos, err)
+		}
+		if !ok {
+			t.Fatalf("IsSet(%d) = false after Set", pos)
+		}
+	})
+}

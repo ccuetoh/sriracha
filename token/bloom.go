@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"strconv"
 
 	"go.sriracha.dev/internal/bitset"
 	"go.sriracha.dev/normalize"
@@ -54,17 +55,22 @@ func (t *Tokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.F
 // tokenizeFieldBloom returns a Bloom filter bitset for a single normalized field value.
 // For each n-gram, cfg.HashCount HMAC-SHA256 outputs determine bit positions to set.
 func (t *Tokenizer) tokenizeFieldBloom(normalizedValue string, path sriracha.FieldPath, cfg sriracha.BloomConfig) (*bitset.Bitset, error) {
-	var (
-		b       = bitset.New(int(cfg.SizeBits))
-		grams   = ngrams(normalizedValue, cfg.NgramSizes)
-		pathStr = path.String()
-	)
+	b := bitset.New(int(cfg.SizeBits))
+	grams := ngrams(normalizedValue, cfg.NgramSizes)
+	pathStr := path.String()
+
+	// Allocate one HMAC instance and reset it between uses to avoid the cost
+	// of re-keying (hmac.New allocates a new underlying hash each call).
+	h := hmac.New(sha256.New, t.secret)
 
 	for _, g := range grams {
+		prefix := []byte(g + pathStr)
 		for i := range cfg.HashCount {
-			suffix := fmt.Sprintf("%d", i)
-			h := hmacSum(t.secret, []byte(g+pathStr+suffix))
-			pos := int(binary.BigEndian.Uint64(h[:8]) % uint64(cfg.SizeBits))
+			h.Reset()
+			h.Write(prefix)
+			h.Write([]byte(strconv.Itoa(i)))
+			sum := h.Sum(nil)
+			pos := int(binary.BigEndian.Uint64(sum[:8]) % uint64(cfg.SizeBits))
 			if err := b.Set(pos); err != nil {
 				return nil, fmt.Errorf("token: bloom set failed: %w", err)
 			}
@@ -72,13 +78,6 @@ func (t *Tokenizer) tokenizeFieldBloom(normalizedValue string, path sriracha.Fie
 	}
 
 	return b, nil
-}
-
-// hmacSum returns HMAC-SHA256(key, data).
-func hmacSum(key, data []byte) []byte {
-	h := hmac.New(sha256.New, key)
-	h.Write(data)
-	return h.Sum(nil)
 }
 
 // ngrams returns all n-grams of the given sizes from s.

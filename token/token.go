@@ -72,6 +72,8 @@ func ValidateTokenRecord(tr sriracha.TokenRecord) error {
 // The field path is included to prevent cross-field collisions.
 func (t *Tokenizer) tokenizeField(normalizedValue string, path sriracha.FieldPath) []byte {
 	h := hmac.New(sha256.New, t.secret)
-	h.Write([]byte(normalizedValue + ":" + path.String()))
+	h.Write([]byte(normalizedValue))
+	h.Write([]byte(":"))
+	h.Write([]byte(path.String()))
 	return h.Sum(nil)
 }

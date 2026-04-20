@@ -331,3 +331,156 @@ func TestNgrams(t *testing.T) {
 		})
 	}
 }
+
+func BenchmarkTokenizeRecord(b *testing.B) {
+	tok, _ := New([]byte("bench-secret-32-bytes-long!!!!!"))
+	rec := sriracha.RawRecord{
+		sriracha.FieldNameGiven:    "Alice",
+		sriracha.FieldNameFamily:   "Smith",
+		sriracha.FieldDateBirth:    "1990-05-15",
+		sriracha.FieldContactEmail: "alice@example.com",
+	}
+	fs := deterministicFS(
+		sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: false, Weight: 2.0},
+		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 2.5},
+		sriracha.FieldSpec{Path: sriracha.FieldDateBirth, Required: false, Weight: 2.0},
+		sriracha.FieldSpec{Path: sriracha.FieldContactEmail, Required: false, Weight: 2.0},
+	)
+	b.ResetTimer()
+	for range b.N {
+		_, _ = tok.TokenizeRecord(rec, fs)
+	}
+}
+
+func BenchmarkTokenizeRecordBloom(b *testing.B) {
+	tok, _ := New([]byte("bench-secret-32-bytes-long!!!!!"))
+	rec := sriracha.RawRecord{
+		sriracha.FieldNameGiven:    "Alice",
+		sriracha.FieldNameFamily:   "Smith",
+		sriracha.FieldDateBirth:    "1990-05-15",
+		sriracha.FieldContactEmail: "alice@example.com",
+	}
+	fs := bloomFS(
+		sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: false, Weight: 2.0},
+		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 2.5},
+		sriracha.FieldSpec{Path: sriracha.FieldDateBirth, Required: false, Weight: 2.0},
+		sriracha.FieldSpec{Path: sriracha.FieldContactEmail, Required: false, Weight: 2.0},
+	)
+	b.ResetTimer()
+	for range b.N {
+		_, _ = tok.TokenizeRecordBloom(rec, fs)
+	}
+}
+
+func BenchmarkNgrams(b *testing.B) {
+	sizes := []int{2, 3}
+	input := "Christopher"
+	b.ResetTimer()
+	for range b.N {
+		_ = ngrams(input, sizes)
+	}
+}
+
+func BenchmarkValidateTokenRecord(b *testing.B) {
+	tok, _ := New([]byte("bench-secret"))
+	rec := sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}
+	fs := deterministicFS(sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
+	tr, _ := tok.TokenizeRecord(rec, fs)
+	b.ResetTimer()
+	for range b.N {
+		_ = ValidateTokenRecord(tr)
+	}
+}
+
+// FuzzNgrams verifies that ngrams never panics and that every returned gram
+// has the correct rune length.
+func FuzzNgrams(f *testing.F) {
+	f.Add("hello", 2)
+	f.Add("", 3)
+	f.Add("\u03b1\u03b2\u03b3", 2)
+	f.Add("a", 1)
+
+	f.Fuzz(func(t *testing.T, s string, size int) {
+		if size <= 0 || size > 20 {
+			return
+		}
+		grams := ngrams(s, []int{size})
+		runes := []rune(s)
+		for _, g := range grams {
+			gr := []rune(g)
+			if len(gr) != size {
+				t.Fatalf("ngrams(%q, [%d]): got gram %q with len %d, want %d", s, size, g, len(gr), size)
+			}
+		}
+		// Count must match expected sliding-window count.
+		n := len(runes)
+		want := 0
+		if n >= size {
+			want = n - size + 1
+		}
+		if len(grams) != want {
+			t.Fatalf("ngrams(%q, [%d]): got %d grams, want %d", s, size, len(grams), want)
+		}
+	})
+}
+
+// FuzzTokenizeRecord verifies that TokenizeRecord never panics for arbitrary
+// field values and that ValidateTokenRecord always accepts its own output.
+func FuzzTokenizeRecord(f *testing.F) {
+	f.Add("Alice", "Smith")
+	f.Add("", "")
+	f.Add("\x00", "\xff")
+
+	fs := deterministicFS(
+		sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: false, Weight: 1.0},
+		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 1.0},
+	)
+	tok, _ := New([]byte("fuzz-secret"))
+
+	f.Fuzz(func(t *testing.T, given, family string) {
+		rec := sriracha.RawRecord{
+			sriracha.FieldNameGiven:  given,
+			sriracha.FieldNameFamily: family,
+		}
+		tr, err := tok.TokenizeRecord(rec, fs)
+		if err != nil {
+			return
+		}
+		if err := ValidateTokenRecord(tr); err != nil {
+			t.Fatalf("ValidateTokenRecord rejected its own output: %v", err)
+		}
+	})
+}
+
+// FuzzTokenizeRecordBloom verifies that TokenizeRecordBloom never panics for
+// arbitrary field values and that its checksum is always valid.
+func FuzzTokenizeRecordBloom(f *testing.F) {
+	f.Add("Alice", "Smith")
+	f.Add("", "")
+	f.Add("Christopher", "Jones")
+
+	fs := bloomFS(
+		sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: false, Weight: 1.0},
+		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 1.0},
+	)
+	tok, _ := New([]byte("fuzz-secret"))
+
+	f.Fuzz(func(t *testing.T, given, family string) {
+		rec := sriracha.RawRecord{
+			sriracha.FieldNameGiven:  given,
+			sriracha.FieldNameFamily: family,
+		}
+		tr, err := tok.TokenizeRecordBloom(rec, fs)
+		if err != nil {
+			return
+		}
+		if err := ValidateTokenRecord(tr); err != nil {
+			t.Fatalf("ValidateTokenRecord rejected TokenizeRecordBloom output: %v", err)
+		}
+		// Payload must be exactly 2 × fieldFilterBytes long.
+		expectedBytes := 2 * int((fs.BloomParams.SizeBits+63)/64*8)
+		if len(tr.Payload) != expectedBytes {
+			t.Fatalf("payload length %d, want %d", len(tr.Payload), expectedBytes)
+		}
+	})
+}

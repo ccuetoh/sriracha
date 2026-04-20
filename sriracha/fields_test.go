@@ -108,3 +108,32 @@ func TestParseFieldPath(t *testing.T) {
 		})
 	}
 }
+
+// FuzzParseFieldPath verifies that ParseFieldPath never panics and that any
+// successfully parsed path survives a String() → ParseFieldPath roundtrip.
+func FuzzParseFieldPath(f *testing.F) {
+	f.Add("sriracha::name::given")
+	f.Add("myorg::identifier::employee_id")
+	f.Add("")
+	f.Add("::")
+	f.Add(":::")
+	f.Add("a::b::c")
+
+	f.Fuzz(func(t *testing.T, s string) {
+		fp, err := ParseFieldPath(s)
+		if err != nil {
+			return
+		}
+		// Roundtrip: String() must re-parse to an identical FieldPath.
+		fp2, err2 := ParseFieldPath(fp.String())
+		if err2 != nil {
+			t.Fatalf("ParseFieldPath(%q).String() = %q, failed to re-parse: %v", s, fp.String(), err2)
+		}
+		if fp.String() != fp2.String() {
+			t.Fatalf("roundtrip mismatch: %q → %q → %q", s, fp.String(), fp2.String())
+		}
+		if fp.Org() != fp2.Org() || fp.Namespace() != fp2.Namespace() || fp.LocalName() != fp2.LocalName() {
+			t.Fatalf("component mismatch after roundtrip for %q", s)
+		}
+	})
+}
