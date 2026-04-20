@@ -604,8 +604,8 @@ func TestRebuild(t *testing.T) {
 		// A date field rejects non-ISO-8601 values; this triggers the TokenizeRecord
 		// error path inside indexRecord.
 		fs := sriracha.FieldSet{
-			Version: "date-v1",
-			Fields:  []sriracha.FieldSpec{{Path: sriracha.FieldDateBirth, Required: false, Weight: 1.0}},
+			Version:     "date-v1",
+			Fields:      []sriracha.FieldSpec{{Path: sriracha.FieldDateBirth, Required: false, Weight: 1.0}},
 			BloomParams: sriracha.DefaultBloomConfig(),
 		}
 		idx, err := New(NewMemoryStorage(), fs, testSecret())
