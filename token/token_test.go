@@ -335,9 +335,9 @@ func TestNgrams(t *testing.T) {
 func BenchmarkTokenizeRecord(b *testing.B) {
 	tok, _ := New([]byte("bench-secret-32-bytes-long!!!!!"))
 	rec := sriracha.RawRecord{
-		sriracha.FieldNameGiven:  "Alice",
-		sriracha.FieldNameFamily: "Smith",
-		sriracha.FieldDateBirth:  "1990-05-15",
+		sriracha.FieldNameGiven:    "Alice",
+		sriracha.FieldNameFamily:   "Smith",
+		sriracha.FieldDateBirth:    "1990-05-15",
 		sriracha.FieldContactEmail: "alice@example.com",
 	}
 	fs := deterministicFS(
@@ -355,9 +355,9 @@ func BenchmarkTokenizeRecord(b *testing.B) {
 func BenchmarkTokenizeRecordBloom(b *testing.B) {
 	tok, _ := New([]byte("bench-secret-32-bytes-long!!!!!"))
 	rec := sriracha.RawRecord{
-		sriracha.FieldNameGiven:  "Alice",
-		sriracha.FieldNameFamily: "Smith",
-		sriracha.FieldDateBirth:  "1990-05-15",
+		sriracha.FieldNameGiven:    "Alice",
+		sriracha.FieldNameFamily:   "Smith",
+		sriracha.FieldDateBirth:    "1990-05-15",
 		sriracha.FieldContactEmail: "alice@example.com",
 	}
 	fs := bloomFS(
