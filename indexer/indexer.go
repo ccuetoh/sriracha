@@ -176,15 +176,18 @@ func (idx *Indexer) Sync(ctx context.Context, src sriracha.IncrementalRecordSour
 
 	if err := src.ScanSince(ctx, checkpoint, func(id string, r sriracha.RawRecord) error {
 		if len(r) == 0 {
-			if err := idx.deleteRecord(ctx, id); err != nil {
+			found, err := idx.deleteRecord(ctx, id)
+			if err != nil {
 				return err
 			}
-
-			idx.stats.RecordCount--
+			if found {
+				idx.stats.RecordCount--
+			}
 			return nil
 		}
 
-		if err := idx.deleteRecord(ctx, id); err != nil {
+		found, err := idx.deleteRecord(ctx, id)
+		if err != nil {
 			return err
 		}
 
@@ -192,7 +195,9 @@ func (idx *Indexer) Sync(ctx context.Context, src sriracha.IncrementalRecordSour
 			return err
 		}
 
-		idx.stats.RecordCount++
+		if !found {
+			idx.stats.RecordCount++
+		}
 		return nil
 	}); err != nil {
 		return err
@@ -245,16 +250,27 @@ func (idx *Indexer) matchProbabilistic(ctx context.Context, tr sriracha.TokenRec
 		return nil, sriracha.ErrIndexCorrupted("query payload length mismatch")
 	}
 
+	// Parse query bitsets once; reused for every stored record in the scan.
+	queryBitsets := make([]*bitset.Bitset, len(idx.fs.Fields))
+	for i := range idx.fs.Fields {
+		start := i * fieldBytes
+		bs, err := bitset.FromBytes(tr.Payload[start : start+fieldBytes])
+		if err != nil {
+			return nil, err
+		}
+		queryBitsets[i] = bs
+	}
+
 	scanPrefix := EntryPrefixProbabilistic + idx.fs.Version + ":"
 	var candidates []sriracha.Candidate
 
 	if err := idx.storage.Scan(ctx, scanPrefix, func(key string, storedPayload []byte) error {
-		if len(storedPayload) != len(tr.Payload) {
+		if len(storedPayload) != expectedLen {
 			return sriracha.ErrIndexCorrupted("stored payload length mismatch")
 		}
 
 		recordID := key[len(scanPrefix):]
-		conf, err := scoreProbabilistic(tr.Payload, storedPayload, idx.fs, cfg)
+		conf, err := scoreProbabilistic(queryBitsets, storedPayload, idx.fs, cfg, fieldBytes)
 		if err != nil {
 			return err
 		}
@@ -279,24 +295,16 @@ func (idx *Indexer) matchProbabilistic(ctx context.Context, tr sriracha.TokenRec
 	return candidates, nil
 }
 
-func scoreProbabilistic(query, stored []byte, fs sriracha.FieldSet, cfg sriracha.MatchConfig) (float64, error) {
-	fieldBytes := fieldFilterBytes(fs.BloomParams.SizeBits)
-	expectedLen := len(fs.Fields) * fieldBytes
-	if len(query) != expectedLen || len(stored) != expectedLen {
+func scoreProbabilistic(queryBitsets []*bitset.Bitset, stored []byte, fs sriracha.FieldSet, cfg sriracha.MatchConfig, fieldBytes int) (float64, error) {
+	if len(stored) != len(queryBitsets)*fieldBytes {
 		return 0, sriracha.ErrIndexCorrupted("payload length mismatch in scorer")
 	}
 
 	var numerator, denominator float64
 	for i, spec := range fs.Fields {
-		start := i * fieldBytes
-		end := start + fieldBytes
+		bsQ := queryBitsets[i]
 
-		bsQ, err := bitset.FromBytes(query[start:end])
-		if err != nil {
-			return 0, err
-		}
-
-		bsS, err := bitset.FromBytes(stored[start:end])
+		bsS, err := bitset.FromBytes(stored[i*fieldBytes : (i+1)*fieldBytes])
 		if err != nil {
 			return 0, err
 		}
@@ -371,37 +379,43 @@ func (idx *Indexer) indexRecord(ctx context.Context, id string, r sriracha.RawRe
 		})
 	}
 
-	return errors.Join(
-		idx.storage.Put(ctx, detKey, []byte(id)),
-		idx.storage.Put(ctx, probKey, probTR.Payload),
-		idx.storage.Put(ctx, metaKey, metaBytes),
-	)
+	if err := idx.storage.Put(ctx, detKey, []byte(id)); err != nil {
+		return err
+	}
+	if err := idx.storage.Put(ctx, probKey, probTR.Payload); err != nil {
+		return err
+	}
+	return idx.storage.Put(ctx, metaKey, metaBytes)
 }
 
-func (idx *Indexer) deleteRecord(ctx context.Context, id string) error {
+// deleteRecord removes all index entries for id. Returns (true, nil) if the
+// record existed, (false, nil) if it was not found, or (false, err) on error.
+func (idx *Indexer) deleteRecord(ctx context.Context, id string) (bool, error) {
 	metaKey := EntryPrefixMeta + id
 	metaBytes, err := idx.storage.Get(ctx, metaKey)
 	if err != nil {
 		if errors.Is(err, sriracha.ErrNotFound) {
-			return nil
+			return false, nil
 		}
-		return err
+		return false, err
 	}
 
 	var meta storedMeta
 	if err := json.Unmarshal(metaBytes, &meta); err != nil {
-		return err
+		return false, err
 	}
 
 	if tx, ok := idx.storage.(Transactor); ok {
-		return tx.DeleteBatch(ctx, []string{meta.DetKey, meta.ProbKey, metaKey})
+		return true, tx.DeleteBatch(ctx, []string{meta.DetKey, meta.ProbKey, metaKey})
 	}
 
-	return errors.Join(
-		idx.storage.Delete(ctx, meta.DetKey),
-		idx.storage.Delete(ctx, meta.ProbKey),
-		idx.storage.Delete(ctx, metaKey),
-	)
+	if err := idx.storage.Delete(ctx, meta.DetKey); err != nil {
+		return false, err
+	}
+	if err := idx.storage.Delete(ctx, meta.ProbKey); err != nil {
+		return false, err
+	}
+	return true, idx.storage.Delete(ctx, metaKey)
 }
 
 func (idx *Indexer) saveStats(ctx context.Context) error {

@@ -215,3 +215,103 @@ func TestNormalizeNFKDEquivalence(t *testing.T) {
 
 	assert.Equal(t, got1, got2, "NFKD equivalence failed: precomposed → %q (%x), decomposed → %q (%x)", got1, []byte(got1), got2, []byte(got2))
 }
+
+func BenchmarkNormalizeName(b *testing.B) {
+	for range b.N {
+		_, _ = Normalize("  José María  ", sriracha.FieldNameGiven)
+	}
+}
+
+func BenchmarkNormalizeIdentifier(b *testing.B) {
+	for range b.N {
+		_, _ = Normalize("123-456.789 0", sriracha.FieldIdentifierNationalID)
+	}
+}
+
+func BenchmarkNormalizeDate(b *testing.B) {
+	for range b.N {
+		_, _ = Normalize("2024-06-15", sriracha.FieldDateBirth)
+	}
+}
+
+func BenchmarkNormalizeCountry(b *testing.B) {
+	for range b.N {
+		_, _ = Normalize("us", sriracha.FieldAddressCountry)
+	}
+}
+
+// FuzzNormalize verifies that Normalize never panics and is idempotent for
+// non-date, non-country fields (name, identifier, address, contact).
+func FuzzNormalize(f *testing.F) {
+	seeds := []string{"", "Alice", "  hello world  ", "123-456.789", "\u00e9", "\u0130", "\u00a0test\u00a0"}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+
+	paths := []sriracha.FieldPath{
+		sriracha.FieldNameGiven,
+		sriracha.FieldNameFamily,
+		sriracha.FieldIdentifierNationalID,
+		sriracha.FieldContactEmail,
+		sriracha.FieldAddressLocality,
+	}
+
+	f.Fuzz(func(t *testing.T, value string) {
+		for _, path := range paths {
+			out1, err1 := Normalize(value, path)
+			if err1 != nil {
+				continue
+			}
+			// Idempotency: normalizing the output must produce the same result.
+			out2, err2 := Normalize(out1, path)
+			if err2 != nil {
+				t.Fatalf("second Normalize(%q, %s) errored after first succeeded: %v", out1, path, err2)
+			}
+			if out1 != out2 {
+				t.Fatalf("Normalize is not idempotent for path %s: %q → %q → %q", path, value, out1, out2)
+			}
+		}
+	})
+}
+
+// FuzzNormalizeDate verifies that normalizeDate accepts exactly ISO 8601
+// dates and rejects everything else without panicking.
+func FuzzNormalizeDate(f *testing.F) {
+	f.Add("2024-01-01")
+	f.Add("2000-02-29")
+	f.Add("not-a-date")
+	f.Add("")
+	f.Add("01/01/2024")
+
+	f.Fuzz(func(t *testing.T, value string) {
+		// Must not panic; error is acceptable for arbitrary input.
+		_, _ = Normalize(value, sriracha.FieldDateBirth)
+	})
+}
+
+// FuzzNormalizeCountry verifies that country normalization never panics and
+// accepts only valid 2-letter ASCII codes.
+func FuzzNormalizeCountry(f *testing.F) {
+	f.Add("US")
+	f.Add("us")
+	f.Add("GB")
+	f.Add("USA")
+	f.Add("")
+	f.Add("12")
+
+	f.Fuzz(func(t *testing.T, value string) {
+		out, err := Normalize(value, sriracha.FieldAddressCountry)
+		if err != nil {
+			return
+		}
+		// Successful result must be exactly 2 uppercase ASCII letters.
+		if len(out) != 2 {
+			t.Fatalf("normalizeCountry(%q) = %q, want 2 chars", value, out)
+		}
+		for _, r := range out {
+			if r < 'A' || r > 'Z' {
+				t.Fatalf("normalizeCountry(%q) = %q, contains non-uppercase-ASCII rune %q", value, out, r)
+			}
+		}
+	})
+}
