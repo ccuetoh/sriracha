@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strconv"
 
-	bloom "github.com/bits-and-blooms/bloom/v3"
 	"github.com/bits-and-blooms/bitset"
+	bloom "github.com/bits-and-blooms/bloom/v3"
 
 	"go.sriracha.dev/normalize"
 	"go.sriracha.dev/sriracha"
@@ -80,7 +80,7 @@ func (t *Tokenizer) tokenizeFieldBloom(normalizedValue string, path sriracha.Fie
 
 // bitsetToBytes serialises a BitSet as little-endian uint64 words.
 func bitsetToBytes(bs *bitset.BitSet) []byte {
-	words := bs.Bytes()
+	words := bs.Words()
 	out := make([]byte, len(words)*8)
 	for i, w := range words {
 		binary.LittleEndian.PutUint64(out[i*8:], w)
