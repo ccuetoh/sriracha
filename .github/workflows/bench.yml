@@ -20,6 +20,9 @@ jobs:
 
       - uses: bencherdev/bencher@main
 
+      - name: Raise memlock limit for memguard
+        run: sudo prlimit --pid $PPID --memlock=unlimited:unlimited
+
       - name: Track benchmarks (main)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
