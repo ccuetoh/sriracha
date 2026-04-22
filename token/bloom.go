@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"strconv"
 
-	"go.sriracha.dev/internal/bitset"
+	bloom "github.com/bits-and-blooms/bloom/v3"
+	"github.com/bits-and-blooms/bitset"
+
 	"go.sriracha.dev/normalize"
 	"go.sriracha.dev/sriracha"
 )
@@ -19,6 +21,7 @@ import (
 // Missing required fields return an error.
 func (t *Tokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.TokenRecord, error) {
 	cfg := fs.BloomParams
+	fieldBytes := int(((cfg.SizeBits + 63) / 64) * 8)
 	var payload []byte
 	for _, spec := range fs.Fields {
 		raw, ok := record[spec.Path]
@@ -27,8 +30,7 @@ func (t *Tokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.F
 				return sriracha.TokenRecord{}, fmt.Errorf("token: required field %q missing", spec.Path)
 			}
 			// Absent optional field: zero-filled filter preserves field layout for weighted scoring
-			zeroFilter := bitset.New(int(cfg.SizeBits))
-			payload = append(payload, zeroFilter.ToBytes()...)
+			payload = append(payload, make([]byte, fieldBytes)...)
 			continue
 		}
 
@@ -36,11 +38,7 @@ func (t *Tokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.F
 		if err != nil {
 			return sriracha.TokenRecord{}, fmt.Errorf("token: normalization failed for field %q: %w", spec.Path, err)
 		}
-		filter, err := t.tokenizeFieldBloom(normalized, spec.Path, cfg)
-		if err != nil {
-			return sriracha.TokenRecord{}, err
-		}
-		payload = append(payload, filter.ToBytes()...)
+		payload = append(payload, t.tokenizeFieldBloom(normalized, spec.Path, cfg)...)
 	}
 
 	return sriracha.TokenRecord{
@@ -52,16 +50,18 @@ func (t *Tokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.F
 	}, nil
 }
 
-// tokenizeFieldBloom returns a Bloom filter bitset for a single normalized field value.
-// For each n-gram, cfg.HashCount HMAC-SHA256 outputs determine bit positions to set.
-func (t *Tokenizer) tokenizeFieldBloom(normalizedValue string, path sriracha.FieldPath, cfg sriracha.BloomConfig) (*bitset.Bitset, error) {
-	b := bitset.New(int(cfg.SizeBits))
+// tokenizeFieldBloom returns serialized Bloom filter bytes for a single normalized field value.
+// Bit positions are determined by HMAC-SHA256 keyed with the Tokenizer secret, preventing
+// n-gram inference without access to the key.
+func (t *Tokenizer) tokenizeFieldBloom(normalizedValue string, path sriracha.FieldPath, cfg sriracha.BloomConfig) []byte {
+	f := bloom.New(uint(cfg.SizeBits), uint(cfg.HashCount))
+	bs := f.BitSet()
 	grams := ngrams(normalizedValue, cfg.NgramSizes)
 	pathStr := path.String()
 
 	// Allocate one HMAC instance and reset it between uses to avoid the cost
 	// of re-keying (hmac.New allocates a new underlying hash each call).
-	h := hmac.New(sha256.New, t.secret)
+	h := hmac.New(sha256.New, t.secret.Bytes())
 
 	for _, g := range grams {
 		prefix := []byte(g + pathStr)
@@ -70,14 +70,22 @@ func (t *Tokenizer) tokenizeFieldBloom(normalizedValue string, path sriracha.Fie
 			h.Write(prefix)
 			h.Write([]byte(strconv.Itoa(i)))
 			sum := h.Sum(nil)
-			pos := int(binary.BigEndian.Uint64(sum[:8]) % uint64(cfg.SizeBits))
-			if err := b.Set(pos); err != nil {
-				return nil, fmt.Errorf("token: bloom set failed: %w", err)
-			}
+			pos := binary.BigEndian.Uint64(sum[:8]) % uint64(cfg.SizeBits)
+			bs.Set(uint(pos))
 		}
 	}
 
-	return b, nil
+	return bitsetToBytes(bs)
+}
+
+// bitsetToBytes serialises a BitSet as little-endian uint64 words.
+func bitsetToBytes(bs *bitset.BitSet) []byte {
+	words := bs.Bytes()
+	out := make([]byte, len(words)*8)
+	for i, w := range words {
+		binary.LittleEndian.PutUint64(out[i*8:], w)
+	}
+	return out
 }
 
 // ngrams returns all n-grams of the given sizes from s.

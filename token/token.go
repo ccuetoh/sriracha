@@ -7,23 +7,32 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/awnumar/memguard"
+
 	"go.sriracha.dev/normalize"
 	"go.sriracha.dev/sriracha"
 )
 
 // Tokenizer produces TokenRecords from RawRecords using a shared secret.
+// Call Destroy when finished to wipe the key from memory.
 type Tokenizer struct {
-	secret []byte
+	secret *memguard.LockedBuffer
 }
 
 // New creates a Tokenizer with the given HMAC secret.
-// Returns an error if secret is empty.
+// The secret is copied into a locked, non-swappable memory region and the
+// source slice is wiped. Returns an error if secret is empty.
 func New(secret []byte) (*Tokenizer, error) {
 	if len(secret) == 0 {
 		return nil, errors.New("token: secret must not be empty")
 	}
 
-	return &Tokenizer{secret: secret}, nil
+	return &Tokenizer{secret: memguard.NewBufferFromBytes(secret)}, nil
+}
+
+// Destroy wipes the HMAC key from memory. The Tokenizer must not be used after this call.
+func (t *Tokenizer) Destroy() {
+	t.secret.Destroy()
 }
 
 // TokenizeRecord tokenizes a RawRecord in deterministic mode (HMAC-SHA256 per field).
@@ -71,7 +80,7 @@ func ValidateTokenRecord(tr sriracha.TokenRecord) error {
 // tokenizeField computes a 32-byte HMAC-SHA256 token for a single normalized field value.
 // The field path is included to prevent cross-field collisions.
 func (t *Tokenizer) tokenizeField(normalizedValue string, path sriracha.FieldPath) []byte {
-	h := hmac.New(sha256.New, t.secret)
+	h := hmac.New(sha256.New, t.secret.Bytes())
 	h.Write([]byte(normalizedValue))
 	h.Write([]byte(":"))
 	h.Write([]byte(path.String()))
