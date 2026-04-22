@@ -2,26 +2,35 @@ package token
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"testing"
 
+	"github.com/bits-and-blooms/bitset"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.sriracha.dev/internal/bitset"
 	"go.sriracha.dev/sriracha"
 )
 
-// dice computes the Sorensen-Dice coefficient of two same-size bitsets.
-func dice(t *testing.T, a, b *bitset.Bitset) float64 {
+// filterFromBytes deserialises a Bloom filter payload into a BitSet.
+func filterFromBytes(data []byte) *bitset.BitSet {
+	nwords := len(data) / 8
+	words := make([]uint64, nwords)
+	for i := range nwords {
+		words[i] = binary.LittleEndian.Uint64(data[i*8:])
+	}
+	return bitset.From(words)
+}
+
+// dice computes the Sorensen-Dice coefficient of two BitSets.
+func dice(t *testing.T, a, b *bitset.BitSet) float64 {
 	t.Helper()
-	inter, err := bitset.And(a, b)
-	require.NoError(t, err)
-	intersection := bitset.Popcount(inter)
-	total := bitset.Popcount(a) + bitset.Popcount(b)
+	popInter := int(a.IntersectionCardinality(b))
+	total := int(a.Count()) + int(b.Count())
 	if total == 0 {
 		return 0
 	}
-	return 2.0 * float64(intersection) / float64(total)
+	return 2.0 * float64(popInter) / float64(total)
 }
 
 func newTok(t *testing.T, secret string) *Tokenizer {
@@ -216,10 +225,8 @@ func TestTokenizeRecordBloom_NameSimilarity(t *testing.T) {
 			tr2, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: tc.nameB}, fs)
 			require.NoError(t, err)
 
-			bs1, err := bitset.FromBytes(tr1.Payload)
-			require.NoError(t, err)
-			bs2, err := bitset.FromBytes(tr2.Payload)
-			require.NoError(t, err)
+			bs1 := filterFromBytes(tr1.Payload)
+			bs2 := filterFromBytes(tr2.Payload)
 
 			d := dice(t, bs1, bs2)
 			if tc.wantAbove {
@@ -273,6 +280,12 @@ func TestNew_ErrorOnEmptySecret(t *testing.T) {
 	assert.Error(t, err, "expected error for nil secret")
 	_, err = New([]byte{})
 	assert.Error(t, err, "expected error for empty secret")
+}
+
+func TestTokenizer_Destroy(t *testing.T) {
+	t.Parallel()
+	tok := newTok(t, "secret")
+	tok.Destroy()
 }
 
 func TestNgrams(t *testing.T) {

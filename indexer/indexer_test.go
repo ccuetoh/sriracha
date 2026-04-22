@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"go.sriracha.dev/internal/bitset"
+	"github.com/bits-and-blooms/bitset"
 	mocksriracha "go.sriracha.dev/mock/sriracha"
 	"go.sriracha.dev/sriracha"
 )
@@ -1281,13 +1281,11 @@ func TestScoreProbabilistic(t *testing.T) {
 
 	// parseQueryBitsets converts a raw payload into the pre-parsed slice that
 	// scoreProbabilistic now expects (mirrors the logic in matchProbabilistic).
-	parseQueryBitsets := func(t *testing.T, payload []byte) []*bitset.Bitset {
+	parseQueryBitsets := func(t *testing.T, payload []byte) []*bitset.BitSet {
 		t.Helper()
-		bss := make([]*bitset.Bitset, len(fs.Fields))
+		bss := make([]*bitset.BitSet, len(fs.Fields))
 		for i := range fs.Fields {
-			bs, err := bitset.FromBytes(payload[i*fieldBytes : (i+1)*fieldBytes])
-			require.NoError(t, err)
-			bss[i] = bs
+			bss[i] = filterFromBytes(payload[i*fieldBytes : (i+1)*fieldBytes])
 		}
 		return bss
 	}

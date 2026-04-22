@@ -3,6 +3,7 @@ package indexer
 import (
 	"cmp"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,8 +12,9 @@ import (
 	"sort"
 	"time"
 
+	"github.com/bits-and-blooms/bitset"
+
 	"go.sriracha.dev/fieldset"
-	"go.sriracha.dev/internal/bitset"
 	"go.sriracha.dev/sriracha"
 	"go.sriracha.dev/token"
 )
@@ -102,8 +104,9 @@ func NewDefault(dir string, fs sriracha.FieldSet, secret []byte) (*Indexer, erro
 	return idx, nil
 }
 
-// Close releases the underlying storage if it implements io.Closer.
+// Close wipes the HMAC key and releases the underlying storage if it implements io.Closer.
 func (idx *Indexer) Close() error {
+	idx.tok.Destroy()
 	if c, ok := idx.storage.(io.Closer); ok {
 		return c.Close()
 	}
@@ -251,12 +254,10 @@ func (idx *Indexer) matchProbabilistic(ctx context.Context, tr sriracha.TokenRec
 	}
 
 	// Parse query bitsets once; reused for every stored record in the scan.
-	queryBitsets := make([]*bitset.Bitset, len(idx.fs.Fields))
+	queryBitsets := make([]*bitset.BitSet, len(idx.fs.Fields))
 	for i := range idx.fs.Fields {
 		start := i * fieldBytes
-		// fieldFilterBytes always returns a multiple of 8, so FromBytes cannot fail.
-		bs, _ := bitset.FromBytes(tr.Payload[start : start+fieldBytes])
-		queryBitsets[i] = bs
+		queryBitsets[i] = filterFromBytes(tr.Payload[start : start+fieldBytes])
 	}
 
 	scanPrefix := EntryPrefixProbabilistic + idx.fs.Version + ":"
@@ -292,7 +293,7 @@ func (idx *Indexer) matchProbabilistic(ctx context.Context, tr sriracha.TokenRec
 	return candidates, nil
 }
 
-func scoreProbabilistic(queryBitsets []*bitset.Bitset, stored []byte, fs sriracha.FieldSet, cfg sriracha.MatchConfig, fieldBytes int) (float64, error) {
+func scoreProbabilistic(queryBitsets []*bitset.BitSet, stored []byte, fs sriracha.FieldSet, cfg sriracha.MatchConfig, fieldBytes int) (float64, error) {
 	if len(stored) != len(queryBitsets)*fieldBytes {
 		return 0, sriracha.ErrIndexCorrupted("payload length mismatch in scorer")
 	}
@@ -300,20 +301,15 @@ func scoreProbabilistic(queryBitsets []*bitset.Bitset, stored []byte, fs srirach
 	var numerator, denominator float64
 	for i, spec := range fs.Fields {
 		bsQ := queryBitsets[i]
+		bsS := filterFromBytes(stored[i*fieldBytes : (i+1)*fieldBytes])
 
-		// Both slices are fieldFilterBytes-sized (multiple of 8) and equal-length,
-		// so FromBytes and And cannot fail.
-		bsS, _ := bitset.FromBytes(stored[i*fieldBytes : (i+1)*fieldBytes])
-
-		popQ := bitset.Popcount(bsQ)
-		popS := bitset.Popcount(bsS)
+		popQ := int(bsQ.Count())
+		popS := int(bsS.Count())
 		if popQ == 0 && popS == 0 {
 			continue
 		}
 
-		inter, _ := bitset.And(bsQ, bsS)
-
-		popInter := bitset.Popcount(inter)
+		popInter := int(bsQ.IntersectionCardinality(bsS))
 		dice := (2.0 * float64(popInter)) / float64(popQ+popS)
 
 		w := fieldWeightFor(i, spec, cfg)
@@ -328,6 +324,17 @@ func scoreProbabilistic(queryBitsets []*bitset.Bitset, stored []byte, fs srirach
 	return numerator / denominator, nil
 }
 
+// filterFromBytes deserialises a per-field Bloom filter payload slice into a BitSet.
+// data must have a length that is a multiple of 8 (guaranteed by fieldFilterBytes).
+func filterFromBytes(data []byte) *bitset.BitSet {
+	nwords := len(data) / 8
+	words := make([]uint64, nwords)
+	for i := range nwords {
+		words[i] = binary.LittleEndian.Uint64(data[i*8:])
+	}
+	return bitset.From(words)
+}
+
 func fieldWeightFor(_ int, spec sriracha.FieldSpec, cfg sriracha.MatchConfig) float64 {
 	for _, fw := range cfg.FieldWeights {
 		if fw.Path == spec.Path {
@@ -337,8 +344,8 @@ func fieldWeightFor(_ int, spec sriracha.FieldSpec, cfg sriracha.MatchConfig) fl
 	return spec.Weight
 }
 
-// fieldFilterBytes returns the byte length of one Bloom filter field slice,
-// matching the output of bitset.New(n).ToBytes(): ceil(n/64)*8 bytes.
+// fieldFilterBytes returns the byte length of one per-field Bloom filter slice:
+// ceil(n/64) uint64 words × 8 bytes, matching bloom.New(n,k).BitSet().Bytes() length.
 func fieldFilterBytes(sizeBits uint32) int {
 	return int(((sizeBits + 63) / 64) * 8)
 }
