@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dgraph-io/badger/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -37,6 +38,7 @@ func newTestIndexer(t *testing.T) *Indexer {
 	t.Helper()
 	idx, err := New(NewMemoryStorage(), testFS(), testSecret())
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = idx.Close() })
 	return idx
 }
 
@@ -131,6 +133,7 @@ func TestNew(t *testing.T) {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
+				t.Cleanup(func() { _ = idx.Close() })
 				assert.NotNil(t, idx)
 			}
 		})
@@ -141,11 +144,13 @@ func TestNew(t *testing.T) {
 		mem := NewMemoryStorage()
 		idx, err := New(mem, testFS(), testSecret())
 		require.NoError(t, err)
+		t.Cleanup(func() { _ = idx.Close() })
 		require.NoError(t, idx.Rebuild(context.Background(), scanSource(t, map[string]sriracha.RawRecord{
 			"r1": {sriracha.FieldNameGiven: "Alice", sriracha.FieldNameFamily: "Smith"},
 		})))
 		idx2, err := New(mem, testFS(), testSecret())
 		require.NoError(t, err)
+		t.Cleanup(func() { _ = idx2.Close() })
 		assert.Equal(t, int64(1), idx2.Stats().RecordCount)
 	})
 
@@ -358,6 +363,18 @@ func TestMemoryStorage(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "", cp)
 	})
+
+	t.Run("scan skips non-string key", func(t *testing.T) {
+		t.Parallel()
+		s := NewMemoryStorage()
+		s.data.Store(42, []byte("v")) // integer key, not string
+		var keys []string
+		require.NoError(t, s.Scan(ctx, "", func(k string, _ []byte) error {
+			keys = append(keys, k)
+			return nil
+		}))
+		assert.Empty(t, keys)
+	})
 }
 
 func TestBadgerStorage(t *testing.T) {
@@ -468,6 +485,36 @@ func TestBadgerStorage(t *testing.T) {
 		require.NoError(t, s.Put(ctx, "p:1", []byte("v")))
 		sentinel := errors.New("fn error")
 		err := s.Scan(ctx, "p:", func(_ string, _ []byte) error { return sentinel })
+		require.ErrorIs(t, err, sentinel)
+	})
+
+	t.Run("scan value copy error", func(t *testing.T) {
+		t.Parallel()
+		s := newBadger(t)
+		require.NoError(t, s.Put(ctx, "k:1", []byte("v")))
+		sentinel := errors.New("vcopy fail")
+		s.valueCopyFn = func(*badger.Item) ([]byte, error) { return nil, sentinel }
+		err := s.Scan(ctx, "k:", func(_ string, _ []byte) error { return nil })
+		require.ErrorIs(t, err, sentinel)
+	})
+
+	t.Run("load checkpoint non-ErrKeyNotFound error", func(t *testing.T) {
+		t.Parallel()
+		s := newBadger(t)
+		// Empty key triggers ErrEmptyKey from Badger, which is not ErrKeyNotFound,
+		// so it falls through to the non-ErrKeyNotFound error branch.
+		s.checkpointKey = ""
+		_, err := s.LoadCheckpoint(ctx)
+		require.Error(t, err)
+	})
+
+	t.Run("load checkpoint value copy error", func(t *testing.T) {
+		t.Parallel()
+		s := newBadger(t)
+		require.NoError(t, s.SaveCheckpoint(ctx, "tok"))
+		sentinel := errors.New("vcopy fail")
+		s.valueCopyFn = func(*badger.Item) ([]byte, error) { return nil, sentinel }
+		_, err := s.LoadCheckpoint(ctx)
 		require.ErrorIs(t, err, sentinel)
 	})
 }
@@ -610,6 +657,7 @@ func TestRebuild(t *testing.T) {
 		}
 		idx, err := New(NewMemoryStorage(), fs, testSecret())
 		require.NoError(t, err)
+		t.Cleanup(func() { _ = idx.Close() })
 		err = idx.Rebuild(ctx, scanSource(t, map[string]sriracha.RawRecord{
 			"r1": {sriracha.FieldDateBirth: "not-a-date"},
 		}))
@@ -804,6 +852,7 @@ func TestSync(t *testing.T) {
 		mem := NewMemoryStorage()
 		idx, err := New(mem, testFS(), testSecret())
 		require.NoError(t, err)
+		t.Cleanup(func() { _ = idx.Close() })
 
 		before := time.Now()
 		require.NoError(t, idx.Sync(ctx, syncSource(t, map[string]sriracha.RawRecord{})))
@@ -849,6 +898,7 @@ func TestSync(t *testing.T) {
 		mem := NewMemoryStorage()
 		idx, err := New(mem, testFS(), testSecret())
 		require.NoError(t, err)
+		t.Cleanup(func() { _ = idx.Close() })
 		require.NoError(t, idx.Rebuild(ctx, scanSource(t, map[string]sriracha.RawRecord{
 			"r1": {sriracha.FieldNameGiven: "Alice", sriracha.FieldNameFamily: "Smith"},
 		})))
@@ -877,6 +927,7 @@ func TestSync(t *testing.T) {
 		mem := NewMemoryStorage()
 		idx, err := New(mem, testFS(), testSecret())
 		require.NoError(t, err)
+		t.Cleanup(func() { _ = idx.Close() })
 		require.NoError(t, idx.Rebuild(ctx, scanSource(t, map[string]sriracha.RawRecord{
 			"r1": {sriracha.FieldNameGiven: "Alice", sriracha.FieldNameFamily: "Smith"},
 		})))
@@ -1260,6 +1311,7 @@ func TestMatch_Probabilistic(t *testing.T) {
 		mem := NewMemoryStorage()
 		idx, err := New(mem, testFS(), testSecret())
 		require.NoError(t, err)
+		t.Cleanup(func() { _ = idx.Close() })
 		require.NoError(t, mem.Put(ctx, "prob:test-v1:r1", []byte{0xFF}))
 
 		tr := sriracha.TokenRecord{
@@ -1573,6 +1625,7 @@ func TestDeleteRecord(t *testing.T) {
 		mem := NewMemoryStorage()
 		idx, err := New(mem, testFS(), testSecret())
 		require.NoError(t, err)
+		t.Cleanup(func() { _ = idx.Close() })
 
 		rec := sriracha.RawRecord{
 			sriracha.FieldNameGiven:  "Alice",

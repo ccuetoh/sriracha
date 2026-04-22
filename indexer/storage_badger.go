@@ -14,25 +14,34 @@ const badgerCheckpointKey = "__checkpoint__"
 // BadgerStorage implements sriracha.IndexStorage using BadgerDB.
 // It also implements io.Closer, StorageSizer, and Transactor.
 type BadgerStorage struct {
-	db *badger.DB
+	db            *badger.DB
+	checkpointKey string
+	valueCopyFn   func(*badger.Item) ([]byte, error) // nil: use item.ValueCopy(nil); set in tests to inject errors
+}
+
+func (s *BadgerStorage) valueCopy(item *badger.Item) ([]byte, error) {
+	if s.valueCopyFn != nil {
+		return s.valueCopyFn(item)
+	}
+	return item.ValueCopy(nil)
+}
+
+func openBadger(opts badger.Options) (*BadgerStorage, error) {
+	db, err := badger.Open(opts)
+	if err != nil {
+		return nil, err
+	}
+	return &BadgerStorage{db: db, checkpointKey: badgerCheckpointKey}, nil
 }
 
 // OpenBadger opens a persistent BadgerDB store at dir.
 func OpenBadger(dir string) (*BadgerStorage, error) {
-	db, err := badger.Open(badger.DefaultOptions(dir).WithLogger(nil))
-	if err != nil {
-		return nil, err
-	}
-	return &BadgerStorage{db: db}, nil
+	return openBadger(badger.DefaultOptions(dir).WithLogger(nil))
 }
 
 // OpenBadgerInMemory opens an ephemeral in-memory BadgerDB store.
 func OpenBadgerInMemory() (*BadgerStorage, error) {
-	db, err := badger.Open(badger.DefaultOptions("").WithInMemory(true).WithLogger(nil))
-	if err != nil {
-		return nil, err
-	}
-	return &BadgerStorage{db: db}, nil
+	return openBadger(badger.DefaultOptions("").WithInMemory(true).WithLogger(nil))
 }
 
 // Close releases all resources held by the BadgerDB instance.
@@ -89,7 +98,7 @@ func (s *BadgerStorage) Scan(ctx context.Context, prefix string, fn func(key str
 			}
 			item := it.Item()
 			key := string(item.Key())
-			val, err := item.ValueCopy(nil)
+			val, err := s.valueCopy(item)
 			if err != nil {
 				return err
 			}
@@ -125,14 +134,14 @@ func (s *BadgerStorage) LoadCheckpoint(ctx context.Context) (string, error) {
 	}
 	var token string
 	err := s.db.View(func(txn *badger.Txn) error {
-		item, err := txn.Get([]byte(badgerCheckpointKey))
+		item, err := txn.Get([]byte(s.checkpointKey))
 		if errors.Is(err, badger.ErrKeyNotFound) {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		val, err := item.ValueCopy(nil)
+		val, err := s.valueCopy(item)
 		if err != nil {
 			return err
 		}

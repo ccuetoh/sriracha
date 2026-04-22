@@ -269,8 +269,7 @@ func (idx *Indexer) matchProbabilistic(ctx context.Context, tr sriracha.TokenRec
 		}
 
 		recordID := key[len(scanPrefix):]
-		// storedPayload length is verified above; the scoreProbabilistic length check
-		// cannot fire, and the inner FromBytes/And errors are also unreachable.
+		// Length pre-validated; bitset-size invariants hold — cannot error.
 		conf, _ := scoreProbabilistic(queryBitsets, storedPayload, idx.fs, cfg, fieldBytes)
 
 		if conf >= float64(cfg.Threshold) {
@@ -356,9 +355,7 @@ func (idx *Indexer) indexRecord(ctx context.Context, id string, r sriracha.RawRe
 		return err
 	}
 
-	// TokenizeRecordBloom can only fail via tokenizeFieldBloom's b.Set error, which is
-	// unreachable: pos = HMAC % SizeBits is always in [0, SizeBits). Any normalization
-	// or required-field errors would have already caused TokenizeRecord above to fail.
+	// b.Set pos = HMAC%SizeBits ∈ [0,SizeBits); normalization/required errors already caught above.
 	probTR, _ := idx.tok.TokenizeRecordBloom(r, idx.fs)
 
 	detKey := EntryPrefixDeterministic + hex.EncodeToString(detTR.Payload)
