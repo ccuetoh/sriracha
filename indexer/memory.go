@@ -54,33 +54,34 @@ func (s *MemoryStorage) Scan(ctx context.Context, prefix string, fn func(key str
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	var keys []string
-	s.data.Range(func(k, _ any) bool {
+	type kv struct {
+		key string
+		val []byte
+	}
+	var pairs []kv
+	s.data.Range(func(k, v any) bool {
 		ks, ok := k.(string)
 		if !ok {
 			return true
 		}
-		if strings.HasPrefix(ks, prefix) {
-			keys = append(keys, ks)
-		}
-		return true
-	})
-	sort.Strings(keys)
-	for _, k := range keys {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		v, ok := s.data.Load(k)
-		if !ok {
-			continue
+		if !strings.HasPrefix(ks, prefix) {
+			return true
 		}
 		src, ok := v.([]byte)
 		if !ok {
-			continue
+			return true
 		}
 		cp := make([]byte, len(src))
 		copy(cp, src)
-		if err := fn(k, cp); err != nil {
+		pairs = append(pairs, kv{ks, cp})
+		return true
+	})
+	sort.Slice(pairs, func(i, j int) bool { return pairs[i].key < pairs[j].key })
+	for _, p := range pairs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := fn(p.key, p.val); err != nil {
 			return err
 		}
 	}

@@ -37,6 +37,7 @@ func newTok(t *testing.T, secret string) *Tokenizer {
 	t.Helper()
 	tok, err := New([]byte(secret))
 	require.NoErrorf(t, err, "New(%q)", secret)
+	t.Cleanup(tok.Destroy)
 	return tok
 }
 
