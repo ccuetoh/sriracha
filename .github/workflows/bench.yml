@@ -41,10 +41,11 @@ jobs:
             --project sriracha \
             --branch "${{ github.head_ref }}" \
             --start-point "${{ github.base_ref }}" \
+            --start-point-hash "${{ github.event.pull_request.base.sha }}" \
             --start-point-clone-thresholds \
             --start-point-reset \
             --testbed ubuntu-latest \
             --adapter go_bench \
-            --err-on-alert \
+            --err \
             --github-actions "${{ secrets.GITHUB_TOKEN }}" \
             "go test -bench=. -benchmem ./..."

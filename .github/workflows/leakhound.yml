@@ -19,7 +19,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Install leakhound
-        run: go install github.com/nilpoona/leakhound@latest
+        run: go install github.com/nilpoona/leakhound/cmd/leakhound@latest
 
       - name: Run leakhound
         run: leakhound ./...
