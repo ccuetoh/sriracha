@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: '0 8 * * 1'
 
 jobs:
   test:
@@ -41,3 +43,52 @@ jobs:
         uses: golangci/golangci-lint-action@v8
         with:
           version: v2.4.0
+
+  leakhound:
+    name: leakhound
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install leakhound
+        run: go install github.com/nilpoona/leakhound/cmd/leakhound@latest
+
+      - name: Run leakhound
+        run: leakhound ./...
+
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod
+          go-package: ./...
+
+  fuzz:
+    name: Fuzz
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Fuzz
+        run: |
+          go test -fuzz=^FuzzParseFieldPath$     -fuzztime=30s go.sriracha.dev/sriracha
+          go test -fuzz=^FuzzNormalize$          -fuzztime=30s go.sriracha.dev/normalize
+          go test -fuzz=^FuzzNormalizeDate$      -fuzztime=30s go.sriracha.dev/normalize
+          go test -fuzz=^FuzzNormalizeCountry$   -fuzztime=30s go.sriracha.dev/normalize
+          go test -fuzz=^FuzzNgrams$             -fuzztime=30s go.sriracha.dev/token
+          go test -fuzz=^FuzzTokenizeRecord$     -fuzztime=30s go.sriracha.dev/token
+          go test -fuzz=^FuzzTokenizeRecordBloom$ -fuzztime=30s go.sriracha.dev/token
