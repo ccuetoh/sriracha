@@ -75,6 +75,12 @@ jobs:
   fuzz:
     name: Fuzz
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package:
+          - go.sriracha.dev/sriracha
+          - go.sriracha.dev/normalize
+          - go.sriracha.dev/token
     steps:
       - uses: actions/checkout@v4
 
@@ -86,5 +92,5 @@ jobs:
       - name: Fuzz
         uses: jidicula/go-fuzz-action@v1.2.0
         with:
-          packages: 'go.sriracha.dev/sriracha go.sriracha.dev/normalize go.sriracha.dev/token'
+          packages: ${{ matrix.package }}
           fuzz-time: 30s
