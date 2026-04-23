@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: '0 8 * * 1'
 
 jobs:
   test:
@@ -41,3 +43,48 @@ jobs:
         uses: golangci/golangci-lint-action@v8
         with:
           version: v2.4.0
+
+  leakhound:
+    name: leakhound
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install leakhound
+        run: go install github.com/nilpoona/leakhound/cmd/leakhound@latest
+
+      - name: Run leakhound
+        run: leakhound ./...
+
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod
+          go-package: ./...
+
+  fuzz:
+    name: Fuzz
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Fuzz
+        uses: jidicula/go-fuzz-action@v1.2.0
+        with:
+          packages: 'go.sriracha.dev/sriracha go.sriracha.dev/normalize go.sriracha.dev/token'
+          fuzz-time: 30s
