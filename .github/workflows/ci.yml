@@ -77,10 +77,14 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        package:
-          - go.sriracha.dev/sriracha
-          - go.sriracha.dev/normalize
-          - go.sriracha.dev/token
+        include:
+          - { pkg: go.sriracha.dev/sriracha,  func: FuzzParseFieldPath      }
+          - { pkg: go.sriracha.dev/normalize, func: FuzzNormalize            }
+          - { pkg: go.sriracha.dev/normalize, func: FuzzNormalizeDate        }
+          - { pkg: go.sriracha.dev/normalize, func: FuzzNormalizeCountry     }
+          - { pkg: go.sriracha.dev/token,     func: FuzzNgrams               }
+          - { pkg: go.sriracha.dev/token,     func: FuzzTokenizeRecord       }
+          - { pkg: go.sriracha.dev/token,     func: FuzzTokenizeRecordBloom  }
     steps:
       - uses: actions/checkout@v4
 
@@ -90,7 +94,4 @@ jobs:
           go-version-file: go.mod
 
       - name: Fuzz
-        uses: jidicula/go-fuzz-action@v1.2.0
-        with:
-          packages: ${{ matrix.package }}
-          fuzz-time: 30s
+        run: go test -fuzz=^${{ matrix.func }}$ -fuzztime=30s ${{ matrix.pkg }}
