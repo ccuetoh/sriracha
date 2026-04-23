@@ -17,6 +17,12 @@ import (
 // for the given field path. Returns an error if the value is invalid for
 // the field's expected format.
 func Normalize(value string, path sriracha.FieldPath) (string, error) {
+	// Replace invalid UTF-8 bytes with U+FFFD before any transformation.
+	// Without this, raw invalid bytes pass through norm.NFKD and cases.Lower
+	// unchanged but get decoded as RuneError by range loops (e.g. in
+	// normalizeIdentifier), producing inconsistent byte representations across
+	// successive calls and breaking idempotency.
+	value = strings.ToValidUTF8(value, "�")
 	// Step 1: NFKD decomposition
 	value = nfkdDecompose(value)
 	// Step 2: Unicode-correct lowercasing (language.Und = deterministic, locale-independent)
