@@ -443,6 +443,216 @@ func TestBulkLinkMissingPolicy(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestQueryMalformedToken(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	client := env.newClient(t)
+
+	_, err := client.Query(context.Background(), &srirachav1.QueryRequest{
+		SessionId:       "sess-bad-token",
+		TokenRecord:     []byte{0xFF, 0xFE, 0x01}, // invalid proto bytes
+		FieldsetVersion: "test-v1",
+		Policy:          env.newPolicy(t),
+	})
+	assert.Error(t, err)
+}
+
+func TestQuerySingleProbabilisticMatch(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	env.expectAudit(t)
+	client := env.newClient(t)
+
+	tr := testTokenRecord(t)
+	trBytes, err := TokenRecordToProto(tr)
+	require.NoError(t, err)
+
+	// Single candidate with confidence < 1.0 and no close second candidate.
+	env.indexer.EXPECT().
+		Match(mock.Anything, mock.Anything, mock.Anything).
+		Return([]sriracha.Candidate{{RecordID: "rec-1", Confidence: 0.90}}, nil)
+	env.source.EXPECT().
+		Fetch(mock.Anything, "rec-1").
+		Return(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, nil)
+
+	resp, err := client.Query(context.Background(), &srirachav1.QueryRequest{
+		SessionId:       "sess-prob-single",
+		TokenRecord:     trBytes,
+		FieldsetVersion: "test-v1",
+		RequestedFields: []string{sriracha.FieldNameGiven.String()},
+		Policy:          env.newPolicy(t),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, srirachav1.MatchStatus_MATCHED, resp.Status)
+	assert.InDelta(t, 0.90, float64(resp.Confidence), 0.001)
+}
+
+func TestBulkLinkFetchError(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	client := env.newClient(t)
+
+	tr := testTokenRecord(t)
+	trBytes, err := TokenRecordToProto(tr)
+	require.NoError(t, err)
+
+	env.indexer.EXPECT().
+		Match(mock.Anything, mock.Anything, mock.Anything).
+		Return([]sriracha.Candidate{{RecordID: "rec-err", Confidence: 1.0}}, nil)
+	env.source.EXPECT().
+		Fetch(mock.Anything, "rec-err").
+		Return(nil, sriracha.ErrRecordNotFound("rec-err"))
+
+	stream, err := client.BulkLink(context.Background())
+	require.NoError(t, err)
+
+	err = stream.Send(&srirachav1.BulkTokenBatch{
+		SessionId:    "bulk-fetch-err",
+		TokenRecords: [][]byte{trBytes},
+		RecordRefs:   []string{"ref-a"},
+		Policy:       env.newPolicy(t),
+	})
+	require.NoError(t, err)
+
+	_, err = stream.Recv()
+	assert.Error(t, err)
+}
+
+func TestQueryIndexerError(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	client := env.newClient(t)
+
+	tr := testTokenRecord(t)
+	trBytes, err := TokenRecordToProto(tr)
+	require.NoError(t, err)
+
+	env.indexer.EXPECT().
+		Match(mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, sriracha.ErrIndexCorrupted("simulated index failure"))
+
+	_, err = client.Query(context.Background(), &srirachav1.QueryRequest{
+		SessionId:       "sess-idx-err",
+		TokenRecord:     trBytes,
+		FieldsetVersion: "test-v1",
+		Policy:          env.newPolicy(t),
+	})
+	assert.Error(t, err)
+}
+
+func TestNewServerNilAudit(t *testing.T) {
+	t.Parallel()
+
+	pki := newTestPKI(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	cache := replay.New(ctx)
+
+	indexer := mocksriracha.NewMockTokenIndexer(t)
+	source := mocksriracha.NewMockRecordSource(t)
+
+	srv, err := New(testServerConfig(), indexer, source, pki.serverTLSConfig(), cache, nil)
+	require.NoError(t, err)
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.GracefulStop)
+
+	conn, err := grpc.NewClient(lis.Addr().String(),
+		grpc.WithTransportCredentials(credentials.NewTLS(pki.clientTLSConfig())),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	stub := srirachav1.NewSrirachaServiceClient(conn)
+
+	tr := testTokenRecord(t)
+	trBytes, err := TokenRecordToProto(tr)
+	require.NoError(t, err)
+
+	indexer.EXPECT().Match(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
+
+	env := &testEnv{pki: pki}
+	resp, err := stub.Query(context.Background(), &srirachav1.QueryRequest{
+		SessionId:       "sess-nop-audit",
+		TokenRecord:     trBytes,
+		FieldsetVersion: "test-v1",
+		Policy:          env.newPolicy(t),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, srirachav1.MatchStatus_NO_MATCH, resp.Status)
+}
+
+func TestQueryRecordFieldNotHeld(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	env.expectAudit(t)
+	client := env.newClient(t)
+
+	tr := testTokenRecord(t)
+	trBytes, err := TokenRecordToProto(tr)
+	require.NoError(t, err)
+
+	env.indexer.EXPECT().
+		Match(mock.Anything, mock.Anything, mock.Anything).
+		Return([]sriracha.Candidate{{RecordID: "rec-1", Confidence: 1.0}}, nil)
+	env.source.EXPECT().
+		Fetch(mock.Anything, "rec-1").
+		Return(sriracha.RawRecord{
+			sriracha.FieldNameGiven: string(sriracha.NotHeld),
+		}, nil)
+
+	resp, err := client.Query(context.Background(), &srirachav1.QueryRequest{
+		SessionId:       "sess-notheld-rec",
+		TokenRecord:     trBytes,
+		FieldsetVersion: "test-v1",
+		RequestedFields: []string{sriracha.FieldNameGiven.String()},
+		Policy:          env.newPolicy(t),
+	})
+	require.NoError(t, err)
+	assert.Empty(t, resp.Fields)
+	assert.Equal(t, []string{sriracha.FieldNameGiven.String()}, resp.NotFound)
+}
+
+func TestQueryWithMatchConfig(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	env.expectAudit(t)
+	client := env.newClient(t)
+
+	tr := testTokenRecord(t)
+	trBytes, err := TokenRecordToProto(tr)
+	require.NoError(t, err)
+
+	env.indexer.EXPECT().
+		Match(mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, nil)
+
+	resp, err := client.Query(context.Background(), &srirachav1.QueryRequest{
+		SessionId:       "sess-matchcfg",
+		TokenRecord:     trBytes,
+		FieldsetVersion: "test-v1",
+		MatchConfig: &srirachav1.MatchConfig{
+			Threshold:  0.8,
+			MaxResults: 5,
+			FieldWeights: []*srirachav1.FieldWeight{
+				{FieldPath: sriracha.FieldNameGiven.String(), Weight: 0.5},
+				{FieldPath: "invalid::field", Weight: 0.1},
+			},
+		},
+		Policy: env.newPolicy(t),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, srirachav1.MatchStatus_NO_MATCH, resp.Status)
+}
+
 func TestNewServerValidation(t *testing.T) {
 	t.Parallel()
 

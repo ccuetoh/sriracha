@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/binary"
 	"encoding/pem"
 	"math/big"
 	"net"
@@ -246,4 +248,173 @@ func TestNewQueryRequest(t *testing.T) {
 	assert.NotEmpty(t, req.TokenRecord)
 	assert.Equal(t, "test-v1", req.FieldsetVersion)
 	assert.Equal(t, srirachav1.MatchMode_DETERMINISTIC, req.MatchMode)
+}
+
+func TestNewQueryRequestProbabilistic(t *testing.T) {
+	t.Parallel()
+
+	var checksum [32]byte
+	tr := sriracha.TokenRecord{
+		FieldSetVersion: "test-v1",
+		Mode:            sriracha.Probabilistic,
+		Algo:            sriracha.AlgoHMACSHA256V1,
+		Payload:         []byte("payload"),
+		Checksum:        checksum,
+	}
+
+	req, err := NewQueryRequest(tr, "test-v1", nil, nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, srirachav1.MatchMode_PROBABILISTIC, req.MatchMode)
+}
+
+func TestNewQueryRequestInvalidMode(t *testing.T) {
+	t.Parallel()
+
+	var checksum [32]byte
+	tr := sriracha.TokenRecord{
+		FieldSetVersion: "test-v1",
+		Mode:            sriracha.MatchMode(99),
+		Algo:            sriracha.AlgoHMACSHA256V1,
+		Payload:         []byte("payload"),
+		Checksum:        checksum,
+	}
+
+	_, err := NewQueryRequest(tr, "test-v1", nil, nil, nil)
+	assert.Error(t, err)
+}
+
+// signTestPolicy signs a ConsentPolicy using the provided Ed25519 private key.
+// The message format mirrors consent.policyMessage.
+func signTestPolicy(t *testing.T, priv ed25519.PrivateKey, p *srirachav1.ConsentPolicy) {
+	t.Helper()
+	var buf []byte
+	buf = append(buf, []byte(p.PolicyId)...)
+	buf = append(buf, []byte(p.IssuerId)...)
+	buf = append(buf, []byte(p.TargetId)...)
+	buf = append(buf, []byte(p.Purpose)...)
+	var ts [8]byte
+	binary.BigEndian.PutUint64(ts[:], uint64(p.IssuedAt))
+	buf = append(buf, ts[:]...)
+	binary.BigEndian.PutUint64(ts[:], uint64(p.ExpiresAt))
+	buf = append(buf, ts[:]...)
+	hash := sha256.Sum256(buf)
+	p.Signature = ed25519.Sign(priv, hash[:])
+}
+
+func newTestPolicy(t *testing.T, pki *testPKI, policyID string) *srirachav1.ConsentPolicy {
+	t.Helper()
+	now := time.Now()
+	p := &srirachav1.ConsentPolicy{
+		PolicyId:  policyID,
+		IssuerId:  "org.example.a",
+		TargetId:  "org.example.b",
+		Purpose:   "test",
+		IssuedAt:  now.Add(-time.Minute).Unix(),
+		ExpiresAt: now.Add(time.Hour).Unix(),
+	}
+	signTestPolicy(t, pki.clientPriv, p)
+	return p
+}
+
+func TestClientQuery(t *testing.T) {
+	t.Parallel()
+
+	pki := newTestPKI(t)
+	addr := startTestServer(t, pki)
+
+	c, err := New(context.Background(), Config{
+		ServerAddr: addr,
+		TLSConfig:  pki.clientTLSConfig(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	var checksum [32]byte
+	tr := sriracha.TokenRecord{
+		FieldSetVersion: "test-v1",
+		Mode:            sriracha.Deterministic,
+		Algo:            sriracha.AlgoHMACSHA256V1,
+		Payload:         []byte("payload"),
+		Checksum:        checksum,
+	}
+
+	req, err := NewQueryRequest(tr, "test-v1", []string{sriracha.FieldNameGiven.String()},
+		newTestPolicy(t, pki, "pol-client-query-1"), nil)
+	require.NoError(t, err)
+
+	resp, err := c.Query(context.Background(), req)
+	require.NoError(t, err)
+	assert.NotNil(t, resp)
+}
+
+func TestClientQueryEmptySessionID(t *testing.T) {
+	t.Parallel()
+
+	pki := newTestPKI(t)
+	addr := startTestServer(t, pki)
+
+	c, err := New(context.Background(), Config{
+		ServerAddr: addr,
+		TLSConfig:  pki.clientTLSConfig(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	trBytes, err := server.TokenRecordToProto(sriracha.TokenRecord{
+		FieldSetVersion: "test-v1",
+		Mode:            sriracha.Deterministic,
+		Algo:            sriracha.AlgoHMACSHA256V1,
+		Payload:         []byte("payload"),
+	})
+	require.NoError(t, err)
+
+	resp, err := c.Query(context.Background(), &srirachav1.QueryRequest{
+		SessionId:       "", // deliberately empty — client generates one
+		TokenRecord:     trBytes,
+		FieldsetVersion: "test-v1",
+		Policy:          newTestPolicy(t, pki, "pol-empty-session"),
+	})
+	require.NoError(t, err)
+	assert.NotNil(t, resp)
+}
+
+func TestClientBulkLink(t *testing.T) {
+	t.Parallel()
+
+	pki := newTestPKI(t)
+	addr := startTestServer(t, pki)
+
+	c, err := New(context.Background(), Config{
+		ServerAddr: addr,
+		TLSConfig:  pki.clientTLSConfig(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	stream, err := c.BulkLink(context.Background())
+	require.NoError(t, err)
+
+	var checksum [32]byte
+	tr := sriracha.TokenRecord{
+		FieldSetVersion: "test-v1",
+		Mode:            sriracha.Deterministic,
+		Algo:            sriracha.AlgoHMACSHA256V1,
+		Payload:         []byte("payload"),
+		Checksum:        checksum,
+	}
+	trBytes, err := server.TokenRecordToProto(tr)
+	require.NoError(t, err)
+
+	err = stream.Send(&srirachav1.BulkTokenBatch{
+		SessionId:    "bulk-client-1",
+		TokenRecords: [][]byte{trBytes},
+		RecordRefs:   []string{"ref-1"},
+		Policy:       newTestPolicy(t, pki, "pol-client-bulk-1"),
+	})
+	require.NoError(t, err)
+
+	result, err := stream.Recv()
+	require.NoError(t, err)
+	assert.Len(t, result.Entries, 1)
+	require.NoError(t, stream.CloseSend())
 }
