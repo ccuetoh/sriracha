@@ -368,14 +368,15 @@ func TestClientQueryEmptySessionID(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	// Empty SessionId is now rejected at the client level.
 	resp, err := c.Query(context.Background(), &srirachav1.QueryRequest{
-		SessionId:       "", // deliberately empty — client generates one
+		SessionId:       "",
 		TokenRecord:     trBytes,
 		FieldsetVersion: "test-v1",
 		Policy:          newTestPolicy(t, pki, "pol-empty-session"),
 	})
-	require.NoError(t, err)
-	assert.NotNil(t, resp)
+	assert.Error(t, err)
+	assert.Nil(t, resp)
 }
 
 func TestClientBulkLink(t *testing.T) {

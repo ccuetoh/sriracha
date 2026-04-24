@@ -15,12 +15,12 @@ import (
 // Validator validates ConsentPolicy messages per spec Section 11.1.
 type Validator struct {
 	ownInstitutionID string
-	cache            *replay.Cache
+	cache            replay.Cache
 }
 
 // NewValidator constructs a Validator for an institution that considers itself
 // ownInstitutionID and tracks policy IDs with cache for replay prevention.
-func NewValidator(ownInstitutionID string, cache *replay.Cache) *Validator {
+func NewValidator(ownInstitutionID string, cache replay.Cache) *Validator {
 	return &Validator{ownInstitutionID: ownInstitutionID, cache: cache}
 }
 

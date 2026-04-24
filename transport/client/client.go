@@ -78,10 +78,10 @@ func (c *Client) Capabilities() *srirachav1.CapabilitiesResponse {
 }
 
 // Query sends a single QueryRequest and returns the response.
-// If req.SessionId is empty, a random session ID is generated.
+// req.SessionId must be non-empty; use NewQueryRequest to construct a well-formed request.
 func (c *Client) Query(ctx context.Context, req *srirachav1.QueryRequest) (*srirachav1.QueryResponse, error) {
 	if req.SessionId == "" {
-		req.SessionId = newSessionID()
+		return nil, fmt.Errorf("client: req.SessionId must not be empty")
 	}
 	return c.stub.Query(ctx, req)
 }
@@ -107,7 +107,7 @@ func NewQueryRequest(
 		return nil, fmt.Errorf("client: serialise token record: %w", err)
 	}
 
-	mode, err := matchModeToProto(tr.Mode)
+	mode, err := server.MatchModeToProto(tr.Mode)
 	if err != nil {
 		return nil, err
 	}
@@ -121,17 +121,6 @@ func NewQueryRequest(
 		RequestedFields: requestedFields,
 		Policy:          policy,
 	}, nil
-}
-
-func matchModeToProto(m sriracha.MatchMode) (srirachav1.MatchMode, error) {
-	switch m {
-	case sriracha.Deterministic:
-		return srirachav1.MatchMode_DETERMINISTIC, nil
-	case sriracha.Probabilistic:
-		return srirachav1.MatchMode_PROBABILISTIC, nil
-	default:
-		return srirachav1.MatchMode_MATCH_MODE_UNSPECIFIED, fmt.Errorf("client: unknown MatchMode %d", m)
-	}
 }
 
 func newSessionID() string {

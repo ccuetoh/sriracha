@@ -24,7 +24,7 @@ func ProtoToTokenRecord(b []byte) (sriracha.TokenRecord, error) {
 		return sriracha.TokenRecord{}, sriracha.ErrChecksumMismatch()
 	}
 
-	mode, err := protoToMatchMode(pb.Mode)
+	mode, err := ProtoToMatchMode(pb.Mode)
 	if err != nil {
 		return sriracha.TokenRecord{}, err
 	}
@@ -43,7 +43,7 @@ func ProtoToTokenRecord(b []byte) (sriracha.TokenRecord, error) {
 
 // TokenRecordToProto serialises a sriracha.TokenRecord to bytes for use in QueryRequest.token_record.
 func TokenRecordToProto(tr sriracha.TokenRecord) ([]byte, error) {
-	mode, err := matchModeToProto(tr.Mode)
+	mode, err := MatchModeToProto(tr.Mode)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +59,8 @@ func TokenRecordToProto(tr sriracha.TokenRecord) ([]byte, error) {
 	return proto.Marshal(pb)
 }
 
-func protoToMatchMode(m srirachav1.MatchMode) (sriracha.MatchMode, error) {
+// ProtoToMatchMode converts a proto MatchMode to the sriracha equivalent.
+func ProtoToMatchMode(m srirachav1.MatchMode) (sriracha.MatchMode, error) {
 	switch m {
 	case srirachav1.MatchMode_DETERMINISTIC:
 		return sriracha.Deterministic, nil
@@ -70,7 +71,8 @@ func protoToMatchMode(m srirachav1.MatchMode) (sriracha.MatchMode, error) {
 	}
 }
 
-func matchModeToProto(m sriracha.MatchMode) (srirachav1.MatchMode, error) {
+// MatchModeToProto converts a sriracha MatchMode to its proto representation.
+func MatchModeToProto(m sriracha.MatchMode) (srirachav1.MatchMode, error) {
 	switch m {
 	case sriracha.Deterministic:
 		return srirachav1.MatchMode_DETERMINISTIC, nil

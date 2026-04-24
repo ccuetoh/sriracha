@@ -14,31 +14,32 @@ func TestClaim(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-
-	c := New(ctx)
 	future := time.Now().Add(time.Hour)
 
 	cases := []struct {
-		name     string
-		policyID string
-		want     bool
+		name string
+		fn   func(*testing.T, *MemoryCache)
 	}{
-		{"first use succeeds", "pol-1", true},
-		{"second use rejected", "pol-1", false},
-		{"different id succeeds", "pol-2", true},
+		{"first use succeeds", func(t *testing.T, c *MemoryCache) {
+			assert.True(t, c.Claim("pol", future))
+		}},
+		{"replay rejected", func(t *testing.T, c *MemoryCache) {
+			require.True(t, c.Claim("pol", future))
+			assert.False(t, c.Claim("pol", future))
+		}},
+		{"distinct id succeeds", func(t *testing.T, c *MemoryCache) {
+			require.True(t, c.Claim("pol-a", future))
+			assert.True(t, c.Claim("pol-b", future))
+		}},
 	}
 
 	for _, tc := range cases {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			// Each tc is independent of ordering — test the final state of pol-1 sequentially.
+			tc.fn(t, New(ctx))
 		})
-		_ = tc
 	}
-
-	require.True(t, c.Claim("pol-abc", future), "first claim should succeed")
-	assert.False(t, c.Claim("pol-abc", future), "replay should be rejected")
-	assert.True(t, c.Claim("pol-xyz", future), "distinct id should succeed")
 }
 
 func TestClaimAfterExpiry(t *testing.T) {

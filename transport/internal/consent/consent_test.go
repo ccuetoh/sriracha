@@ -15,7 +15,7 @@ import (
 	srirachav1 "go.sriracha.dev/transport/proto/srirachav1"
 )
 
-func newCache(t *testing.T) *replay.Cache {
+func newCache(t *testing.T) replay.Cache {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

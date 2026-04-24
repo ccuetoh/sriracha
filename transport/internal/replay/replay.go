@@ -6,36 +6,33 @@ import (
 	"time"
 )
 
-// Cache is a concurrency-safe replay-prevention store for ConsentPolicy IDs.
-// Once a policy ID is claimed it cannot be claimed again until it expires.
-type Cache struct {
-	mu      sync.Mutex
-	entries map[string]time.Time // policyID → expiresAt
+// Cache is the replay-prevention contract. Implementations must be safe for concurrent use.
+type Cache interface {
+	Claim(policyID string, expiresAt time.Time) bool
 }
 
-// New creates a Cache and starts a background pruning goroutine that exits
-// when ctx is cancelled. Callers must cancel ctx to avoid goroutine leaks.
-func New(ctx context.Context) *Cache {
-	c := &Cache{entries: make(map[string]time.Time)}
+// MemoryCache is an in-memory Cache backed by a sync.Map with a background
+// pruning goroutine. Create one with New.
+type MemoryCache struct {
+	entries sync.Map // map[string]time.Time
+}
+
+// New creates a MemoryCache and starts a background pruning goroutine that
+// exits when ctx is cancelled. Callers must cancel ctx to avoid goroutine leaks.
+func New(ctx context.Context) *MemoryCache {
+	c := &MemoryCache{}
 	go c.pruneLoop(ctx)
 	return c
 }
 
 // Claim attempts to reserve policyID until expiresAt.
 // Returns true on first use, false if already claimed (replay detected).
-func (c *Cache) Claim(policyID string, expiresAt time.Time) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if _, exists := c.entries[policyID]; exists {
-		return false
-	}
-
-	c.entries[policyID] = expiresAt
-	return true
+func (c *MemoryCache) Claim(policyID string, expiresAt time.Time) bool {
+	_, loaded := c.entries.LoadOrStore(policyID, expiresAt)
+	return !loaded
 }
 
-func (c *Cache) pruneLoop(ctx context.Context) {
+func (c *MemoryCache) pruneLoop(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 
@@ -49,14 +46,12 @@ func (c *Cache) pruneLoop(ctx context.Context) {
 	}
 }
 
-func (c *Cache) prune() {
+func (c *MemoryCache) prune() {
 	now := time.Now()
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	for id, exp := range c.entries {
-		if exp.Before(now) {
-			delete(c.entries, id)
+	c.entries.Range(func(key, value any) bool {
+		if value.(time.Time).Before(now) {
+			c.entries.Delete(key)
 		}
-	}
+		return true
+	})
 }

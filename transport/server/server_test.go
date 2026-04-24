@@ -18,7 +18,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 
 	mocksriracha "go.sriracha.dev/mock/sriracha"
 	"go.sriracha.dev/sriracha"
@@ -157,7 +159,7 @@ func testServerConfig() Config {
 
 type testEnv struct {
 	pki     *testPKI
-	cache   *replay.Cache
+	cache   replay.Cache
 	indexer *mocksriracha.MockTokenIndexer
 	source  *mocksriracha.MockRecordSource
 	audit   *mocksriracha.MockAuditLog
@@ -669,7 +671,7 @@ func TestNewServerValidation(t *testing.T) {
 		idx     sriracha.TokenIndexer
 		src     sriracha.RecordSource
 		tlsCfg  *tls.Config
-		cache   *replay.Cache
+		cache   replay.Cache
 		wantErr bool
 	}{
 		{
@@ -730,4 +732,25 @@ func TestNewServerValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestQueryUnsupportedFieldsetVersion(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	client := env.newClient(t)
+
+	tr := testTokenRecord(t)
+	trBytes, err := TokenRecordToProto(tr)
+	require.NoError(t, err)
+
+	_, err = client.Query(context.Background(), &srirachav1.QueryRequest{
+		SessionId:       "sess-bad-version",
+		TokenRecord:     trBytes,
+		FieldsetVersion: "unknown-v99",
+		Policy:          env.newPolicy(t),
+	})
+	require.Error(t, err)
+	s, _ := status.FromError(err)
+	assert.Equal(t, codes.InvalidArgument, s.Code())
 }
