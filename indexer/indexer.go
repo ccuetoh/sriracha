@@ -302,13 +302,13 @@ func scoreProbabilistic(queryBitsets []*bitset.BitSet, stored []byte, fs srirach
 		bsQ := queryBitsets[i]
 		bsS := filterFromBytes(stored[i*fieldBytes : (i+1)*fieldBytes])
 
-		popQ := int(bsQ.Count())
-		popS := int(bsS.Count())
+		popQ := int(bsQ.Count()) //nolint:gosec // G115: bloom cardinality never exceeds math.MaxInt
+		popS := int(bsS.Count()) //nolint:gosec // G115: bloom cardinality never exceeds math.MaxInt
 		if popQ == 0 && popS == 0 {
 			continue
 		}
 
-		popInter := int(bsQ.IntersectionCardinality(bsS))
+		popInter := int(bsQ.IntersectionCardinality(bsS)) //nolint:gosec // G115: bloom cardinality never exceeds math.MaxInt
 		dice := (2.0 * float64(popInter)) / float64(popQ+popS)
 
 		w := fieldWeightFor(i, spec, cfg)

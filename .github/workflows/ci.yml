@@ -20,11 +20,20 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install gotestsum
+        run: go install gotest.tools/gotestsum@v1.13.0
+
       - name: Test with coverage
-        run: go test -coverprofile=coverage.out ./...
+        run: gotestsum --junitfile test-results.xml -- -race -timeout 5m -coverprofile=coverage.out ./...
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
@@ -43,6 +52,75 @@ jobs:
         uses: golangci/golangci-lint-action@v8
         with:
           version: v2.4.0
+
+  proto:
+    name: Proto
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install buf
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo bufbuild/buf --pattern 'buf-Linux-x86_64' --dir /tmp/buf
+          sudo install /tmp/buf/buf-Linux-x86_64 /usr/local/bin/buf
+
+      - name: Fetch base branch
+        if: github.event_name == 'pull_request'
+        run: git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
+
+      - name: Check for breaking proto changes
+        if: github.event_name == 'pull_request'
+        run: buf breaking --against ".git#branch=${{ github.base_ref }}"
+
+  generated:
+    name: Generated files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install mockery
+        run: go install github.com/vektra/mockery/v2@v2.53.6
+
+      - name: Regenerate mocks
+        run: mockery
+
+      - name: Check for uncommitted changes
+        run: git diff --exit-code
+
+  test-matrix:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install gotestsum
+        run: go install gotest.tools/gotestsum@v1.13.0
+
+      - name: Test
+        run: gotestsum --junitfile test-results.xml -- -timeout 5m ./...
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   leakhound:
     name: leakhound
@@ -83,6 +161,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Raise memlock limit for memguard
+        run: sudo prlimit --pid $PPID --memlock=unlimited:unlimited
+
       - name: Fuzz
         run: |
           go test -fuzz=^FuzzParseFieldPath$     -fuzztime=30s go.sriracha.dev/sriracha
@@ -91,4 +172,6 @@ jobs:
           go test -fuzz=^FuzzNormalizeCountry$   -fuzztime=30s go.sriracha.dev/normalize
           go test -fuzz=^FuzzNgrams$             -fuzztime=30s go.sriracha.dev/token
           go test -fuzz=^FuzzTokenizeRecord$     -fuzztime=30s go.sriracha.dev/token
-          go test -fuzz=^FuzzTokenizeRecordBloom$ -fuzztime=30s go.sriracha.dev/token
+          go test -fuzz=^FuzzTokenizeRecordBloom$  -fuzztime=30s go.sriracha.dev/token
+          go test -fuzz=^FuzzProtoToTokenRecord$  -fuzztime=30s go.sriracha.dev/transport/server
+          go test -fuzz=^FuzzBuildFieldValues$    -fuzztime=30s go.sriracha.dev/transport/server

@@ -25,8 +25,8 @@ func filterFromBytes(data []byte) *bitset.BitSet {
 // dice computes the Sorensen-Dice coefficient of two BitSets.
 func dice(t *testing.T, a, b *bitset.BitSet) float64 {
 	t.Helper()
-	popInter := int(a.IntersectionCardinality(b))
-	total := int(a.Count()) + int(b.Count())
+	popInter := int(a.IntersectionCardinality(b)) //nolint:gosec // G115: bitset cardinality never exceeds math.MaxInt
+	total := int(a.Count()) + int(b.Count())      //nolint:gosec // G115: bitset cardinality never exceeds math.MaxInt
 	if total == 0 {
 		return 0
 	}
