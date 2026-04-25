@@ -19,9 +19,7 @@ func newCache(t *testing.T) replay.Cache {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	c, err := replay.New(ctx)
-	require.NoError(t, err)
-	return c
+	return replay.New(ctx)
 }
 
 func generateKeyPair(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {

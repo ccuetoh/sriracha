@@ -2,7 +2,6 @@ package replay
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -22,21 +21,15 @@ type MemoryCache struct {
 }
 
 // New creates a MemoryCache backed by an otter cache. The cache is closed when ctx is cancelled.
-func New(ctx context.Context) (*MemoryCache, error) {
-	b, err := otter.NewBuilder[string, struct{}](100_000)
-	if err != nil {
-		return nil, fmt.Errorf("replay: build cache: %w", err)
-	}
-	c, err := b.WithVariableTTL().Build()
-	if err != nil {
-		return nil, fmt.Errorf("replay: build cache: %w", err)
-	}
+func New(ctx context.Context) *MemoryCache {
+	//nolint:errcheck // Build only fails when capacity <= 0; MustBuilder guarantees capacity is valid.
+	c, _ := otter.MustBuilder[string, struct{}](100_000).WithVariableTTL().Build()
 	mc := &MemoryCache{cache: c}
 	go func() {
 		<-ctx.Done()
 		mc.cache.Close()
 	}()
-	return mc, nil
+	return mc
 }
 
 // Claim attempts to reserve policyID until expiresAt.

@@ -9,13 +9,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestClaimExpiredPolicy(t *testing.T) {
+	t.Parallel()
+	c := newTestCache(t)
+	// expiresAt in the past → ttl <= 0 → returns true without caching.
+	assert.True(t, c.Claim("pol-already-expired", time.Now().Add(-time.Second)))
+}
+
 func newTestCache(t *testing.T) *MemoryCache {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	c, err := New(ctx)
-	require.NoError(t, err)
-	return c
+	return New(ctx)
 }
 
 func TestClaim(t *testing.T) {

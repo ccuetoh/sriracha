@@ -2,7 +2,9 @@ package server_test
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
@@ -37,6 +39,8 @@ type testPKI struct {
 	clientCert tls.Certificate
 	clientPriv ed25519.PrivateKey
 	caPool     *x509.CertPool
+	caCert     *x509.Certificate
+	caPriv     ed25519.PrivateKey
 }
 
 func newTestPKI(t *testing.T) *testPKI {
@@ -97,6 +101,8 @@ func newTestPKI(t *testing.T) *testPKI {
 		clientCert: clientTLSCert,
 		clientPriv: clientPriv,
 		caPool:     caPool,
+		caCert:     caCert,
+		caPriv:     caPriv,
 	}
 }
 
@@ -106,6 +112,34 @@ func (p *testPKI) serverTLSConfig() *tls.Config {
 
 func (p *testPKI) clientTLSConfig() *tls.Config {
 	cfg := tlsconf.ClientTLS(p.clientCert, p.caPool)
+	cfg.ServerName = "127.0.0.1"
+	return cfg
+}
+
+func (p *testPKI) ecdsaClientTLSConfig(t *testing.T) *tls.Config {
+	t.Helper()
+	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(999),
+		Subject:      pkix.Name{CommonName: "org.example.ecdsa"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, p.caCert, &ecKey.PublicKey, p.caPriv)
+	require.NoError(t, err)
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyDER, err := x509.MarshalPKCS8PrivateKey(ecKey)
+	require.NoError(t, err)
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
+
+	tlsCert, err := tls.X509KeyPair(certPEM, keyPEM)
+	require.NoError(t, err)
+
+	cfg := tlsconf.ClientTLS(tlsCert, p.caPool)
 	cfg.ServerName = "127.0.0.1"
 	return cfg
 }
@@ -173,8 +207,7 @@ func newTestEnv(t *testing.T) *testEnv {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	cache, err := replay.New(ctx)
-	require.NoError(t, err)
+	cache := replay.New(ctx)
 
 	indexer := mocksriracha.NewMockTokenIndexer(t)
 	source := mocksriracha.NewMockRecordSource(t)
@@ -579,8 +612,7 @@ func TestNewServerNilAudit(t *testing.T) {
 	pki := newTestPKI(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	cache, err := replay.New(ctx)
-	require.NoError(t, err)
+	cache := replay.New(ctx)
 
 	indexer := mocksriracha.NewMockTokenIndexer(t)
 	source := mocksriracha.NewMockRecordSource(t)
@@ -689,8 +721,7 @@ func TestNewServerValidation(t *testing.T) {
 	pki := newTestPKI(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	cache, err := replay.New(ctx)
-	require.NoError(t, err)
+	cache := replay.New(ctx)
 	idx := mocksriracha.NewMockTokenIndexer(t)
 	src := mocksriracha.NewMockRecordSource(t)
 
@@ -790,8 +821,7 @@ func TestGetCapabilitiesInvalidMode(t *testing.T) {
 	pki := newTestPKI(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	cache, err := replay.New(ctx)
-	require.NoError(t, err)
+	cache := replay.New(ctx)
 
 	cfg := testServerConfig()
 	cfg.SupportedModes = []sriracha.MatchMode{sriracha.MatchMode(99)} // invalid — skipped in GetCapabilities
@@ -999,6 +1029,65 @@ func TestBulkLinkContextCancel(t *testing.T) {
 
 	// Cancel immediately — server's stream.Recv() returns a non-EOF error.
 	cancel()
+
+	_, err = stream.Recv()
+	assert.Error(t, err)
+}
+
+// TestQueryECDSAClient covers peerIdentity rejecting a non-Ed25519 cert (server.go:337-339)
+// and the Query handler returning the peerIdentity error (server.go:156-158).
+func TestQueryECDSAClient(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	ecdsaTLS := env.pki.ecdsaClientTLSConfig(t)
+
+	conn, err := grpc.NewClient(env.addr,
+		grpc.WithTransportCredentials(credentials.NewTLS(ecdsaTLS)),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	stub := srirachav1.NewSrirachaServiceClient(conn)
+
+	trBytes, err := TokenRecordToProto(testTokenRecord(t))
+	require.NoError(t, err)
+
+	_, err = stub.Query(context.Background(), &srirachav1.QueryRequest{
+		SessionId:       "sess-ecdsa",
+		TokenRecord:     trBytes,
+		FieldsetVersion: "test-v1",
+		Policy:          env.newPolicy(t),
+	})
+	assert.Error(t, err)
+}
+
+// TestBulkLinkECDSAClient covers the BulkLink handler returning the peerIdentity error (server.go:233-235).
+func TestBulkLinkECDSAClient(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	ecdsaTLS := env.pki.ecdsaClientTLSConfig(t)
+
+	conn, err := grpc.NewClient(env.addr,
+		grpc.WithTransportCredentials(credentials.NewTLS(ecdsaTLS)),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	stub := srirachav1.NewSrirachaServiceClient(conn)
+
+	trBytes, err := TokenRecordToProto(testTokenRecord(t))
+	require.NoError(t, err)
+
+	stream, err := stub.BulkLink(context.Background())
+	require.NoError(t, err)
+
+	err = stream.Send(&srirachav1.BulkTokenBatch{
+		SessionId:    "bulk-ecdsa",
+		TokenRecords: [][]byte{trBytes},
+		RecordRefs:   []string{"ref-ecdsa"},
+		Policy:       env.newPolicy(t),
+	})
+	require.NoError(t, err)
 
 	_, err = stream.Recv()
 	assert.Error(t, err)

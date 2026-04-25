@@ -109,8 +109,7 @@ func startTestServer(t *testing.T, pki *testPKI) string {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	cache, err := replay.New(ctx)
-	require.NoError(t, err)
+	cache := replay.New(ctx)
 
 	indexer := mocksriracha.NewMockTokenIndexer(t)
 	source := mocksriracha.NewMockRecordSource(t)
