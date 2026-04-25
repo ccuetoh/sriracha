@@ -21,7 +21,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Test with coverage
-        run: go test -race -coverprofile=coverage.out ./...
+        run: go test -race -timeout 5m -coverprofile=coverage.out ./...
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5
@@ -83,6 +83,25 @@ jobs:
       - name: Check for uncommitted changes
         run: git diff --exit-code
 
+  build:
+    name: Build (${{ matrix.goos }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+    env:
+      GOOS: ${{ matrix.goos }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: go build ./...
+
   leakhound:
     name: leakhound
     runs-on: ubuntu-latest
@@ -130,4 +149,6 @@ jobs:
           go test -fuzz=^FuzzNormalizeCountry$   -fuzztime=30s go.sriracha.dev/normalize
           go test -fuzz=^FuzzNgrams$             -fuzztime=30s go.sriracha.dev/token
           go test -fuzz=^FuzzTokenizeRecord$     -fuzztime=30s go.sriracha.dev/token
-          go test -fuzz=^FuzzTokenizeRecordBloom$ -fuzztime=30s go.sriracha.dev/token
+          go test -fuzz=^FuzzTokenizeRecordBloom$  -fuzztime=30s go.sriracha.dev/token
+          go test -fuzz=^FuzzProtoToTokenRecord$  -fuzztime=30s go.sriracha.dev/transport/server
+          go test -fuzz=^FuzzBuildFieldValues$    -fuzztime=30s go.sriracha.dev/transport/server
