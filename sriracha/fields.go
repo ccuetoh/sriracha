@@ -54,6 +54,15 @@ func MustParsePath(s string) FieldPath {
 	return fp
 }
 
+// Canonical namespace identifiers.
+const (
+	NamespaceName       = "name"
+	NamespaceIdentifier = "identifier"
+	NamespaceDate       = "date"
+	NamespaceAddress    = "address"
+	NamespaceContact    = "contact"
+)
+
 // Canonical field path variables.
 var (
 	FieldIdentifierNationalID = MustParsePath("sriracha::identifier::national_id")

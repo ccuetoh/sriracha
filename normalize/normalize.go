@@ -34,10 +34,14 @@ func Normalize(value string, path sriracha.FieldPath) (string, error) {
 
 	// Step 5: Field-specific normalization
 	switch {
-	case path.InNamespace("date"):
+	case path.InNamespace(sriracha.NamespaceDate):
 		return normalizeDate(value)
-	case path.InNamespace("identifier"):
-		return normalizeIdentifier(value), nil
+	case path.InNamespace(sriracha.NamespaceIdentifier):
+		// Re-apply NFKD after stripping: removing separators (e.g. a space
+		// produced by NFKD decomposition of U+00B8 CEDILLA) can leave adjacent
+		// combining marks in non-canonical combining-class order, which NFKD
+		// would reorder on the next call and break idempotency.
+		return nfkdDecompose(normalizeIdentifier(value)), nil
 	// Country is the only address field with special normalization;
 	// other address fields fall through to default (steps 1-4 only).
 	case path.String() == sriracha.FieldAddressCountry.String():

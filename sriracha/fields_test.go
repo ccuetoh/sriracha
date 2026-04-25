@@ -60,8 +60,8 @@ func TestFieldPathComponents(t *testing.T) {
 func TestFieldPathInNamespace(t *testing.T) {
 	t.Parallel()
 
-	assert.True(t, FieldNameGiven.InNamespace("name"), "FieldNameGiven should be in namespace 'name'")
-	assert.False(t, FieldNameGiven.InNamespace("date"), "FieldNameGiven should not be in namespace 'date'")
+	assert.True(t, FieldNameGiven.InNamespace(NamespaceName), "FieldNameGiven should be in namespace 'name'")
+	assert.False(t, FieldNameGiven.InNamespace(NamespaceDate), "FieldNameGiven should not be in namespace 'date'")
 }
 
 func TestMustParsePath_Panics(t *testing.T) {
