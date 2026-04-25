@@ -107,9 +107,13 @@ func NewQueryRequest(
 		return nil, fmt.Errorf("client: serialise token record: %w", err)
 	}
 
-	mode, err := server.MatchModeToProto(tr.Mode)
-	if err != nil {
-		return nil, err
+	// Mode already validated by TokenRecordToProto; map to proto directly.
+	var mode srirachav1.MatchMode
+	switch tr.Mode {
+	case sriracha.Deterministic:
+		mode = srirachav1.MatchMode_DETERMINISTIC
+	case sriracha.Probabilistic:
+		mode = srirachav1.MatchMode_PROBABILISTIC
 	}
 
 	return &srirachav1.QueryRequest{

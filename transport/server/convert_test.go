@@ -65,3 +65,43 @@ func TestProtoToTokenRecordProbabilistic(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, sriracha.Probabilistic, got.Mode)
 }
+
+func TestProtoToTokenRecordUnknownMode(t *testing.T) {
+	t.Parallel()
+
+	// Valid proto bytes but unknown mode — ProtoToMatchMode fails inside ProtoToTokenRecord.
+	checksum := make([]byte, 32)
+	pb := &srirachav1.TokenRecord{
+		FieldsetVersion: "test-v1",
+		Mode:            srirachav1.MatchMode(999),
+		Algo:            sriracha.AlgoHMACSHA256V1,
+		Payload:         []byte("payload"),
+		Checksum:        checksum,
+	}
+	b, err := proto.Marshal(pb)
+	require.NoError(t, err)
+
+	_, err = ProtoToTokenRecord(b)
+	assert.Error(t, err)
+}
+
+func TestProtoToMatchModeUnknown(t *testing.T) {
+	t.Parallel()
+
+	_, err := ProtoToMatchMode(srirachav1.MatchMode(999))
+	assert.Error(t, err)
+}
+
+func TestMatchModeToProtoUnknown(t *testing.T) {
+	t.Parallel()
+
+	_, err := MatchModeToProto(sriracha.MatchMode(99))
+	assert.Error(t, err)
+}
+
+func TestTokenRecordToProtoInvalidMode(t *testing.T) {
+	t.Parallel()
+
+	_, err := TokenRecordToProto(sriracha.TokenRecord{Mode: sriracha.MatchMode(99)})
+	assert.Error(t, err)
+}

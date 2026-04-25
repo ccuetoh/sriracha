@@ -145,3 +145,30 @@ func TestLoadServerTLSInvalidCert(t *testing.T) {
 	_, err := LoadServerTLS([]byte("not a cert"), []byte("not a key"), nil)
 	assert.Error(t, err)
 }
+
+func TestLoadClientTLSError(t *testing.T) {
+	t.Parallel()
+
+	_, err := LoadClientTLS([]byte("not a cert"), []byte("not a key"), nil)
+	assert.Error(t, err)
+}
+
+func TestLoadClientTLSGarbageCA(t *testing.T) {
+	t.Parallel()
+
+	certPEM, keyPEM, _ := generateEd25519Cert(t)
+	// Garbage caPEM causes pem.Decode to return nil immediately — benign, pool is empty.
+	cfg, err := LoadClientTLS(certPEM, keyPEM, []byte("not-a-pem"))
+	require.NoError(t, err)
+	assert.NotNil(t, cfg)
+}
+
+func TestLoadClientTLSInvalidCACert(t *testing.T) {
+	t.Parallel()
+
+	certPEM, keyPEM, _ := generateEd25519Cert(t)
+	// Valid PEM envelope but non-DER bytes inside — x509.ParseCertificate fails.
+	garbage := "-----BEGIN CERTIFICATE-----\nbm90LXZhbGlkLWRlcg==\n-----END CERTIFICATE-----\n"
+	_, err := LoadClientTLS(certPEM, keyPEM, []byte(garbage))
+	assert.Error(t, err)
+}

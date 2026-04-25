@@ -68,3 +68,19 @@ func TestPruneLoopExitsOnContextCancel(t *testing.T) {
 	// Cancel immediately; the goroutine must exit before the test ends.
 	cancel()
 }
+
+func TestPruneLoopTicker(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	c := NewWithInterval(ctx, time.Millisecond)
+
+	past := time.Now().Add(-time.Second)
+	require.True(t, c.Claim("pol-tick", past))
+
+	// Wait for the ticker to fire and prune the expired entry.
+	require.Eventually(t, func() bool {
+		return c.Claim("pol-tick", time.Now().Add(time.Hour))
+	}, 200*time.Millisecond, time.Millisecond)
+}

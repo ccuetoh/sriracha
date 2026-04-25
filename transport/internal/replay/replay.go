@@ -20,8 +20,13 @@ type MemoryCache struct {
 // New creates a MemoryCache and starts a background pruning goroutine that
 // exits when ctx is cancelled. Callers must cancel ctx to avoid goroutine leaks.
 func New(ctx context.Context) *MemoryCache {
+	return NewWithInterval(ctx, time.Minute)
+}
+
+// NewWithInterval is like New but uses a custom prune interval. Useful for tests.
+func NewWithInterval(ctx context.Context, interval time.Duration) *MemoryCache {
 	c := &MemoryCache{}
-	go c.pruneLoop(ctx)
+	go c.pruneLoop(ctx, interval)
 	return c
 }
 
@@ -32,8 +37,8 @@ func (c *MemoryCache) Claim(policyID string, expiresAt time.Time) bool {
 	return !loaded
 }
 
-func (c *MemoryCache) pruneLoop(ctx context.Context) {
-	ticker := time.NewTicker(time.Minute)
+func (c *MemoryCache) pruneLoop(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {

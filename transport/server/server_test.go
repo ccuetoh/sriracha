@@ -352,6 +352,27 @@ func TestQueryMissingPolicy(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestQueryInvalidPolicy(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	client := env.newClient(t)
+
+	trBytes, err := TokenRecordToProto(testTokenRecord(t))
+	require.NoError(t, err)
+
+	p := env.newPolicy(t)
+	p.Signature = []byte("wrong-signature")
+
+	_, err = client.Query(context.Background(), &srirachav1.QueryRequest{
+		SessionId:       "sess-invalid-policy",
+		TokenRecord:     trBytes,
+		FieldsetVersion: "test-v1",
+		Policy:          p,
+	})
+	assert.Error(t, err)
+}
+
 func TestQueryNotHeld(t *testing.T) {
 	t.Parallel()
 
@@ -753,4 +774,223 @@ func TestQueryUnsupportedFieldsetVersion(t *testing.T) {
 	require.Error(t, err)
 	s, _ := status.FromError(err)
 	assert.Equal(t, codes.InvalidArgument, s.Code())
+}
+
+func TestGetCapabilitiesInvalidMode(t *testing.T) {
+	t.Parallel()
+
+	pki := newTestPKI(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	cache := replay.New(ctx)
+
+	cfg := testServerConfig()
+	cfg.SupportedModes = []sriracha.MatchMode{sriracha.MatchMode(99)} // invalid — skipped in GetCapabilities
+
+	srv, err := New(cfg, mocksriracha.NewMockTokenIndexer(t), mocksriracha.NewMockRecordSource(t),
+		pki.serverTLSConfig(), cache, nil)
+	require.NoError(t, err)
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.GracefulStop)
+
+	conn, err := grpc.NewClient(lis.Addr().String(),
+		grpc.WithTransportCredentials(credentials.NewTLS(pki.clientTLSConfig())),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	stub := srirachav1.NewSrirachaServiceClient(conn)
+
+	resp, err := stub.GetCapabilities(context.Background(), &srirachav1.CapabilitiesRequest{})
+	require.NoError(t, err)
+	assert.Empty(t, resp.MatchModes)
+}
+
+func TestQueryFetchError(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	client := env.newClient(t)
+
+	trBytes, err := TokenRecordToProto(testTokenRecord(t))
+	require.NoError(t, err)
+
+	env.indexer.EXPECT().
+		Match(mock.Anything, mock.Anything, mock.Anything).
+		Return([]sriracha.Candidate{{RecordID: "rec-fetch-err", Confidence: 1.0}}, nil)
+	env.source.EXPECT().
+		Fetch(mock.Anything, "rec-fetch-err").
+		Return(nil, sriracha.ErrRecordNotFound("rec-fetch-err"))
+
+	_, err = client.Query(context.Background(), &srirachav1.QueryRequest{
+		SessionId:       "sess-fetch-err",
+		TokenRecord:     trBytes,
+		FieldsetVersion: "test-v1",
+		Policy:          env.newPolicy(t),
+	})
+	assert.Error(t, err)
+}
+
+func TestBulkLinkNoMatch(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	client := env.newClient(t)
+
+	trBytes, err := TokenRecordToProto(testTokenRecord(t))
+	require.NoError(t, err)
+
+	env.indexer.EXPECT().
+		Match(mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, nil)
+
+	stream, err := client.BulkLink(context.Background())
+	require.NoError(t, err)
+
+	err = stream.Send(&srirachav1.BulkTokenBatch{
+		SessionId:    "bulk-no-match",
+		TokenRecords: [][]byte{trBytes},
+		RecordRefs:   []string{"ref-nm"},
+		Policy:       env.newPolicy(t),
+	})
+	require.NoError(t, err)
+
+	result, err := stream.Recv()
+	require.NoError(t, err)
+	require.Len(t, result.Entries, 1)
+	assert.Equal(t, srirachav1.MatchStatus_NO_MATCH, result.Entries[0].Status)
+	require.NoError(t, stream.CloseSend())
+}
+
+func TestBulkLinkMultipleCandidates(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	client := env.newClient(t)
+
+	trBytes, err := TokenRecordToProto(testTokenRecord(t))
+	require.NoError(t, err)
+
+	env.indexer.EXPECT().
+		Match(mock.Anything, mock.Anything, mock.Anything).
+		Return([]sriracha.Candidate{
+			{RecordID: "rec-1", Confidence: 0.95},
+			{RecordID: "rec-2", Confidence: 0.945}, // gap < 0.01 → MULTIPLE_CANDIDATES
+		}, nil)
+
+	stream, err := client.BulkLink(context.Background())
+	require.NoError(t, err)
+
+	err = stream.Send(&srirachav1.BulkTokenBatch{
+		SessionId:    "bulk-multi",
+		TokenRecords: [][]byte{trBytes},
+		RecordRefs:   []string{"ref-mc"},
+		Policy:       env.newPolicy(t),
+	})
+	require.NoError(t, err)
+
+	result, err := stream.Recv()
+	require.NoError(t, err)
+	require.Len(t, result.Entries, 1)
+	assert.Equal(t, srirachav1.MatchStatus_MULTIPLE_CANDIDATES, result.Entries[0].Status)
+	assert.InDelta(t, 0.95, float64(result.Entries[0].Confidence), 0.001)
+	require.NoError(t, stream.CloseSend())
+}
+
+func TestBulkLinkMalformedToken(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	client := env.newClient(t)
+
+	stream, err := client.BulkLink(context.Background())
+	require.NoError(t, err)
+
+	err = stream.Send(&srirachav1.BulkTokenBatch{
+		SessionId:    "bulk-bad-token",
+		TokenRecords: [][]byte{{0xFF, 0xFE}}, // invalid proto bytes → NO_MATCH entry
+		RecordRefs:   []string{"ref-bad"},
+		Policy:       env.newPolicy(t),
+	})
+	require.NoError(t, err)
+
+	result, err := stream.Recv()
+	require.NoError(t, err)
+	require.Len(t, result.Entries, 1)
+	assert.Equal(t, srirachav1.MatchStatus_NO_MATCH, result.Entries[0].Status)
+	require.NoError(t, stream.CloseSend())
+}
+
+func TestBulkLinkIndexerError(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	client := env.newClient(t)
+
+	trBytes, err := TokenRecordToProto(testTokenRecord(t))
+	require.NoError(t, err)
+
+	env.indexer.EXPECT().
+		Match(mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, sriracha.ErrIndexCorrupted("simulated index failure"))
+
+	stream, err := client.BulkLink(context.Background())
+	require.NoError(t, err)
+
+	err = stream.Send(&srirachav1.BulkTokenBatch{
+		SessionId:    "bulk-idx-err",
+		TokenRecords: [][]byte{trBytes},
+		RecordRefs:   []string{"ref-ie"},
+		Policy:       env.newPolicy(t),
+	})
+	require.NoError(t, err)
+
+	_, err = stream.Recv()
+	assert.Error(t, err)
+}
+
+func TestBulkLinkInvalidPolicy(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	client := env.newClient(t)
+
+	trBytes, err := TokenRecordToProto(testTokenRecord(t))
+	require.NoError(t, err)
+
+	p := env.newPolicy(t)
+	p.Signature = []byte("wrong-signature")
+
+	stream, err := client.BulkLink(context.Background())
+	require.NoError(t, err)
+
+	err = stream.Send(&srirachav1.BulkTokenBatch{
+		SessionId:    "bulk-bad-policy",
+		TokenRecords: [][]byte{trBytes},
+		RecordRefs:   []string{"ref-bp"},
+		Policy:       p,
+	})
+	require.NoError(t, err)
+
+	_, err = stream.Recv()
+	assert.Error(t, err)
+}
+
+func TestBulkLinkContextCancel(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	client := env.newClient(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stream, err := client.BulkLink(ctx)
+	require.NoError(t, err)
+
+	// Cancel immediately — server's stream.Recv() returns a non-EOF error.
+	cancel()
+
+	_, err = stream.Recv()
+	assert.Error(t, err)
 }

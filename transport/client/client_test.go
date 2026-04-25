@@ -419,3 +419,15 @@ func TestClientBulkLink(t *testing.T) {
 	assert.Len(t, result.Entries, 1)
 	require.NoError(t, stream.CloseSend())
 }
+
+func TestNewClientInvalidTarget(t *testing.T) {
+	t.Parallel()
+
+	pki := newTestPKI(t)
+	// A null byte in the target makes grpc.NewClient fail during URI parsing.
+	_, err := New(context.Background(), Config{
+		ServerAddr: "\x00",
+		TLSConfig:  pki.clientTLSConfig(),
+	})
+	assert.Error(t, err)
+}
