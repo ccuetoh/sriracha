@@ -61,13 +61,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: bufbuild/buf-action@v1
-        with:
-          setup_only: true
+      - name: Install buf
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo bufbuild/buf --pattern 'buf-Linux-x86_64' --dir /tmp/buf
+          sudo install /tmp/buf/buf-Linux-x86_64 /usr/local/bin/buf
 
       - name: Fetch base branch
         if: github.event_name == 'pull_request'
-        run: git fetch origin ${{ github.base_ref }}
+        run: git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
 
       - name: Check for breaking proto changes
         if: github.event_name == 'pull_request'
