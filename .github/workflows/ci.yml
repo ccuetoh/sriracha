@@ -62,6 +62,7 @@ jobs:
       - uses: bufbuild/buf-action@v1
         with:
           push: false
+          format: false
           breaking_against: ${{ github.event_name == 'pull_request' && format('https://github.com/{0}.git#branch={1}', github.repository, github.base_ref) || '' }}
 
   generated:
@@ -156,6 +157,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+
+      - name: Raise memlock limit for memguard
+        run: sudo prlimit --pid $PPID --memlock=unlimited:unlimited
 
       - name: Fuzz
         run: |
