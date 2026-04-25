@@ -6,7 +6,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"go.sriracha.dev/sriracha"
-	srirachav1 "go.sriracha.dev/transport/proto/srirachav1"
+	srirachav1 "go.sriracha.dev/transport/proto/sriracha/v1"
 )
 
 // ProtoToTokenRecord deserialises QueryRequest.token_record bytes into a sriracha.TokenRecord.
@@ -62,9 +62,9 @@ func TokenRecordToProto(tr sriracha.TokenRecord) ([]byte, error) {
 // ProtoToMatchMode converts a proto MatchMode to the sriracha equivalent.
 func ProtoToMatchMode(m srirachav1.MatchMode) (sriracha.MatchMode, error) {
 	switch m {
-	case srirachav1.MatchMode_DETERMINISTIC:
+	case srirachav1.MatchMode_MATCH_MODE_DETERMINISTIC:
 		return sriracha.Deterministic, nil
-	case srirachav1.MatchMode_PROBABILISTIC:
+	case srirachav1.MatchMode_MATCH_MODE_PROBABILISTIC:
 		return sriracha.Probabilistic, nil
 	default:
 		return 0, fmt.Errorf("transport: unknown MatchMode %d", m)
@@ -75,9 +75,9 @@ func ProtoToMatchMode(m srirachav1.MatchMode) (sriracha.MatchMode, error) {
 func MatchModeToProto(m sriracha.MatchMode) (srirachav1.MatchMode, error) {
 	switch m {
 	case sriracha.Deterministic:
-		return srirachav1.MatchMode_DETERMINISTIC, nil
+		return srirachav1.MatchMode_MATCH_MODE_DETERMINISTIC, nil
 	case sriracha.Probabilistic:
-		return srirachav1.MatchMode_PROBABILISTIC, nil
+		return srirachav1.MatchMode_MATCH_MODE_PROBABILISTIC, nil
 	default:
 		return srirachav1.MatchMode_MATCH_MODE_UNSPECIFIED, fmt.Errorf("transport: unknown MatchMode %d", m)
 	}
@@ -109,13 +109,13 @@ func protoToMatchConfig(mc *srirachav1.MatchConfig) sriracha.MatchConfig {
 // candidatesToStatus maps a candidate list to the appropriate MatchStatus.
 func candidatesToStatus(candidates []sriracha.Candidate) srirachav1.MatchStatus {
 	if len(candidates) == 0 {
-		return srirachav1.MatchStatus_NO_MATCH
+		return srirachav1.MatchStatus_MATCH_STATUS_NO_MATCH
 	}
 	if candidates[0].Confidence == 1.0 {
-		return srirachav1.MatchStatus_MATCHED
+		return srirachav1.MatchStatus_MATCH_STATUS_MATCHED
 	}
 	if len(candidates) > 1 && (candidates[0].Confidence-candidates[1].Confidence) < 0.01 {
-		return srirachav1.MatchStatus_MULTIPLE_CANDIDATES
+		return srirachav1.MatchStatus_MATCH_STATUS_MULTIPLE_CANDIDATES
 	}
-	return srirachav1.MatchStatus_MATCHED
+	return srirachav1.MatchStatus_MATCH_STATUS_MATCHED
 }

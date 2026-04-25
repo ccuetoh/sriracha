@@ -2,7 +2,7 @@ package server
 
 import (
 	"go.sriracha.dev/sriracha"
-	srirachav1 "go.sriracha.dev/transport/proto/srirachav1"
+	srirachav1 "go.sriracha.dev/transport/proto/sriracha/v1"
 )
 
 // partitionFields separates requestedFields into held (server supports) and notHeld.

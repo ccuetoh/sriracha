@@ -2,13 +2,13 @@ syntax = "proto3";
 
 package sriracha.v1;
 
-option go_package = "go.sriracha.dev/transport/proto/srirachav1;srirachav1";
+option go_package = "go.sriracha.dev/transport/proto/sriracha/v1;srirachav1";
 
 // ── Capabilities ─────────────────────────────────────────────────
 
-message CapabilitiesRequest {}
+message GetCapabilitiesRequest {}
 
-message CapabilitiesResponse {
+message GetCapabilitiesResponse {
   string spec_version = 1;
   repeated string fieldset_versions = 2;
   repeated string supported_fields = 3;
@@ -49,22 +49,22 @@ message FieldValue {
 
 enum MatchStatus {
   MATCH_STATUS_UNSPECIFIED = 0;
-  MATCHED = 1;
-  NO_MATCH = 2;
-  BELOW_THRESHOLD = 3;
-  MULTIPLE_CANDIDATES = 4;
+  MATCH_STATUS_MATCHED = 1;
+  MATCH_STATUS_NO_MATCH = 2;
+  MATCH_STATUS_BELOW_THRESHOLD = 3;
+  MATCH_STATUS_MULTIPLE_CANDIDATES = 4;
 }
 
 // ── Bulk Linkage ──────────────────────────────────────────────────
 
-message BulkTokenBatch {
+message BulkLinkRequest {
   string session_id = 1;
   repeated bytes token_records = 2;
   repeated string record_refs = 3;
   ConsentPolicy policy = 4;
 }
 
-message BulkMatchResult {
+message BulkLinkResponse {
   string session_id = 1;
   repeated MatchResultEntry entries = 2;
 }
@@ -82,8 +82,8 @@ message MatchResultEntry {
 
 enum MatchMode {
   MATCH_MODE_UNSPECIFIED = 0;
-  DETERMINISTIC = 1;
-  PROBABILISTIC = 2;
+  MATCH_MODE_DETERMINISTIC = 1;
+  MATCH_MODE_PROBABILISTIC = 2;
 }
 
 message MatchConfig {
@@ -120,7 +120,7 @@ message TokenRecord {
 // ── Service ───────────────────────────────────────────────────────
 
 service SrirachaService {
-  rpc GetCapabilities(CapabilitiesRequest) returns (CapabilitiesResponse);
+  rpc GetCapabilities(GetCapabilitiesRequest) returns (GetCapabilitiesResponse);
   rpc Query(QueryRequest) returns (QueryResponse);
-  rpc BulkLink(stream BulkTokenBatch) returns (stream BulkMatchResult);
+  rpc BulkLink(stream BulkLinkRequest) returns (stream BulkLinkResponse);
 }

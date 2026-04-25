@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.sriracha.dev/transport/internal/replay"
-	srirachav1 "go.sriracha.dev/transport/proto/srirachav1"
+	srirachav1 "go.sriracha.dev/transport/proto/sriracha/v1"
 )
 
 func newCache(t testing.TB) replay.Cache {

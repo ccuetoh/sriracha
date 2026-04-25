@@ -68,6 +68,9 @@ jobs:
           gh release download --repo bufbuild/buf --pattern 'buf-Linux-x86_64' --dir /tmp/buf
           sudo install /tmp/buf/buf-Linux-x86_64 /usr/local/bin/buf
 
+      - name: Lint proto
+        run: buf lint
+
       - name: Fetch base branch
         if: github.event_name == 'pull_request'
         run: git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
@@ -88,7 +91,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Install mockery
-        run: go install github.com/vektra/mockery/v2@v2.53.6
+        run: go install github.com/vektra/mockery/v3@v3.7.0
 
       - name: Regenerate mocks
         run: mockery

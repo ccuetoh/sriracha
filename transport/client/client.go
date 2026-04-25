@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 
 	"go.sriracha.dev/sriracha"
-	srirachav1 "go.sriracha.dev/transport/proto/srirachav1"
+	srirachav1 "go.sriracha.dev/transport/proto/sriracha/v1"
 	"go.sriracha.dev/transport/server"
 )
 
@@ -30,7 +30,7 @@ type Client interface {
 	// Close releases the underlying gRPC connection.
 	Close() error
 	// Capabilities returns the cached server capabilities from the initial handshake.
-	Capabilities() *srirachav1.CapabilitiesResponse
+	Capabilities() *srirachav1.GetCapabilitiesResponse
 	// Query sends a single QueryRequest and returns the response.
 	// req.SessionId must be non-empty; use NewQueryRequest to construct a well-formed request.
 	Query(ctx context.Context, req *srirachav1.QueryRequest) (*srirachav1.QueryResponse, error)
@@ -41,7 +41,7 @@ type Client interface {
 type client struct {
 	conn         *grpc.ClientConn
 	stub         srirachav1.SrirachaServiceClient
-	capabilities *srirachav1.CapabilitiesResponse
+	capabilities *srirachav1.GetCapabilitiesResponse
 }
 
 // New dials the remote Sriracha server, performs the mandatory GetCapabilities
@@ -69,7 +69,7 @@ func New(ctx context.Context, cfg Config) (Client, error) {
 
 	stub := srirachav1.NewSrirachaServiceClient(conn)
 
-	caps, err := stub.GetCapabilities(ctx, &srirachav1.CapabilitiesRequest{})
+	caps, err := stub.GetCapabilities(ctx, &srirachav1.GetCapabilitiesRequest{})
 	if err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("client: capabilities handshake: %w", err)
@@ -82,7 +82,7 @@ func (c *client) Close() error {
 	return c.conn.Close()
 }
 
-func (c *client) Capabilities() *srirachav1.CapabilitiesResponse {
+func (c *client) Capabilities() *srirachav1.GetCapabilitiesResponse {
 	return c.capabilities
 }
 
@@ -120,9 +120,9 @@ func NewQueryRequest(
 	var mode srirachav1.MatchMode
 	switch tr.Mode {
 	case sriracha.Deterministic:
-		mode = srirachav1.MatchMode_DETERMINISTIC
+		mode = srirachav1.MatchMode_MATCH_MODE_DETERMINISTIC
 	case sriracha.Probabilistic:
-		mode = srirachav1.MatchMode_PROBABILISTIC
+		mode = srirachav1.MatchMode_MATCH_MODE_PROBABILISTIC
 	}
 
 	return &srirachav1.QueryRequest{

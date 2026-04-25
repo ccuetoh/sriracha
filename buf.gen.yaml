@@ -1,8 +1,8 @@
 version: v2
 plugins:
   - remote: buf.build/protocolbuffers/go:v1.36.11
-    out: transport/proto/srirachav1
+    out: transport/proto
     opt: paths=source_relative
   - remote: buf.build/grpc/go:v1.6.1
-    out: transport/proto/srirachav1
+    out: transport/proto
     opt: paths=source_relative

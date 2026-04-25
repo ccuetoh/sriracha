@@ -24,7 +24,7 @@ import (
 	. "go.sriracha.dev/transport/client"
 	"go.sriracha.dev/transport/internal/replay"
 	"go.sriracha.dev/transport/internal/tlsconf"
-	srirachav1 "go.sriracha.dev/transport/proto/srirachav1"
+	srirachav1 "go.sriracha.dev/transport/proto/sriracha/v1"
 	"go.sriracha.dev/transport/server"
 )
 
@@ -247,7 +247,7 @@ func TestNewQueryRequest(t *testing.T) {
 	assert.NotEmpty(t, req.SessionId)
 	assert.NotEmpty(t, req.TokenRecord)
 	assert.Equal(t, "test-v1", req.FieldsetVersion)
-	assert.Equal(t, srirachav1.MatchMode_DETERMINISTIC, req.MatchMode)
+	assert.Equal(t, srirachav1.MatchMode_MATCH_MODE_DETERMINISTIC, req.MatchMode)
 }
 
 func TestNewQueryRequestProbabilistic(t *testing.T) {
@@ -264,7 +264,7 @@ func TestNewQueryRequestProbabilistic(t *testing.T) {
 
 	req, err := NewQueryRequest(tr, "test-v1", nil, nil, nil)
 	require.NoError(t, err)
-	assert.Equal(t, srirachav1.MatchMode_PROBABILISTIC, req.MatchMode)
+	assert.Equal(t, srirachav1.MatchMode_MATCH_MODE_PROBABILISTIC, req.MatchMode)
 }
 
 func TestNewQueryRequestInvalidMode(t *testing.T) {
@@ -406,7 +406,7 @@ func TestClientBulkLink(t *testing.T) {
 	trBytes, err := server.TokenRecordToProto(tr)
 	require.NoError(t, err)
 
-	err = stream.Send(&srirachav1.BulkTokenBatch{
+	err = stream.Send(&srirachav1.BulkLinkRequest{
 		SessionId:    "bulk-client-1",
 		TokenRecords: [][]byte{trBytes},
 		RecordRefs:   []string{"ref-1"},

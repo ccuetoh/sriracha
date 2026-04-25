@@ -8,7 +8,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"go.sriracha.dev/sriracha"
-	srirachav1 "go.sriracha.dev/transport/proto/srirachav1"
+	srirachav1 "go.sriracha.dev/transport/proto/sriracha/v1"
 )
 
 func TestProtoToTokenRecordEmpty(t *testing.T) {
@@ -34,7 +34,7 @@ func TestProtoToTokenRecordBadChecksum(t *testing.T) {
 	// Valid proto but checksum is not 32 bytes.
 	pb := &srirachav1.TokenRecord{
 		FieldsetVersion: "test-v1",
-		Mode:            srirachav1.MatchMode_DETERMINISTIC,
+		Mode:            srirachav1.MatchMode_MATCH_MODE_DETERMINISTIC,
 		Algo:            sriracha.AlgoHMACSHA256V1,
 		Payload:         []byte("test"),
 		Checksum:        []byte{0x01, 0x02}, // only 2 bytes, not 32
