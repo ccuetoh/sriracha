@@ -2,8 +2,11 @@ package replay
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
+
+	"github.com/maypok86/otter"
 )
 
 // Cache is the replay-prevention contract. Implementations must be safe for concurrent use.
@@ -11,52 +14,45 @@ type Cache interface {
 	Claim(policyID string, expiresAt time.Time) bool
 }
 
-// MemoryCache is an in-memory Cache backed by a sync.Map with a background
-// pruning goroutine. Create one with New.
+// MemoryCache is an in-memory Cache backed by otter with automatic TTL eviction.
+// Create one with New.
 type MemoryCache struct {
-	entries sync.Map // map[string]time.Time
+	mu    sync.Mutex
+	cache otter.CacheWithVariableTTL[string, struct{}]
 }
 
-// New creates a MemoryCache and starts a background pruning goroutine that
-// exits when ctx is cancelled. Callers must cancel ctx to avoid goroutine leaks.
-func New(ctx context.Context) *MemoryCache {
-	return NewWithInterval(ctx, time.Minute)
-}
-
-// NewWithInterval is like New but uses a custom prune interval. Useful for tests.
-func NewWithInterval(ctx context.Context, interval time.Duration) *MemoryCache {
-	c := &MemoryCache{}
-	go c.pruneLoop(ctx, interval)
-	return c
+// New creates a MemoryCache backed by an otter cache. The cache is closed when ctx is cancelled.
+func New(ctx context.Context) (*MemoryCache, error) {
+	b, err := otter.NewBuilder[string, struct{}](100_000)
+	if err != nil {
+		return nil, fmt.Errorf("replay: build cache: %w", err)
+	}
+	c, err := b.WithVariableTTL().Build()
+	if err != nil {
+		return nil, fmt.Errorf("replay: build cache: %w", err)
+	}
+	mc := &MemoryCache{cache: c}
+	go func() {
+		<-ctx.Done()
+		mc.cache.Close()
+	}()
+	return mc, nil
 }
 
 // Claim attempts to reserve policyID until expiresAt.
 // Returns true on first use, false if already claimed (replay detected).
 func (c *MemoryCache) Claim(policyID string, expiresAt time.Time) bool {
-	_, loaded := c.entries.LoadOrStore(policyID, expiresAt)
-	return !loaded
-}
-
-func (c *MemoryCache) pruneLoop(ctx context.Context, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			c.prune()
-		}
-	}
-}
-
-func (c *MemoryCache) prune() {
-	now := time.Now()
-	c.entries.Range(func(key, value any) bool {
-		if exp, ok := value.(time.Time); ok && exp.Before(now) {
-			c.entries.Delete(key)
-		}
+	ttl := time.Until(expiresAt)
+	if ttl <= 0 {
 		return true
-	})
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Has returns false for expired entries, enabling re-claim after expiry.
+	if c.cache.Has(policyID) {
+		return false
+	}
+	return c.cache.Set(policyID, struct{}{}, ttl)
 }

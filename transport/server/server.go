@@ -44,14 +44,21 @@ type Config struct {
 	RateBulkRecordsPerDay uint32
 }
 
-// Server implements the Sriracha gRPC service (responding party B).
-type Server struct {
+// Server is the Sriracha gRPC service (responding party B).
+type Server interface {
+	// Serve binds lis and blocks until the server stops or an error occurs.
+	Serve(lis net.Listener) error
+	// GracefulStop stops the server, waiting for in-flight RPCs to complete.
+	GracefulStop()
+}
+
+type server struct {
 	srirachav1.UnimplementedSrirachaServiceServer
 
 	cfg     Config
 	indexer sriracha.TokenIndexer
 	source  sriracha.RecordSource
-	consent *consent.Validator
+	consent consent.Validator
 	audit   sriracha.AuditLog
 	grpcSrv *grpc.Server
 }
@@ -65,7 +72,7 @@ func New(
 	tlsCfg *tls.Config,
 	cache replay.Cache,
 	audit sriracha.AuditLog,
-) (*Server, error) {
+) (Server, error) {
 	if cfg.InstitutionID == "" {
 		return nil, errors.New("server: InstitutionID must not be empty")
 	}
@@ -83,7 +90,7 @@ func New(
 	}
 
 	if audit == nil {
-		audit = nopAuditLog{}
+		audit = NopAuditLog{}
 	}
 
 	grpcSrv := grpc.NewServer(
@@ -99,7 +106,7 @@ func New(
 		}),
 	)
 
-	srv := &Server{
+	srv := &server{
 		cfg:     cfg,
 		indexer: idx,
 		source:  src,
@@ -112,18 +119,16 @@ func New(
 	return srv, nil
 }
 
-// Serve binds lis and blocks until the server stops or an error occurs.
-func (s *Server) Serve(lis net.Listener) error {
+func (s *server) Serve(lis net.Listener) error {
 	return s.grpcSrv.Serve(lis)
 }
 
-// GracefulStop stops the server, waiting for in-flight RPCs to complete.
-func (s *Server) GracefulStop() {
+func (s *server) GracefulStop() {
 	s.grpcSrv.GracefulStop()
 }
 
 // GetCapabilities implements SrirachaService.GetCapabilities.
-func (s *Server) GetCapabilities(_ context.Context, _ *srirachav1.CapabilitiesRequest) (*srirachav1.CapabilitiesResponse, error) {
+func (s *server) GetCapabilities(_ context.Context, _ *srirachav1.CapabilitiesRequest) (*srirachav1.CapabilitiesResponse, error) {
 	modes := make([]srirachav1.MatchMode, 0, len(s.cfg.SupportedModes))
 	for _, m := range s.cfg.SupportedModes {
 		pm, err := MatchModeToProto(m)
@@ -146,7 +151,7 @@ func (s *Server) GetCapabilities(_ context.Context, _ *srirachav1.CapabilitiesRe
 }
 
 // Query implements SrirachaService.Query.
-func (s *Server) Query(ctx context.Context, req *srirachav1.QueryRequest) (*srirachav1.QueryResponse, error) {
+func (s *server) Query(ctx context.Context, req *srirachav1.QueryRequest) (*srirachav1.QueryResponse, error) {
 	peerKey, peerID, err := s.peerIdentity(ctx)
 	if err != nil {
 		return nil, err
@@ -210,7 +215,7 @@ func (s *Server) Query(ctx context.Context, req *srirachav1.QueryRequest) (*srir
 }
 
 // BulkLink implements SrirachaService.BulkLink.
-func (s *Server) BulkLink(stream srirachav1.SrirachaService_BulkLinkServer) error {
+func (s *server) BulkLink(stream srirachav1.SrirachaService_BulkLinkServer) error {
 	ctx := stream.Context()
 	policyValidated := false
 
@@ -252,7 +257,7 @@ func (s *Server) BulkLink(stream srirachav1.SrirachaService_BulkLinkServer) erro
 	}
 }
 
-func (s *Server) processBatch(ctx context.Context, batch *srirachav1.BulkTokenBatch) (*srirachav1.BulkMatchResult, error) {
+func (s *server) processBatch(ctx context.Context, batch *srirachav1.BulkTokenBatch) (*srirachav1.BulkMatchResult, error) {
 	entries := make([]*srirachav1.MatchResultEntry, 0, len(batch.TokenRecords))
 
 	for i, trBytes := range batch.TokenRecords {
@@ -275,7 +280,7 @@ func (s *Server) processBatch(ctx context.Context, batch *srirachav1.BulkTokenBa
 	}, nil
 }
 
-func (s *Server) matchOne(ctx context.Context, trBytes []byte, ref string) (*srirachav1.MatchResultEntry, error) {
+func (s *server) matchOne(ctx context.Context, trBytes []byte, ref string) (*srirachav1.MatchResultEntry, error) {
 	tr, err := ProtoToTokenRecord(trBytes)
 	if err != nil {
 		return &srirachav1.MatchResultEntry{
@@ -316,7 +321,7 @@ func (s *Server) matchOne(ctx context.Context, trBytes []byte, ref string) (*sri
 
 // peerIdentity extracts the Ed25519 public key and institution ID from the
 // mTLS peer certificate in ctx.
-func (s *Server) peerIdentity(ctx context.Context) (ed25519.PublicKey, string, error) {
+func (s *server) peerIdentity(ctx context.Context) (ed25519.PublicKey, string, error) {
 	p, ok := peer.FromContext(ctx)
 	if !ok {
 		return nil, "", status.Error(codes.Unauthenticated, "no peer information in context")
@@ -351,7 +356,7 @@ func peerInstitutionID(info credentials.TLSInfo) string {
 	return cmp.Or(uri, cert.Subject.CommonName)
 }
 
-func (s *Server) emitAudit(ctx context.Context, event, sessionID, policyID string, st srirachav1.MatchStatus) {
+func (s *server) emitAudit(ctx context.Context, event, sessionID, policyID string, st srirachav1.MatchStatus) {
 	_ = s.audit.Append(ctx, event, map[string]string{
 		"session_id": sessionID,
 		"policy_id":  policyID,

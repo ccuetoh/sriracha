@@ -173,7 +173,8 @@ func newTestEnv(t *testing.T) *testEnv {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	cache := replay.New(ctx)
+	cache, err := replay.New(ctx)
+	require.NoError(t, err)
 
 	indexer := mocksriracha.NewMockTokenIndexer(t)
 	source := mocksriracha.NewMockRecordSource(t)
@@ -226,6 +227,11 @@ func (e *testEnv) newPolicy(t *testing.T) *srirachav1.ConsentPolicy {
 func (e *testEnv) expectAudit(t *testing.T) {
 	t.Helper()
 	e.audit.EXPECT().Append(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+}
+
+func TestNopAuditLogVerify(t *testing.T) {
+	t.Parallel()
+	assert.NoError(t, NopAuditLog{}.Verify(context.Background()))
 }
 
 func TestGetCapabilities(t *testing.T) {
@@ -573,7 +579,8 @@ func TestNewServerNilAudit(t *testing.T) {
 	pki := newTestPKI(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	cache := replay.New(ctx)
+	cache, err := replay.New(ctx)
+	require.NoError(t, err)
 
 	indexer := mocksriracha.NewMockTokenIndexer(t)
 	source := mocksriracha.NewMockRecordSource(t)
@@ -682,7 +689,8 @@ func TestNewServerValidation(t *testing.T) {
 	pki := newTestPKI(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	cache := replay.New(ctx)
+	cache, err := replay.New(ctx)
+	require.NoError(t, err)
 	idx := mocksriracha.NewMockTokenIndexer(t)
 	src := mocksriracha.NewMockRecordSource(t)
 
@@ -782,7 +790,8 @@ func TestGetCapabilitiesInvalidMode(t *testing.T) {
 	pki := newTestPKI(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	cache := replay.New(ctx)
+	cache, err := replay.New(ctx)
+	require.NoError(t, err)
 
 	cfg := testServerConfig()
 	cfg.SupportedModes = []sriracha.MatchMode{sriracha.MatchMode(99)} // invalid — skipped in GetCapabilities

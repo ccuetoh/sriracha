@@ -12,29 +12,28 @@ import (
 	srirachav1 "go.sriracha.dev/transport/proto/srirachav1"
 )
 
-// Validator validates ConsentPolicy messages per spec Section 11.1.
-type Validator struct {
+// Validator validates ConsentPolicy messages.
+type Validator interface {
+	Validate(p *srirachav1.ConsentPolicy, peerKey ed25519.PublicKey, peerID string) error
+}
+
+type validator struct {
 	ownInstitutionID string
 	cache            replay.Cache
 }
 
-// NewValidator constructs a Validator for an institution that considers itself
-// ownInstitutionID and tracks policy IDs with cache for replay prevention.
-func NewValidator(ownInstitutionID string, cache replay.Cache) *Validator {
-	return &Validator{ownInstitutionID: ownInstitutionID, cache: cache}
+// NewValidator constructs a Validator that considers itself ownInstitutionID and
+// tracks policy IDs with cache for replay prevention.
+func NewValidator(ownInstitutionID string, cache replay.Cache) Validator {
+	return &validator{ownInstitutionID: ownInstitutionID, cache: cache}
 }
 
-// Validate enforces all six rules from spec Section 11.1:
-//  1. Ed25519 signature over SHA256(policy_id||issuer_id||target_id||purpose||issued_at_be8||expires_at_be8)
-//  2. issuer_id matches the first URI SAN of the peer certificate (peerID)
-//  3. target_id matches this institution's own ID
-//  4. issued_at <= now
-//  5. expires_at > now
-//  6. policy_id has not been seen in the replay cache
+// Validate checks the policy signature, issuer/target identity, validity window,
+// and replay status.
 //
 // peerKey is the Ed25519 public key extracted from the peer's mTLS certificate.
 // peerID is the institution identifier from the peer's certificate SAN.
-func (v *Validator) Validate(p *srirachav1.ConsentPolicy, peerKey ed25519.PublicKey, peerID string) error {
+func (v *validator) Validate(p *srirachav1.ConsentPolicy, peerKey ed25519.PublicKey, peerID string) error {
 	if p == nil {
 		return errors.New("consent: policy is nil")
 	}
@@ -43,34 +42,28 @@ func (v *Validator) Validate(p *srirachav1.ConsentPolicy, peerKey ed25519.Public
 	issuedAt := time.Unix(p.IssuedAt, 0)
 	expiresAt := time.Unix(p.ExpiresAt, 0)
 
-	// Rule 4: issued_at <= now
 	if issuedAt.After(now) {
 		return fmt.Errorf("consent: policy not yet valid: issued_at %d is in the future", p.IssuedAt)
 	}
 
-	// Rule 5: expires_at > now
 	if !expiresAt.After(now) {
 		return fmt.Errorf("consent: policy expired at %d", p.ExpiresAt)
 	}
 
-	// Rule 1: signature verification
 	msg := policyMessage(p)
 	hash := sha256.Sum256(msg)
 	if !ed25519.Verify(peerKey, hash[:], p.Signature) {
 		return errors.New("consent: invalid signature")
 	}
 
-	// Rule 2: issuer_id matches peer certificate identity
 	if p.IssuerId != peerID {
 		return fmt.Errorf("consent: issuer_id %q does not match peer identity %q", p.IssuerId, peerID)
 	}
 
-	// Rule 3: target_id matches this institution
 	if p.TargetId != v.ownInstitutionID {
 		return fmt.Errorf("consent: target_id %q does not match own institution %q", p.TargetId, v.ownInstitutionID)
 	}
 
-	// Rule 6: replay prevention
 	if !v.cache.Claim(p.PolicyId, expiresAt) {
 		return fmt.Errorf("consent: policy_id %q already used (replay detected)", p.PolicyId)
 	}

@@ -9,34 +9,39 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestClaim(t *testing.T) {
-	t.Parallel()
-
+func newTestCache(t *testing.T) *MemoryCache {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	future := time.Now().Add(time.Hour)
+	c, err := New(ctx)
+	require.NoError(t, err)
+	return c
+}
+
+func TestClaim(t *testing.T) {
+	t.Parallel()
 
 	cases := []struct {
 		name string
 		fn   func(*testing.T, *MemoryCache)
 	}{
 		{"first use succeeds", func(t *testing.T, c *MemoryCache) {
-			assert.True(t, c.Claim("pol", future))
+			assert.True(t, c.Claim("pol", time.Now().Add(time.Hour)))
 		}},
 		{"replay rejected", func(t *testing.T, c *MemoryCache) {
-			require.True(t, c.Claim("pol", future))
-			assert.False(t, c.Claim("pol", future))
+			require.True(t, c.Claim("pol", time.Now().Add(time.Hour)))
+			assert.False(t, c.Claim("pol", time.Now().Add(time.Hour)))
 		}},
 		{"distinct id succeeds", func(t *testing.T, c *MemoryCache) {
-			require.True(t, c.Claim("pol-a", future))
-			assert.True(t, c.Claim("pol-b", future))
+			require.True(t, c.Claim("pol-a", time.Now().Add(time.Hour)))
+			assert.True(t, c.Claim("pol-b", time.Now().Add(time.Hour)))
 		}},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			tc.fn(t, New(ctx))
+			tc.fn(t, newTestCache(t))
 		})
 	}
 }
@@ -44,42 +49,14 @@ func TestClaim(t *testing.T) {
 func TestClaimAfterExpiry(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
+	c := newTestCache(t)
 
-	c := New(ctx)
+	// otter uses a 1-second coarse clock, so the minimum effective TTL is ~1s.
+	expiry := time.Now().Add(time.Second)
+	require.True(t, c.Claim("pol-old", expiry))
 
-	past := time.Now().Add(-time.Second)
-	require.True(t, c.Claim("pol-old", past))
-
-	// Manually prune to simulate the ticker firing.
-	c.prune()
-
-	// After pruning the expired entry, a new claim with the same ID succeeds.
-	assert.True(t, c.Claim("pol-old", time.Now().Add(time.Hour)))
-}
-
-func TestPruneLoopExitsOnContextCancel(t *testing.T) {
-	t.Parallel()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	New(ctx)
-	// Cancel immediately; the goroutine must exit before the test ends.
-	cancel()
-}
-
-func TestPruneLoopTicker(t *testing.T) {
-	t.Parallel()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	c := NewWithInterval(ctx, time.Millisecond)
-
-	past := time.Now().Add(-time.Second)
-	require.True(t, c.Claim("pol-tick", past))
-
-	// Wait for the ticker to fire and prune the expired entry.
+	// After the TTL elapses, the entry is evicted and the same ID can be re-claimed.
 	require.Eventually(t, func() bool {
-		return c.Claim("pol-tick", time.Now().Add(time.Hour))
-	}, 200*time.Millisecond, time.Millisecond)
+		return c.Claim("pol-old", time.Now().Add(time.Hour))
+	}, 5*time.Second, 100*time.Millisecond)
 }
