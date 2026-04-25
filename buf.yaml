@@ -1,3 +1,6 @@
 version: v2
 modules:
   - path: transport/proto/srirachav1
+lint:
+  except:
+    - ENUM_VALUE_PREFIX

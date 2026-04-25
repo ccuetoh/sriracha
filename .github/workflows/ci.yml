@@ -20,11 +20,20 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install gotestsum
+        run: go install gotest.tools/gotestsum@v1.13.0
+
       - name: Test with coverage
-        run: go test -race -timeout 5m -coverprofile=coverage.out ./...
+        run: gotestsum --junitfile test-results.xml -- -race -timeout 5m -coverprofile=coverage.out ./...
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
@@ -72,7 +81,7 @@ jobs:
           setup_only: true
 
       - name: Install mockery
-        run: go install github.com/vektra/mockery/v2@latest
+        run: go install github.com/vektra/mockery/v2@v2.53.6
 
       - name: Regenerate proto
         run: buf generate
@@ -83,14 +92,12 @@ jobs:
       - name: Check for uncommitted changes
         run: git diff --exit-code
 
-  build:
-    name: Build (${{ matrix.goos }})
-    runs-on: ubuntu-latest
+  test-matrix:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        goos: [linux, darwin, windows]
-    env:
-      GOOS: ${{ matrix.goos }}
+        os: [macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
 
@@ -99,8 +106,17 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Build
-        run: go build ./...
+      - name: Install gotestsum
+        run: go install gotest.tools/gotestsum@v1.13.0
+
+      - name: Test
+        run: gotestsum --junitfile test-results.xml -- -timeout 5m ./...
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   leakhound:
     name: leakhound
