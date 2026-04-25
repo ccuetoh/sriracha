@@ -58,13 +58,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: bufbuild/buf-action@v1
         with:
-          push: false
-          lint: false
-          format: false
-          breaking_against: ${{ github.event_name == 'pull_request' && format('https://github.com/{0}.git#branch={1}', github.repository, github.base_ref) || '' }}
+          fetch-depth: 0
+
+      - name: Install buf
+        run: |
+          curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.50.0/buf-Linux-x86_64" \
+            -o /usr/local/bin/buf && chmod +x /usr/local/bin/buf
+
+      - name: Fetch base branch
+        if: github.event_name == 'pull_request'
+        run: git fetch origin ${{ github.base_ref }}
+
+      - name: Check for breaking proto changes
+        if: github.event_name == 'pull_request'
+        run: buf breaking --against ".git#branch=${{ github.base_ref }}"
 
   generated:
     name: Generated files
