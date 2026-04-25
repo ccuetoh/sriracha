@@ -2,6 +2,7 @@ package replay
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -64,4 +65,19 @@ func TestClaimAfterExpiry(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return c.Claim("pol-old", time.Now().Add(time.Hour))
 	}, 5*time.Second, 100*time.Millisecond)
+}
+
+func BenchmarkClaim(b *testing.B) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := New(ctx)
+	expiresAt := time.Now().Add(time.Hour)
+	ids := make([]string, b.N)
+	for i := range ids {
+		ids[i] = "pol-bench-" + strconv.Itoa(i)
+	}
+	b.ResetTimer()
+	for i := range b.N {
+		c.Claim(ids[i], expiresAt)
+	}
 }

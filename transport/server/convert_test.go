@@ -105,3 +105,59 @@ func TestTokenRecordToProtoInvalidMode(t *testing.T) {
 	_, err := TokenRecordToProto(sriracha.TokenRecord{Mode: sriracha.MatchMode(99)})
 	assert.Error(t, err)
 }
+
+func BenchmarkTokenRecordToProto(b *testing.B) {
+	var checksum [32]byte
+	tr := sriracha.TokenRecord{
+		FieldSetVersion: "v1",
+		Mode:            sriracha.Deterministic,
+		Algo:            sriracha.AlgoHMACSHA256V1,
+		Payload:         []byte("benchmark-payload"),
+		Checksum:        checksum,
+	}
+	b.ResetTimer()
+	for range b.N {
+		_, _ = TokenRecordToProto(tr)
+	}
+}
+
+func BenchmarkProtoToTokenRecord(b *testing.B) {
+	var checksum [32]byte
+	tr := sriracha.TokenRecord{
+		FieldSetVersion: "v1",
+		Mode:            sriracha.Deterministic,
+		Algo:            sriracha.AlgoHMACSHA256V1,
+		Payload:         []byte("benchmark-payload"),
+		Checksum:        checksum,
+	}
+	data, err := TokenRecordToProto(tr)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	for range b.N {
+		_, _ = ProtoToTokenRecord(data)
+	}
+}
+
+func FuzzProtoToTokenRecord(f *testing.F) {
+	var checksum [32]byte
+	tr := sriracha.TokenRecord{
+		FieldSetVersion: "v1",
+		Mode:            sriracha.Deterministic,
+		Algo:            sriracha.AlgoHMACSHA256V1,
+		Payload:         []byte("seed"),
+		Checksum:        checksum,
+	}
+	seed, err := TokenRecordToProto(tr)
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(seed)
+	f.Add([]byte(nil))
+	f.Add([]byte{})
+	f.Fuzz(func(t *testing.T, data []byte) {
+		// Must never panic regardless of input.
+		_, _ = ProtoToTokenRecord(data)
+	})
+}

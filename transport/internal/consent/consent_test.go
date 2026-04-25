@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
+	"strconv"
 	"testing"
 	"time"
 
@@ -15,21 +16,21 @@ import (
 	srirachav1 "go.sriracha.dev/transport/proto/srirachav1"
 )
 
-func newCache(t *testing.T) replay.Cache {
+func newCache(t testing.TB) replay.Cache {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	return replay.New(ctx)
 }
 
-func generateKeyPair(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
+func generateKeyPair(t testing.TB) (ed25519.PublicKey, ed25519.PrivateKey) {
 	t.Helper()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 	return pub, priv
 }
 
-func signPolicy(t *testing.T, p *srirachav1.ConsentPolicy, priv ed25519.PrivateKey) {
+func signPolicy(t testing.TB, p *srirachav1.ConsentPolicy, priv ed25519.PrivateKey) {
 	t.Helper()
 	msg := policyMessage(p)
 	hash := sha256.Sum256(msg)
@@ -158,4 +159,27 @@ func TestValidateReplay(t *testing.T) {
 
 	err := v.Validate(p, pub, issuerID)
 	assert.ErrorContains(t, err, "replay")
+}
+
+func BenchmarkValidate(b *testing.B) {
+	const (
+		issuerID = "org.bench.a"
+		targetID = "org.bench.b"
+	)
+	pub, priv := generateKeyPair(b)
+	v := NewValidator(targetID, newCache(b))
+
+	b.ResetTimer()
+	for i := range b.N {
+		p := &srirachav1.ConsentPolicy{
+			PolicyId:  "pol-bench-" + strconv.Itoa(i),
+			IssuerId:  issuerID,
+			TargetId:  targetID,
+			Purpose:   "bench",
+			IssuedAt:  time.Now().Add(-time.Minute).Unix(),
+			ExpiresAt: time.Now().Add(time.Hour).Unix(),
+		}
+		signPolicy(b, p, priv)
+		_ = v.Validate(p, pub, issuerID)
+	}
 }

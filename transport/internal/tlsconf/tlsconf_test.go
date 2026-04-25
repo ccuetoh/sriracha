@@ -19,7 +19,7 @@ import (
 
 // generateEd25519Cert creates a self-signed Ed25519 certificate and returns
 // certPEM, keyPEM, and the parsed *x509.Certificate.
-func generateEd25519Cert(t *testing.T) ([]byte, []byte, *x509.Certificate) {
+func generateEd25519Cert(t testing.TB) ([]byte, []byte, *x509.Certificate) {
 	t.Helper()
 
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -49,7 +49,7 @@ func generateEd25519Cert(t *testing.T) ([]byte, []byte, *x509.Certificate) {
 }
 
 // generateECDSACert creates a self-signed ECDSA P-256 certificate.
-func generateECDSACert(t *testing.T) *x509.Certificate {
+func generateECDSACert(t testing.TB) *x509.Certificate {
 	t.Helper()
 
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -171,4 +171,13 @@ func TestLoadClientTLSInvalidCACert(t *testing.T) {
 	garbage := "-----BEGIN CERTIFICATE-----\nbm90LXZhbGlkLWRlcg==\n-----END CERTIFICATE-----\n"
 	_, err := LoadClientTLS(certPEM, keyPEM, []byte(garbage))
 	assert.Error(t, err)
+}
+
+func BenchmarkPeerPublicKey(b *testing.B) {
+	_, _, cert := generateEd25519Cert(b)
+	chain := []*x509.Certificate{cert}
+	b.ResetTimer()
+	for range b.N {
+		_, _ = PeerPublicKey(chain)
+	}
 }

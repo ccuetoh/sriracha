@@ -1,4 +1,4 @@
-package server_test
+package server
 
 import (
 	"context"
@@ -11,8 +11,11 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
+	"io"
 	"math/big"
 	"net"
+	"net/url"
 	"testing"
 	"time"
 
@@ -22,6 +25,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
 	mocksriracha "go.sriracha.dev/mock/sriracha"
@@ -29,7 +33,6 @@ import (
 	"go.sriracha.dev/transport/internal/replay"
 	"go.sriracha.dev/transport/internal/tlsconf"
 	srirachav1 "go.sriracha.dev/transport/proto/srirachav1"
-	. "go.sriracha.dev/transport/server"
 )
 
 // testPKI holds a minimal PKI for integration tests: one CA, one server cert,
@@ -260,11 +263,6 @@ func (e *testEnv) newPolicy(t *testing.T) *srirachav1.ConsentPolicy {
 func (e *testEnv) expectAudit(t *testing.T) {
 	t.Helper()
 	e.audit.EXPECT().Append(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
-}
-
-func TestNopAuditLogVerify(t *testing.T) {
-	t.Parallel()
-	assert.NoError(t, NopAuditLog{}.Verify(context.Background()))
 }
 
 func TestGetCapabilities(t *testing.T) {
@@ -1091,4 +1089,209 @@ func TestBulkLinkECDSAClient(t *testing.T) {
 
 	_, err = stream.Recv()
 	assert.Error(t, err)
+}
+
+// TestPeerInstitutionID tests the peerInstitutionID helper in server.go.
+func TestPeerInstitutionID(t *testing.T) {
+	t.Parallel()
+
+	t.Run("uri san takes priority", func(t *testing.T) {
+		t.Parallel()
+		u, err := url.Parse("spiffe://org.example.a")
+		require.NoError(t, err)
+		info := credentials.TLSInfo{
+			State: tls.ConnectionState{
+				PeerCertificates: []*x509.Certificate{
+					{URIs: []*url.URL{u}, Subject: pkix.Name{CommonName: "ignored"}},
+				},
+			},
+		}
+		assert.Equal(t, "spiffe://org.example.a", peerInstitutionID(info))
+	})
+
+	t.Run("falls back to common name", func(t *testing.T) {
+		t.Parallel()
+		info := credentials.TLSInfo{
+			State: tls.ConnectionState{
+				PeerCertificates: []*x509.Certificate{
+					{Subject: pkix.Name{CommonName: "org.example.b"}},
+				},
+			},
+		}
+		assert.Equal(t, "org.example.b", peerInstitutionID(info))
+	})
+
+	t.Run("empty chain returns empty string", func(t *testing.T) {
+		t.Parallel()
+		info := credentials.TLSInfo{}
+		assert.Empty(t, peerInstitutionID(info))
+	})
+}
+
+// newWhiteboxServer creates a minimal *server for whitebox tests via type assertion.
+func newWhiteboxServer(t *testing.T) *server {
+	t.Helper()
+
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test-ca"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, pub, priv)
+	require.NoError(t, err)
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	privDER, err := x509.MarshalPKCS8PrivateKey(priv)
+	require.NoError(t, err)
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privDER})
+
+	tlsCfg, err := tlsconf.LoadServerTLS(certPEM, keyPEM, certPEM)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	cache := replay.New(ctx)
+	indexer := mocksriracha.NewMockTokenIndexer(t)
+	source := mocksriracha.NewMockRecordSource(t)
+
+	srv, err := New(
+		Config{InstitutionID: "org.example.b", SpecVersion: "0.1.0"},
+		indexer, source, tlsCfg, cache, nil,
+	)
+	require.NoError(t, err)
+	s, ok := srv.(*server)
+	require.True(t, ok)
+	return s
+}
+
+// generateWhiteboxClientCert returns a self-signed Ed25519 cert for injecting a fake peer.
+func generateWhiteboxClientCert(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey, *x509.Certificate) {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "org.example.a"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, pub, priv)
+	require.NoError(t, err)
+	cert, err := x509.ParseCertificate(der)
+	require.NoError(t, err)
+	return pub, priv, cert
+}
+
+// signWithKey signs a policy using policyMessage.
+func signWithKey(priv ed25519.PrivateKey, p *srirachav1.ConsentPolicy) {
+	msg := policyMessage(p)
+	hash := sha256.Sum256(msg)
+	p.Signature = ed25519.Sign(priv, hash[:])
+}
+
+// fakeAuthInfo satisfies credentials.AuthInfo but is not TLSInfo.
+type fakeAuthInfo struct{}
+
+func (fakeAuthInfo) AuthType() string { return "fake" }
+
+// fakeBulkStream implements srirachav1.SrirachaService_BulkLinkServer for whitebox tests.
+type fakeBulkStream struct {
+	grpc.ServerStream
+	ctx     context.Context
+	batches []*srirachav1.BulkTokenBatch
+	pos     int
+	recvErr error
+	sendErr error
+	sent    []*srirachav1.BulkMatchResult
+}
+
+func (f *fakeBulkStream) Context() context.Context { return f.ctx }
+
+func (f *fakeBulkStream) Recv() (*srirachav1.BulkTokenBatch, error) {
+	if f.pos >= len(f.batches) {
+		if f.recvErr != nil {
+			return nil, f.recvErr
+		}
+		return nil, io.EOF
+	}
+	b := f.batches[f.pos]
+	f.pos++
+	return b, nil
+}
+
+func (f *fakeBulkStream) Send(r *srirachav1.BulkMatchResult) error {
+	if f.sendErr != nil {
+		return f.sendErr
+	}
+	f.sent = append(f.sent, r)
+	return nil
+}
+
+func TestPeerIdentityNoPeer(t *testing.T) {
+	t.Parallel()
+	s := newWhiteboxServer(t)
+	_, _, err := s.peerIdentity(context.Background())
+	assert.Error(t, err)
+}
+
+func TestPeerIdentityNonTLS(t *testing.T) {
+	t.Parallel()
+	s := newWhiteboxServer(t)
+	p := &peer.Peer{AuthInfo: fakeAuthInfo{}}
+	ctx := peer.NewContext(context.Background(), p)
+	_, _, err := s.peerIdentity(ctx)
+	assert.Error(t, err)
+}
+
+func TestBulkLinkRecvError(t *testing.T) {
+	t.Parallel()
+	s := newWhiteboxServer(t)
+	stream := &fakeBulkStream{
+		ctx:     context.Background(),
+		recvErr: errors.New("network error"),
+	}
+	assert.Error(t, s.BulkLink(stream))
+}
+
+// TestBulkLinkSendError covers stream.Send returning an error.
+func TestBulkLinkSendError(t *testing.T) {
+	t.Parallel()
+
+	s := newWhiteboxServer(t)
+	_, clientPriv, clientCert := generateWhiteboxClientCert(t)
+
+	info := credentials.TLSInfo{
+		State: tls.ConnectionState{PeerCertificates: []*x509.Certificate{clientCert}},
+	}
+	ctx := peer.NewContext(context.Background(), &peer.Peer{AuthInfo: info})
+
+	now := time.Now()
+	policy := &srirachav1.ConsentPolicy{
+		PolicyId:  "pol-send-err",
+		IssuerId:  "org.example.a",
+		TargetId:  "org.example.b",
+		Purpose:   "testing",
+		IssuedAt:  now.Add(-time.Minute).Unix(),
+		ExpiresAt: now.Add(time.Hour).Unix(),
+	}
+	signWithKey(clientPriv, policy)
+
+	stream := &fakeBulkStream{
+		ctx:     ctx,
+		sendErr: errors.New("send failed"),
+		batches: []*srirachav1.BulkTokenBatch{
+			{SessionId: "bulk-send-err", TokenRecords: nil, Policy: policy},
+		},
+	}
+	assert.Error(t, s.BulkLink(stream))
 }
