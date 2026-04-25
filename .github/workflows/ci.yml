@@ -61,10 +61,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install buf
-        run: |
-          curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.50.0/buf-Linux-x86_64" \
-            -o /usr/local/bin/buf && chmod +x /usr/local/bin/buf
+      - uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true
 
       - name: Fetch base branch
         if: github.event_name == 'pull_request'
