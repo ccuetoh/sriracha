@@ -168,13 +168,19 @@ jobs:
         run: sudo prlimit --pid $PPID --memlock=unlimited:unlimited
 
       - name: Fuzz
+        env:
+          FUZZTIME: 60s
         run: |
-          go test -fuzz=^FuzzParseFieldPath$     -fuzztime=30s go.sriracha.dev/sriracha
-          go test -fuzz=^FuzzNormalize$          -fuzztime=30s go.sriracha.dev/normalize
-          go test -fuzz=^FuzzNormalizeDate$      -fuzztime=30s go.sriracha.dev/normalize
-          go test -fuzz=^FuzzNormalizeCountry$   -fuzztime=30s go.sriracha.dev/normalize
-          go test -fuzz=^FuzzNgrams$             -fuzztime=30s go.sriracha.dev/token
-          go test -fuzz=^FuzzTokenizeRecord$     -fuzztime=30s go.sriracha.dev/token
-          go test -fuzz=^FuzzTokenizeRecordBloom$  -fuzztime=30s go.sriracha.dev/token
-          go test -fuzz=^FuzzProtoToTokenRecord$  -fuzztime=30s go.sriracha.dev/transport/server
-          go test -fuzz=^FuzzBuildFieldValues$    -fuzztime=30s go.sriracha.dev/transport/server
+          set -euo pipefail
+          failed=0
+          for pkg in $(go list ./...); do
+            targets=$(go test -list '^Fuzz' "$pkg" 2>/dev/null | awk '/^Fuzz/')
+            for target in $targets; do
+              echo "::group::$pkg $target"
+              if ! go test -fuzz="^${target}$" -fuzztime="$FUZZTIME" "$pkg"; then
+                failed=1
+              fi
+              echo "::endgroup::"
+            done
+          done
+          exit "$failed"
