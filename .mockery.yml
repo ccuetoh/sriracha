@@ -1,10 +1,17 @@
+force-file-write: true
+formatter: goimports
 log-level: info
+
 structname: '{{.Mock}}{{.InterfaceName}}'
-outpkg: 'mock{{.PackageName}}'
+pkgname: 'mock{{.SrcPackageName}}'
+
+template: testify
+template-schema: '{{.Template}}.schema.json'
+
 packages:
   go.sriracha.dev:
     config:
       all: true
       recursive: true
-      dir: 'mock/{{.PackageName}}'
-      filename: "mock_{{.InterfaceName}}.go"
+      dir: 'mock/{{.SrcPackageName}}'
+      filename: "mocks.go"

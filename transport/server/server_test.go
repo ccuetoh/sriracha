@@ -32,7 +32,7 @@ import (
 	"go.sriracha.dev/sriracha"
 	"go.sriracha.dev/transport/internal/replay"
 	"go.sriracha.dev/transport/internal/tlsconf"
-	srirachav1 "go.sriracha.dev/transport/proto/srirachav1"
+	srirachav1 "go.sriracha.dev/transport/proto/sriracha/v1"
 )
 
 // testPKI holds a minimal PKI for integration tests: one CA, one server cert,
@@ -271,7 +271,7 @@ func TestGetCapabilities(t *testing.T) {
 	env := newTestEnv(t)
 	client := env.newClient(t)
 
-	resp, err := client.GetCapabilities(context.Background(), &srirachav1.CapabilitiesRequest{})
+	resp, err := client.GetCapabilities(context.Background(), &srirachav1.GetCapabilitiesRequest{})
 	require.NoError(t, err)
 
 	assert.Equal(t, "0.1.0", resp.SpecVersion)
@@ -306,7 +306,7 @@ func TestQuery(t *testing.T) {
 		{
 			name:       "no match",
 			candidates: nil,
-			wantStatus: srirachav1.MatchStatus_NO_MATCH,
+			wantStatus: srirachav1.MatchStatus_MATCH_STATUS_NO_MATCH,
 		},
 		{
 			name: "deterministic match",
@@ -317,7 +317,7 @@ func TestQuery(t *testing.T) {
 				sriracha.FieldNameGiven:  "Alice",
 				sriracha.FieldNameFamily: "Smith",
 			},
-			wantStatus: srirachav1.MatchStatus_MATCHED,
+			wantStatus: srirachav1.MatchStatus_MATCH_STATUS_MATCHED,
 			wantFields: 2,
 		},
 		{
@@ -326,7 +326,7 @@ func TestQuery(t *testing.T) {
 				{RecordID: "rec-1", Confidence: 0.95},
 				{RecordID: "rec-2", Confidence: 0.949},
 			},
-			wantStatus: srirachav1.MatchStatus_MULTIPLE_CANDIDATES,
+			wantStatus: srirachav1.MatchStatus_MATCH_STATUS_MULTIPLE_CANDIDATES,
 		},
 	}
 
@@ -356,7 +356,7 @@ func TestQuery(t *testing.T) {
 				SessionId:       "sess-1",
 				TokenRecord:     trBytes,
 				FieldsetVersion: "test-v1",
-				MatchMode:       srirachav1.MatchMode_DETERMINISTIC,
+				MatchMode:       srirachav1.MatchMode_MATCH_MODE_DETERMINISTIC,
 				RequestedFields: []string{
 					sriracha.FieldNameGiven.String(),
 					sriracha.FieldNameFamily.String(),
@@ -463,7 +463,7 @@ func TestBulkLink(t *testing.T) {
 	stream, err := client.BulkLink(context.Background())
 	require.NoError(t, err)
 
-	err = stream.Send(&srirachav1.BulkTokenBatch{
+	err = stream.Send(&srirachav1.BulkLinkRequest{
 		SessionId:    "bulk-sess-1",
 		TokenRecords: [][]byte{trBytes},
 		RecordRefs:   []string{"ref-a"},
@@ -475,7 +475,7 @@ func TestBulkLink(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, result.Entries, 1)
 	assert.Equal(t, "ref-a", result.Entries[0].RecordRef)
-	assert.Equal(t, srirachav1.MatchStatus_MATCHED, result.Entries[0].Status)
+	assert.Equal(t, srirachav1.MatchStatus_MATCH_STATUS_MATCHED, result.Entries[0].Status)
 
 	require.NoError(t, stream.CloseSend())
 }
@@ -493,7 +493,7 @@ func TestBulkLinkMissingPolicy(t *testing.T) {
 	stream, err := client.BulkLink(context.Background())
 	require.NoError(t, err)
 
-	err = stream.Send(&srirachav1.BulkTokenBatch{
+	err = stream.Send(&srirachav1.BulkLinkRequest{
 		SessionId:    "bulk-no-policy",
 		TokenRecords: [][]byte{trBytes},
 	})
@@ -545,7 +545,7 @@ func TestQuerySingleProbabilisticMatch(t *testing.T) {
 		Policy:          env.newPolicy(t),
 	})
 	require.NoError(t, err)
-	assert.Equal(t, srirachav1.MatchStatus_MATCHED, resp.Status)
+	assert.Equal(t, srirachav1.MatchStatus_MATCH_STATUS_MATCHED, resp.Status)
 	assert.InDelta(t, 0.90, float64(resp.Confidence), 0.001)
 }
 
@@ -569,7 +569,7 @@ func TestBulkLinkFetchError(t *testing.T) {
 	stream, err := client.BulkLink(context.Background())
 	require.NoError(t, err)
 
-	err = stream.Send(&srirachav1.BulkTokenBatch{
+	err = stream.Send(&srirachav1.BulkLinkRequest{
 		SessionId:    "bulk-fetch-err",
 		TokenRecords: [][]byte{trBytes},
 		RecordRefs:   []string{"ref-a"},
@@ -645,7 +645,7 @@ func TestNewServerNilAudit(t *testing.T) {
 		Policy:          env.newPolicy(t),
 	})
 	require.NoError(t, err)
-	assert.Equal(t, srirachav1.MatchStatus_NO_MATCH, resp.Status)
+	assert.Equal(t, srirachav1.MatchStatus_MATCH_STATUS_NO_MATCH, resp.Status)
 }
 
 func TestQueryRecordFieldNotHeld(t *testing.T) {
@@ -710,7 +710,7 @@ func TestQueryWithMatchConfig(t *testing.T) {
 		Policy: env.newPolicy(t),
 	})
 	require.NoError(t, err)
-	assert.Equal(t, srirachav1.MatchStatus_NO_MATCH, resp.Status)
+	assert.Equal(t, srirachav1.MatchStatus_MATCH_STATUS_NO_MATCH, resp.Status)
 }
 
 func TestNewServerValidation(t *testing.T) {
@@ -840,7 +840,7 @@ func TestGetCapabilitiesInvalidMode(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 	stub := srirachav1.NewSrirachaServiceClient(conn)
 
-	resp, err := stub.GetCapabilities(context.Background(), &srirachav1.CapabilitiesRequest{})
+	resp, err := stub.GetCapabilities(context.Background(), &srirachav1.GetCapabilitiesRequest{})
 	require.NoError(t, err)
 	assert.Empty(t, resp.MatchModes)
 }
@@ -886,7 +886,7 @@ func TestBulkLinkNoMatch(t *testing.T) {
 	stream, err := client.BulkLink(context.Background())
 	require.NoError(t, err)
 
-	err = stream.Send(&srirachav1.BulkTokenBatch{
+	err = stream.Send(&srirachav1.BulkLinkRequest{
 		SessionId:    "bulk-no-match",
 		TokenRecords: [][]byte{trBytes},
 		RecordRefs:   []string{"ref-nm"},
@@ -897,7 +897,7 @@ func TestBulkLinkNoMatch(t *testing.T) {
 	result, err := stream.Recv()
 	require.NoError(t, err)
 	require.Len(t, result.Entries, 1)
-	assert.Equal(t, srirachav1.MatchStatus_NO_MATCH, result.Entries[0].Status)
+	assert.Equal(t, srirachav1.MatchStatus_MATCH_STATUS_NO_MATCH, result.Entries[0].Status)
 	require.NoError(t, stream.CloseSend())
 }
 
@@ -920,7 +920,7 @@ func TestBulkLinkMultipleCandidates(t *testing.T) {
 	stream, err := client.BulkLink(context.Background())
 	require.NoError(t, err)
 
-	err = stream.Send(&srirachav1.BulkTokenBatch{
+	err = stream.Send(&srirachav1.BulkLinkRequest{
 		SessionId:    "bulk-multi",
 		TokenRecords: [][]byte{trBytes},
 		RecordRefs:   []string{"ref-mc"},
@@ -931,7 +931,7 @@ func TestBulkLinkMultipleCandidates(t *testing.T) {
 	result, err := stream.Recv()
 	require.NoError(t, err)
 	require.Len(t, result.Entries, 1)
-	assert.Equal(t, srirachav1.MatchStatus_MULTIPLE_CANDIDATES, result.Entries[0].Status)
+	assert.Equal(t, srirachav1.MatchStatus_MATCH_STATUS_MULTIPLE_CANDIDATES, result.Entries[0].Status)
 	assert.InDelta(t, 0.95, float64(result.Entries[0].Confidence), 0.001)
 	require.NoError(t, stream.CloseSend())
 }
@@ -945,7 +945,7 @@ func TestBulkLinkMalformedToken(t *testing.T) {
 	stream, err := client.BulkLink(context.Background())
 	require.NoError(t, err)
 
-	err = stream.Send(&srirachav1.BulkTokenBatch{
+	err = stream.Send(&srirachav1.BulkLinkRequest{
 		SessionId:    "bulk-bad-token",
 		TokenRecords: [][]byte{{0xFF, 0xFE}}, // invalid proto bytes → NO_MATCH entry
 		RecordRefs:   []string{"ref-bad"},
@@ -956,7 +956,7 @@ func TestBulkLinkMalformedToken(t *testing.T) {
 	result, err := stream.Recv()
 	require.NoError(t, err)
 	require.Len(t, result.Entries, 1)
-	assert.Equal(t, srirachav1.MatchStatus_NO_MATCH, result.Entries[0].Status)
+	assert.Equal(t, srirachav1.MatchStatus_MATCH_STATUS_NO_MATCH, result.Entries[0].Status)
 	require.NoError(t, stream.CloseSend())
 }
 
@@ -976,7 +976,7 @@ func TestBulkLinkIndexerError(t *testing.T) {
 	stream, err := client.BulkLink(context.Background())
 	require.NoError(t, err)
 
-	err = stream.Send(&srirachav1.BulkTokenBatch{
+	err = stream.Send(&srirachav1.BulkLinkRequest{
 		SessionId:    "bulk-idx-err",
 		TokenRecords: [][]byte{trBytes},
 		RecordRefs:   []string{"ref-ie"},
@@ -1003,7 +1003,7 @@ func TestBulkLinkInvalidPolicy(t *testing.T) {
 	stream, err := client.BulkLink(context.Background())
 	require.NoError(t, err)
 
-	err = stream.Send(&srirachav1.BulkTokenBatch{
+	err = stream.Send(&srirachav1.BulkLinkRequest{
 		SessionId:    "bulk-bad-policy",
 		TokenRecords: [][]byte{trBytes},
 		RecordRefs:   []string{"ref-bp"},
@@ -1079,7 +1079,7 @@ func TestBulkLinkECDSAClient(t *testing.T) {
 	stream, err := stub.BulkLink(context.Background())
 	require.NoError(t, err)
 
-	err = stream.Send(&srirachav1.BulkTokenBatch{
+	err = stream.Send(&srirachav1.BulkLinkRequest{
 		SessionId:    "bulk-ecdsa",
 		TokenRecords: [][]byte{trBytes},
 		RecordRefs:   []string{"ref-ecdsa"},
@@ -1208,16 +1208,16 @@ func (fakeAuthInfo) AuthType() string { return "fake" }
 type fakeBulkStream struct {
 	grpc.ServerStream
 	ctx     context.Context
-	batches []*srirachav1.BulkTokenBatch
+	batches []*srirachav1.BulkLinkRequest
 	pos     int
 	recvErr error
 	sendErr error
-	sent    []*srirachav1.BulkMatchResult
+	sent    []*srirachav1.BulkLinkResponse
 }
 
 func (f *fakeBulkStream) Context() context.Context { return f.ctx }
 
-func (f *fakeBulkStream) Recv() (*srirachav1.BulkTokenBatch, error) {
+func (f *fakeBulkStream) Recv() (*srirachav1.BulkLinkRequest, error) {
 	if f.pos >= len(f.batches) {
 		if f.recvErr != nil {
 			return nil, f.recvErr
@@ -1229,7 +1229,7 @@ func (f *fakeBulkStream) Recv() (*srirachav1.BulkTokenBatch, error) {
 	return b, nil
 }
 
-func (f *fakeBulkStream) Send(r *srirachav1.BulkMatchResult) error {
+func (f *fakeBulkStream) Send(r *srirachav1.BulkLinkResponse) error {
 	if f.sendErr != nil {
 		return f.sendErr
 	}
@@ -1289,7 +1289,7 @@ func TestBulkLinkSendError(t *testing.T) {
 	stream := &fakeBulkStream{
 		ctx:     ctx,
 		sendErr: errors.New("send failed"),
-		batches: []*srirachav1.BulkTokenBatch{
+		batches: []*srirachav1.BulkLinkRequest{
 			{SessionId: "bulk-send-err", TokenRecords: nil, Policy: policy},
 		},
 	}

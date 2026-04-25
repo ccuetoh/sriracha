@@ -23,7 +23,7 @@ import (
 	"go.sriracha.dev/transport/internal/consent"
 	"go.sriracha.dev/transport/internal/replay"
 	"go.sriracha.dev/transport/internal/tlsconf"
-	srirachav1 "go.sriracha.dev/transport/proto/srirachav1"
+	srirachav1 "go.sriracha.dev/transport/proto/sriracha/v1"
 )
 
 // Config holds all tunable parameters for the Sriracha gRPC server.
@@ -128,7 +128,7 @@ func (s *server) GracefulStop() {
 }
 
 // GetCapabilities implements SrirachaService.GetCapabilities.
-func (s *server) GetCapabilities(_ context.Context, _ *srirachav1.CapabilitiesRequest) (*srirachav1.CapabilitiesResponse, error) {
+func (s *server) GetCapabilities(_ context.Context, _ *srirachav1.GetCapabilitiesRequest) (*srirachav1.GetCapabilitiesResponse, error) {
 	modes := make([]srirachav1.MatchMode, 0, len(s.cfg.SupportedModes))
 	for _, m := range s.cfg.SupportedModes {
 		pm, err := MatchModeToProto(m)
@@ -138,7 +138,7 @@ func (s *server) GetCapabilities(_ context.Context, _ *srirachav1.CapabilitiesRe
 		modes = append(modes, pm)
 	}
 
-	return &srirachav1.CapabilitiesResponse{
+	return &srirachav1.GetCapabilitiesResponse{
 		SpecVersion:      s.cfg.SpecVersion,
 		FieldsetVersions: s.cfg.FieldSetVersions,
 		SupportedFields:  s.cfg.SupportedFields,
@@ -192,7 +192,7 @@ func (s *server) Query(ctx context.Context, req *srirachav1.QueryRequest) (*srir
 		Status:    matchStatus,
 	}
 
-	if len(candidates) == 0 || matchStatus == srirachav1.MatchStatus_MULTIPLE_CANDIDATES {
+	if len(candidates) == 0 || matchStatus == srirachav1.MatchStatus_MATCH_STATUS_MULTIPLE_CANDIDATES {
 		if len(candidates) > 0 {
 			resp.Confidence = float32(candidates[0].Confidence)
 		}
@@ -257,7 +257,7 @@ func (s *server) BulkLink(stream srirachav1.SrirachaService_BulkLinkServer) erro
 	}
 }
 
-func (s *server) processBatch(ctx context.Context, batch *srirachav1.BulkTokenBatch) (*srirachav1.BulkMatchResult, error) {
+func (s *server) processBatch(ctx context.Context, batch *srirachav1.BulkLinkRequest) (*srirachav1.BulkLinkResponse, error) {
 	entries := make([]*srirachav1.MatchResultEntry, 0, len(batch.TokenRecords))
 
 	for i, trBytes := range batch.TokenRecords {
@@ -274,7 +274,7 @@ func (s *server) processBatch(ctx context.Context, batch *srirachav1.BulkTokenBa
 		entries = append(entries, entry)
 	}
 
-	return &srirachav1.BulkMatchResult{
+	return &srirachav1.BulkLinkResponse{
 		SessionId: batch.SessionId,
 		Entries:   entries,
 	}, nil
@@ -285,7 +285,7 @@ func (s *server) matchOne(ctx context.Context, trBytes []byte, ref string) (*sri
 	if err != nil {
 		return &srirachav1.MatchResultEntry{
 			RecordRef: ref,
-			Status:    srirachav1.MatchStatus_NO_MATCH,
+			Status:    srirachav1.MatchStatus_MATCH_STATUS_NO_MATCH,
 		}, nil
 	}
 
@@ -300,7 +300,7 @@ func (s *server) matchOne(ctx context.Context, trBytes []byte, ref string) (*sri
 		Status:    matchStatus,
 	}
 
-	if len(candidates) == 0 || matchStatus == srirachav1.MatchStatus_MULTIPLE_CANDIDATES {
+	if len(candidates) == 0 || matchStatus == srirachav1.MatchStatus_MATCH_STATUS_MULTIPLE_CANDIDATES {
 		if len(candidates) > 0 {
 			entry.Confidence = float32(candidates[0].Confidence)
 		}
