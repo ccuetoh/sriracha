@@ -204,11 +204,11 @@ func TestPeerIdentityNonEd25519Cert(t *testing.T) {
 // fakeBulkStream implements SrirachaService_BulkLinkServer without gRPC transport.
 type fakeBulkStream struct {
 	grpc.ServerStream // nil — panics on any unoverridden method
-	ctx     context.Context
-	batches []*srirachav1.BulkTokenBatch
-	pos     int
-	sendErr error
-	sent    []*srirachav1.BulkMatchResult
+	ctx               context.Context
+	batches           []*srirachav1.BulkTokenBatch
+	pos               int
+	sendErr           error
+	sent              []*srirachav1.BulkMatchResult
 }
 
 func (f *fakeBulkStream) Context() context.Context { return f.ctx }

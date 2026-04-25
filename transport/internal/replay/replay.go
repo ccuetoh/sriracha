@@ -54,7 +54,7 @@ func (c *MemoryCache) pruneLoop(ctx context.Context, interval time.Duration) {
 func (c *MemoryCache) prune() {
 	now := time.Now()
 	c.entries.Range(func(key, value any) bool {
-		if value.(time.Time).Before(now) {
+		if exp, ok := value.(time.Time); ok && exp.Before(now) {
 			c.entries.Delete(key)
 		}
 		return true

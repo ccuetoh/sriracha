@@ -48,7 +48,6 @@ func TestCodeForSrirachaCode(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(fmt.Sprintf("code_%d", tc.code), func(t *testing.T) {
 			t.Parallel()
 			got := codeForSrirachaCode(tc.code)

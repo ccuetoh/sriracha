@@ -25,9 +25,20 @@ type Config struct {
 	TLSConfig *tls.Config
 }
 
-// Client is a Sriracha client for querying a remote institution (responding party B).
-// Call Close when done to release the underlying connection.
-type Client struct {
+// Client is the interface for querying a remote Sriracha institution (responding party B).
+type Client interface {
+	// Close releases the underlying gRPC connection.
+	Close() error
+	// Capabilities returns the cached server capabilities from the initial handshake.
+	Capabilities() *srirachav1.CapabilitiesResponse
+	// Query sends a single QueryRequest and returns the response.
+	// req.SessionId must be non-empty; use NewQueryRequest to construct a well-formed request.
+	Query(ctx context.Context, req *srirachav1.QueryRequest) (*srirachav1.QueryResponse, error)
+	// BulkLink opens a bidirectional streaming session for bulk record linkage.
+	BulkLink(ctx context.Context) (srirachav1.SrirachaService_BulkLinkClient, error)
+}
+
+type client struct {
 	conn         *grpc.ClientConn
 	stub         srirachav1.SrirachaServiceClient
 	capabilities *srirachav1.CapabilitiesResponse
@@ -36,7 +47,7 @@ type Client struct {
 // New dials the remote Sriracha server, performs the mandatory GetCapabilities
 // handshake, and returns a ready Client. Returns an error if the connection or
 // handshake fails.
-func New(ctx context.Context, cfg Config) (*Client, error) {
+func New(ctx context.Context, cfg Config) (Client, error) {
 	if cfg.ServerAddr == "" {
 		return nil, fmt.Errorf("client: ServerAddr must not be empty")
 	}
@@ -64,22 +75,20 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		return nil, fmt.Errorf("client: capabilities handshake: %w", err)
 	}
 
-	return &Client{conn: conn, stub: stub, capabilities: caps}, nil
+	return &client{conn: conn, stub: stub, capabilities: caps}, nil
 }
 
-// Close releases the underlying gRPC connection.
-func (c *Client) Close() error {
+func (c *client) Close() error {
 	return c.conn.Close()
 }
 
-// Capabilities returns the cached server capabilities from the initial handshake.
-func (c *Client) Capabilities() *srirachav1.CapabilitiesResponse {
+func (c *client) Capabilities() *srirachav1.CapabilitiesResponse {
 	return c.capabilities
 }
 
 // Query sends a single QueryRequest and returns the response.
 // req.SessionId must be non-empty; use NewQueryRequest to construct a well-formed request.
-func (c *Client) Query(ctx context.Context, req *srirachav1.QueryRequest) (*srirachav1.QueryResponse, error) {
+func (c *client) Query(ctx context.Context, req *srirachav1.QueryRequest) (*srirachav1.QueryResponse, error) {
 	if req.SessionId == "" {
 		return nil, fmt.Errorf("client: req.SessionId must not be empty")
 	}
@@ -89,7 +98,7 @@ func (c *Client) Query(ctx context.Context, req *srirachav1.QueryRequest) (*srir
 // BulkLink opens a bidirectional streaming session for bulk record linkage.
 // The caller is responsible for sending BulkTokenBatch messages and receiving
 // BulkMatchResult messages, and for closing the send side when done.
-func (c *Client) BulkLink(ctx context.Context) (srirachav1.SrirachaService_BulkLinkClient, error) {
+func (c *client) BulkLink(ctx context.Context) (srirachav1.SrirachaService_BulkLinkClient, error) {
 	return c.stub.BulkLink(ctx)
 }
 
