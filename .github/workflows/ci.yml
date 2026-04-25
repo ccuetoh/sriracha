@@ -76,16 +76,8 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Set up buf
-        uses: bufbuild/buf-action@v1
-        with:
-          setup_only: true
-
       - name: Install mockery
         run: go install github.com/vektra/mockery/v2@v2.53.6
-
-      - name: Regenerate proto
-        run: buf generate
 
       - name: Regenerate mocks
         run: mockery

@@ -2,5 +2,7 @@ version: v2
 modules:
   - path: transport/proto/srirachav1
     lint:
+      use:
+        - MINIMAL
       except:
         - ENUM_VALUE_PREFIX
