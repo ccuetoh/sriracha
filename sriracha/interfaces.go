@@ -48,8 +48,10 @@ type IndexStorage interface {
 
 // AuditLog records protocol events for compliance.
 type AuditLog interface {
-	// Append adds an event record to the log.
-	Append(ctx context.Context, event string, metadata map[string]string) error
-	// Verify checks the integrity of the log.
+	// Append adds an event to the log, computing and setting PreviousHash.
+	// The caller provides all fields except PreviousHash and EventID;
+	// the implementation fills those in.
+	Append(ctx context.Context, event AuditEvent) error
+	// Verify checks hash chain integrity. Returns nil if the chain is intact.
 	Verify(ctx context.Context) error
 }
