@@ -5,6 +5,7 @@
 package mockserver
 
 import (
+	"context"
 	"net"
 
 	mock "github.com/stretchr/testify/mock"
@@ -38,8 +39,8 @@ func (_m *MockServer) EXPECT() *MockServer_Expecter {
 }
 
 // GracefulStop provides a mock function for the type MockServer
-func (_mock *MockServer) GracefulStop() {
-	_mock.Called()
+func (_mock *MockServer) GracefulStop(ctx context.Context) {
+	_mock.Called(ctx)
 	return
 }
 
@@ -49,13 +50,20 @@ type MockServer_GracefulStop_Call struct {
 }
 
 // GracefulStop is a helper method to define mock.On call
-func (_e *MockServer_Expecter) GracefulStop() *MockServer_GracefulStop_Call {
-	return &MockServer_GracefulStop_Call{Call: _e.mock.On("GracefulStop")}
+//   - ctx context.Context
+func (_e *MockServer_Expecter) GracefulStop(ctx interface{}) *MockServer_GracefulStop_Call {
+	return &MockServer_GracefulStop_Call{Call: _e.mock.On("GracefulStop", ctx)}
 }
 
-func (_c *MockServer_GracefulStop_Call) Run(run func()) *MockServer_GracefulStop_Call {
+func (_c *MockServer_GracefulStop_Call) Run(run func(ctx context.Context)) *MockServer_GracefulStop_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
 	})
 	return _c
 }
@@ -65,7 +73,7 @@ func (_c *MockServer_GracefulStop_Call) Return() *MockServer_GracefulStop_Call {
 	return _c
 }
 
-func (_c *MockServer_GracefulStop_Call) RunAndReturn(run func()) *MockServer_GracefulStop_Call {
+func (_c *MockServer_GracefulStop_Call) RunAndReturn(run func(ctx context.Context)) *MockServer_GracefulStop_Call {
 	_c.Run(run)
 	return _c
 }

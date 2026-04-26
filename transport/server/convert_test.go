@@ -33,7 +33,7 @@ func TestProtoToTokenRecordBadChecksum(t *testing.T) {
 
 	// Valid proto but checksum is not 32 bytes.
 	pb := &srirachav1.TokenRecord{
-		FieldsetVersion: "test-v1",
+		FieldsetVersion: "1.0.0-test",
 		Mode:            srirachav1.MatchMode_MATCH_MODE_DETERMINISTIC,
 		Algo:            sriracha.AlgoHMACSHA256V1,
 		Payload:         []byte("test"),
@@ -51,7 +51,7 @@ func TestProtoToTokenRecordProbabilistic(t *testing.T) {
 
 	var checksum [32]byte
 	tr := sriracha.TokenRecord{
-		FieldSetVersion: "test-v1",
+		FieldSetVersion: "1.0.0-test",
 		Mode:            sriracha.Probabilistic,
 		Algo:            sriracha.AlgoHMACSHA256V1,
 		Payload:         []byte("payload"),
@@ -72,7 +72,7 @@ func TestProtoToTokenRecordUnknownMode(t *testing.T) {
 	// Valid proto bytes but unknown mode — ProtoToMatchMode fails inside ProtoToTokenRecord.
 	checksum := make([]byte, 32)
 	pb := &srirachav1.TokenRecord{
-		FieldsetVersion: "test-v1",
+		FieldsetVersion: "1.0.0-test",
 		Mode:            srirachav1.MatchMode(999),
 		Algo:            sriracha.AlgoHMACSHA256V1,
 		Payload:         []byte("payload"),

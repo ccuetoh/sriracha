@@ -2,7 +2,6 @@ package replay
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/maypok86/otter"
@@ -16,7 +15,6 @@ type Cache interface {
 // MemoryCache is an in-memory Cache backed by otter with automatic TTL eviction.
 // Create one with New.
 type MemoryCache struct {
-	mu    sync.Mutex
 	cache otter.CacheWithVariableTTL[string, struct{}]
 }
 
@@ -33,19 +31,14 @@ func New(ctx context.Context) *MemoryCache {
 }
 
 // Claim attempts to reserve policyID until expiresAt.
-// Returns true on first use, false if already claimed (replay detected).
+// Returns true on first use, false if the policy is already claimed (replay
+// detected) or if expiresAt is in the past. Expired policies must be rejected
+// here so they cannot bypass replay detection in the gap between the
+// validator's own expiry check and this call.
 func (c *MemoryCache) Claim(policyID string, expiresAt time.Time) bool {
 	ttl := time.Until(expiresAt)
 	if ttl <= 0 {
-		return true
-	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Has returns false for expired entries, enabling re-claim after expiry.
-	if c.cache.Has(policyID) {
 		return false
 	}
-	return c.cache.Set(policyID, struct{}{}, ttl)
+	return c.cache.SetIfAbsent(policyID, struct{}{}, ttl)
 }

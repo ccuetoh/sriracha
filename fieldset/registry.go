@@ -32,9 +32,12 @@ func DefaultFieldSet() sriracha.FieldSet {
 	fields := make([]sriracha.FieldSpec, len(defaultV01.Fields))
 	copy(fields, defaultV01.Fields)
 
+	bp := defaultV01.BloomParams
+	bp.NgramSizes = append([]int(nil), defaultV01.BloomParams.NgramSizes...)
+
 	return sriracha.FieldSet{
 		Version:     defaultV01.Version,
 		Fields:      fields,
-		BloomParams: defaultV01.BloomParams,
+		BloomParams: bp,
 	}
 }

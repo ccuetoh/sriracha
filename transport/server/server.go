@@ -26,6 +26,12 @@ import (
 	srirachav1 "go.sriracha.dev/transport/proto/sriracha/v1"
 )
 
+// DefaultMaxRecvMessageBytes caps the size of an incoming gRPC message when
+// Config.MaxRecvMessageBytes is left at zero. 4 MiB matches gRPC's own
+// default and bounds the memory a single peer can force the server to
+// allocate per BulkLink batch or Query.
+const DefaultMaxRecvMessageBytes = 4 * 1024 * 1024
+
 // Config holds all tunable parameters for the Sriracha gRPC server.
 type Config struct {
 	// InstitutionID is this institution's canonical identifier (matched against ConsentPolicy.target_id).
@@ -42,14 +48,23 @@ type Config struct {
 	RateQueriesPerMinute uint32
 	// RateBulkRecordsPerDay is the maximum bulk records per day (0 = unlimited).
 	RateBulkRecordsPerDay uint32
+	// MaxRecvMessageBytes caps a single incoming gRPC message. Zero falls
+	// back to DefaultMaxRecvMessageBytes; pass a positive value to allow
+	// larger BulkLink batches on trusted links.
+	MaxRecvMessageBytes int
+	// MaxBulkRecordsPerStream caps the cumulative TokenRecords accepted on
+	// one BulkLink stream. Zero disables the cap.
+	MaxBulkRecordsPerStream int
 }
 
 // Server is the Sriracha gRPC service (responding party B).
 type Server interface {
 	// Serve binds lis and blocks until the server stops or an error occurs.
 	Serve(lis net.Listener) error
-	// GracefulStop stops the server, waiting for in-flight RPCs to complete.
-	GracefulStop()
+	// GracefulStop waits for in-flight RPCs to complete. Once the supplied
+	// context is cancelled or its deadline elapses, it falls back to a hard
+	// Stop so a hung BulkLink stream cannot block shutdown forever.
+	GracefulStop(ctx context.Context)
 }
 
 type server struct {
@@ -93,8 +108,14 @@ func New(
 		audit = NopAuditLog{}
 	}
 
+	maxRecv := cfg.MaxRecvMessageBytes
+	if maxRecv <= 0 {
+		maxRecv = DefaultMaxRecvMessageBytes
+	}
+
 	grpcSrv := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(tlsCfg)),
+		grpc.MaxRecvMsgSize(maxRecv),
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			Time:             30 * time.Second,
 			Timeout:          10 * time.Second,
@@ -123,8 +144,18 @@ func (s *server) Serve(lis net.Listener) error {
 	return s.grpcSrv.Serve(lis)
 }
 
-func (s *server) GracefulStop() {
-	s.grpcSrv.GracefulStop()
+func (s *server) GracefulStop(ctx context.Context) {
+	done := make(chan struct{})
+	go func() {
+		s.grpcSrv.GracefulStop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		s.grpcSrv.Stop()
+		<-done
+	}
 }
 
 // GetCapabilities implements SrirachaService.GetCapabilities.
@@ -184,7 +215,9 @@ func (s *server) Query(ctx context.Context, req *srirachav1.QueryRequest) (*srir
 			InitiatorID: peerID,
 			TargetID:    s.cfg.InstitutionID,
 		})
-		return nil, status.Error(codes.PermissionDenied, err.Error())
+		// The detailed reason is recorded in the audit event above; do not
+		// leak issuer/target identities or replay state to the peer.
+		return nil, status.Error(codes.PermissionDenied, "consent policy rejected")
 	}
 
 	// TODO: enforce s.cfg.RateQueriesPerMinute
@@ -207,7 +240,10 @@ func (s *server) Query(ctx context.Context, req *srirachav1.QueryRequest) (*srir
 	}
 
 	matchStatus := candidatesToStatus(candidates)
-	matchMode, _ := ProtoToMatchMode(req.MatchMode)
+	matchMode, err := ProtoToMatchMode(req.MatchMode)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "unknown match mode")
+	}
 
 	resp := &srirachav1.QueryResponse{
 		SessionId: req.SessionId,
@@ -311,7 +347,7 @@ func (s *server) BulkLink(stream srirachav1.SrirachaService_BulkLinkServer) erro
 					InitiatorID: peerID,
 					TargetID:    s.cfg.InstitutionID,
 				})
-				return status.Error(codes.PermissionDenied, err.Error())
+				return status.Error(codes.PermissionDenied, "consent policy rejected")
 			}
 
 			policyValidated = true
@@ -329,6 +365,10 @@ func (s *server) BulkLink(stream srirachav1.SrirachaService_BulkLinkServer) erro
 		}
 
 		recordCount += len(batch.TokenRecords)
+		if cap := s.cfg.MaxBulkRecordsPerStream; cap > 0 && recordCount > cap {
+			return status.Errorf(codes.ResourceExhausted,
+				"bulk record cap exceeded: %d > %d", recordCount, cap)
+		}
 
 		result, err := s.processBatch(ctx, batch)
 		if err != nil {

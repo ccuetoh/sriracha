@@ -44,7 +44,7 @@ func Normalize(value string, path sriracha.FieldPath) (string, error) {
 		return nfkdDecompose(normalizeIdentifier(value)), nil
 	// Country is the only address field with special normalization;
 	// other address fields fall through to default (steps 1-4 only).
-	case path.String() == sriracha.FieldAddressCountry.String():
+	case path == sriracha.FieldAddressCountry:
 		return normalizeCountry(value)
 	default:
 		return value, nil

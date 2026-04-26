@@ -125,7 +125,7 @@ func startTestServer(t *testing.T, pki *testPKI) string {
 		InstitutionID:    "org.example.b",
 		SpecVersion:      "0.1.0",
 		SupportedFields:  []string{sriracha.FieldNameGiven.String()},
-		FieldSetVersions: []string{"test-v1"},
+		FieldSetVersions: []string{"1.0.0-test"},
 		SupportedModes:   []sriracha.MatchMode{sriracha.Deterministic},
 	}
 
@@ -136,7 +136,7 @@ func startTestServer(t *testing.T, pki *testPKI) string {
 	require.NoError(t, err)
 
 	go func() { _ = srv.Serve(lis) }()
-	t.Cleanup(srv.GracefulStop)
+	t.Cleanup(func() { srv.GracefulStop(context.Background()) })
 
 	return lis.Addr().String()
 }
@@ -225,7 +225,7 @@ func TestNewQueryRequest(t *testing.T) {
 
 	var checksum [32]byte
 	tr := sriracha.TokenRecord{
-		FieldSetVersion: "test-v1",
+		FieldSetVersion: "1.0.0-test",
 		Mode:            sriracha.Deterministic,
 		Algo:            sriracha.AlgoHMACSHA256V1,
 		Payload:         []byte("payload"),
@@ -242,11 +242,11 @@ func TestNewQueryRequest(t *testing.T) {
 		ExpiresAt: now.Add(time.Hour).Unix(),
 	}
 
-	req, err := NewQueryRequest(tr, "test-v1", []string{"sriracha::name::given"}, policy, nil)
+	req, err := NewQueryRequest(tr, "1.0.0-test", []string{"sriracha::name::given"}, policy, nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, req.SessionId)
 	assert.NotEmpty(t, req.TokenRecord)
-	assert.Equal(t, "test-v1", req.FieldsetVersion)
+	assert.Equal(t, "1.0.0-test", req.FieldsetVersion)
 	assert.Equal(t, srirachav1.MatchMode_MATCH_MODE_DETERMINISTIC, req.MatchMode)
 }
 
@@ -255,14 +255,14 @@ func TestNewQueryRequestProbabilistic(t *testing.T) {
 
 	var checksum [32]byte
 	tr := sriracha.TokenRecord{
-		FieldSetVersion: "test-v1",
+		FieldSetVersion: "1.0.0-test",
 		Mode:            sriracha.Probabilistic,
 		Algo:            sriracha.AlgoHMACSHA256V1,
 		Payload:         []byte("payload"),
 		Checksum:        checksum,
 	}
 
-	req, err := NewQueryRequest(tr, "test-v1", nil, nil, nil)
+	req, err := NewQueryRequest(tr, "1.0.0-test", nil, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, srirachav1.MatchMode_MATCH_MODE_PROBABILISTIC, req.MatchMode)
 }
@@ -272,26 +272,32 @@ func TestNewQueryRequestInvalidMode(t *testing.T) {
 
 	var checksum [32]byte
 	tr := sriracha.TokenRecord{
-		FieldSetVersion: "test-v1",
+		FieldSetVersion: "1.0.0-test",
 		Mode:            sriracha.MatchMode(99),
 		Algo:            sriracha.AlgoHMACSHA256V1,
 		Payload:         []byte("payload"),
 		Checksum:        checksum,
 	}
 
-	_, err := NewQueryRequest(tr, "test-v1", nil, nil, nil)
+	_, err := NewQueryRequest(tr, "1.0.0-test", nil, nil, nil)
 	assert.Error(t, err)
 }
 
 // signTestPolicy signs a ConsentPolicy using the provided Ed25519 private key.
-// The message format mirrors consent.policyMessage.
+// The message format mirrors consent.policyMessage (domain prefix +
+// length-prefixed fields + big-endian timestamps).
 func signTestPolicy(t *testing.T, priv ed25519.PrivateKey, p *srirachav1.ConsentPolicy) {
 	t.Helper()
+	const domain = "sriracha.consent.v1\x00"
+	fields := []string{p.PolicyId, p.IssuerId, p.TargetId, p.Purpose}
 	var buf []byte
-	buf = append(buf, []byte(p.PolicyId)...)
-	buf = append(buf, []byte(p.IssuerId)...)
-	buf = append(buf, []byte(p.TargetId)...)
-	buf = append(buf, []byte(p.Purpose)...)
+	buf = append(buf, domain...)
+	var lp [4]byte
+	for _, f := range fields {
+		binary.BigEndian.PutUint32(lp[:], uint32(len(f))) //nolint:gosec // G115: policy field length bounded by validation
+		buf = append(buf, lp[:]...)
+		buf = append(buf, f...)
+	}
 	var ts [8]byte
 	binary.BigEndian.PutUint64(ts[:], uint64(p.IssuedAt)) //nolint:gosec // G115: bit-pattern serialisation for HMAC; sign is irrelevant
 	buf = append(buf, ts[:]...)
@@ -331,14 +337,14 @@ func TestClientQuery(t *testing.T) {
 
 	var checksum [32]byte
 	tr := sriracha.TokenRecord{
-		FieldSetVersion: "test-v1",
+		FieldSetVersion: "1.0.0-test",
 		Mode:            sriracha.Deterministic,
 		Algo:            sriracha.AlgoHMACSHA256V1,
 		Payload:         []byte("payload"),
 		Checksum:        checksum,
 	}
 
-	req, err := NewQueryRequest(tr, "test-v1", []string{sriracha.FieldNameGiven.String()},
+	req, err := NewQueryRequest(tr, "1.0.0-test", []string{sriracha.FieldNameGiven.String()},
 		newTestPolicy(t, pki, "pol-client-query-1"), nil)
 	require.NoError(t, err)
 
@@ -361,7 +367,7 @@ func TestClientQueryEmptySessionID(t *testing.T) {
 	t.Cleanup(func() { _ = c.Close() })
 
 	trBytes, err := server.TokenRecordToProto(sriracha.TokenRecord{
-		FieldSetVersion: "test-v1",
+		FieldSetVersion: "1.0.0-test",
 		Mode:            sriracha.Deterministic,
 		Algo:            sriracha.AlgoHMACSHA256V1,
 		Payload:         []byte("payload"),
@@ -372,7 +378,7 @@ func TestClientQueryEmptySessionID(t *testing.T) {
 	resp, err := c.Query(context.Background(), &srirachav1.QueryRequest{
 		SessionId:       "",
 		TokenRecord:     trBytes,
-		FieldsetVersion: "test-v1",
+		FieldsetVersion: "1.0.0-test",
 		Policy:          newTestPolicy(t, pki, "pol-empty-session"),
 	})
 	assert.Error(t, err)
@@ -397,7 +403,7 @@ func TestClientBulkLink(t *testing.T) {
 
 	var checksum [32]byte
 	tr := sriracha.TokenRecord{
-		FieldSetVersion: "test-v1",
+		FieldSetVersion: "1.0.0-test",
 		Mode:            sriracha.Deterministic,
 		Algo:            sriracha.AlgoHMACSHA256V1,
 		Payload:         []byte("payload"),

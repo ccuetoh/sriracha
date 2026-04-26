@@ -13,8 +13,9 @@ import (
 func TestClaimExpiredPolicy(t *testing.T) {
 	t.Parallel()
 	c := newTestCache(t)
-	// expiresAt in the past → ttl <= 0 → returns true without caching.
-	assert.True(t, c.Claim("pol-already-expired", time.Now().Add(-time.Second)))
+	// expiresAt in the past → ttl <= 0 → reject so an expired policy cannot
+	// slip through the validator/cache TOCTOU window and be replayed.
+	assert.False(t, c.Claim("pol-already-expired", time.Now().Add(-time.Second)))
 }
 
 func newTestCache(t *testing.T) *MemoryCache {

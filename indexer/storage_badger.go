@@ -3,6 +3,8 @@ package indexer
 import (
 	"context"
 	"errors"
+	"sync"
+	"time"
 
 	"github.com/dgraph-io/badger/v4"
 
@@ -11,19 +13,28 @@ import (
 
 const badgerCheckpointKey = "__checkpoint__"
 
+// badgerGCInterval is how often the value-log GC pass runs in the background
+// when a persistent store is opened. Badger reclaims space on update/delete
+// only when GC is invoked; without this loop a long-running deployment grows
+// unboundedly even if the logical record count is stable.
+const badgerGCInterval = 5 * time.Minute
+
+// badgerGCDiscardRatio is the minimum fraction of stale data a value-log file
+// must contain before Badger rewrites it. 0.5 is the value Badger's docs
+// recommend.
+const badgerGCDiscardRatio = 0.5
+
 // BadgerStorage implements sriracha.IndexStorage using BadgerDB.
 // It also implements io.Closer, StorageSizer, and Transactor.
 type BadgerStorage struct {
 	db            *badger.DB
 	checkpointKey string
-	valueCopyFn   func(*badger.Item) ([]byte, error) // nil: use item.ValueCopy(nil); set in tests to inject errors
-}
 
-func (s *BadgerStorage) valueCopy(item *badger.Item) ([]byte, error) {
-	if s.valueCopyFn != nil {
-		return s.valueCopyFn(item)
-	}
-	return item.ValueCopy(nil)
+	gcStop  chan struct{}
+	gcDone  chan struct{}
+	gcOnce  sync.Once
+	closeMu sync.Mutex
+	closed  bool
 }
 
 func openBadger(opts badger.Options) (*BadgerStorage, error) {
@@ -31,7 +42,21 @@ func openBadger(opts badger.Options) (*BadgerStorage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &BadgerStorage{db: db, checkpointKey: badgerCheckpointKey}, nil
+	s := &BadgerStorage{
+		db:            db,
+		checkpointKey: badgerCheckpointKey,
+		gcStop:        make(chan struct{}),
+		gcDone:        make(chan struct{}),
+	}
+	// In-memory mode has no value log, so the GC loop is a no-op. Guard
+	// against starting it to keep tests deterministic and avoid spurious
+	// goroutine leaks.
+	if !opts.InMemory {
+		go s.runValueLogGC(badgerGCInterval)
+	} else {
+		close(s.gcDone)
+	}
+	return s, nil
 }
 
 // OpenBadger opens a persistent BadgerDB store at dir.
@@ -44,8 +69,41 @@ func OpenBadgerInMemory() (*BadgerStorage, error) {
 	return openBadger(badger.DefaultOptions("").WithInMemory(true).WithLogger(nil))
 }
 
-// Close releases all resources held by the BadgerDB instance.
+// runValueLogGC drives Badger's value-log garbage collector at a fixed
+// interval until Close is called. Each tick repeatedly invokes
+// db.RunValueLogGC until it reports no rewrite is needed (or any other
+// error), so a single pass can reclaim multiple stale files.
+func (s *BadgerStorage) runValueLogGC(interval time.Duration) {
+	defer close(s.gcDone)
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-s.gcStop:
+			return
+		case <-t.C:
+			for {
+				if err := s.db.RunValueLogGC(badgerGCDiscardRatio); err != nil {
+					break
+				}
+			}
+		}
+	}
+}
+
+// Close stops the background GC loop and releases all resources held by the
+// BadgerDB instance. Calling Close more than once is safe.
 func (s *BadgerStorage) Close() error {
+	s.closeMu.Lock()
+	if s.closed {
+		s.closeMu.Unlock()
+		return nil
+	}
+	s.closed = true
+	s.closeMu.Unlock()
+
+	s.gcOnce.Do(func() { close(s.gcStop) })
+	<-s.gcDone
 	return s.db.Close()
 }
 
@@ -98,7 +156,7 @@ func (s *BadgerStorage) Scan(ctx context.Context, prefix string, fn func(key str
 			}
 			item := it.Item()
 			key := string(item.Key())
-			val, err := s.valueCopy(item)
+			val, err := item.ValueCopy(nil)
 			if err != nil {
 				return err
 			}
@@ -141,7 +199,7 @@ func (s *BadgerStorage) LoadCheckpoint(ctx context.Context) (string, error) {
 		if err != nil {
 			return err
 		}
-		val, err := s.valueCopy(item)
+		val, err := item.ValueCopy(nil)
 		if err != nil {
 			return err
 		}

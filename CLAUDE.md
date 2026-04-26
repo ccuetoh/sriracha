@@ -2,16 +2,18 @@
 
 ## Module
 
-`go.sriracha.dev`, Go 1.23+. External runtime deps should be carefully considered. Tests use
+`go.sriracha.dev`, Go 1.25+. External runtime deps should be carefully considered. Tests use
 `github.com/stretchr/testify`.
 
 ## Package layout
 ```
 sriracha/        # go.sriracha.dev/sriracha — root types, fields, errors, interfaces
-internal/bitset/ # []uint64-backed bitset; no external deps
 normalize/       # Unicode normalization pipeline
-token/           # HMAC-SHA256 deterministic + Bloom filter probabilistic tokenizers
-fieldset/        # FieldSet validation, compatibility, version negotiation, canonical V0.1
+token/           # HMAC-SHA256 deterministic + Bloom filter probabilistic tokenizers (uses bits-and-blooms/bitset)
+fieldset/        # FieldSet validation, compatibility, semver-based version negotiation, canonical V0.1
+indexer/         # TokenIndexer with pluggable IndexStorage (MemoryStorage or BadgerStorage)
+audit/file/      # Append-only JSONL audit log with SHA-256 hash chaining
+transport/       # gRPC client and server (mTLS, consent policy, replay cache)
 ```
 
 ## Hard rules
@@ -32,7 +34,7 @@ fieldset/        # FieldSet validation, compatibility, version negotiation, cano
 - Use `require` for fatal checks (errors that stop the test), `assert` for non-fatal value checks.
 - Table-driven tests with named subtests wherever multiple cases test the same function.
 - Loop variable capture (`tc := tc`) before subtest closures.
-- Target 100% coverage; the only accepted gap is the structurally unreachable `b.Set` error path in `tokenizeFieldBloom`.
+- Target 100% coverage.
 
 ## Running tests
 ```bash

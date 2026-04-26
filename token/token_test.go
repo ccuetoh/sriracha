@@ -43,14 +43,14 @@ func newTok(t *testing.T, secret string) *Tokenizer {
 
 func deterministicFS(fields ...sriracha.FieldSpec) sriracha.FieldSet {
 	return sriracha.FieldSet{
-		Version: "test-v1",
+		Version: "1.0.0-test",
 		Fields:  fields,
 	}
 }
 
 func bloomFS(fields ...sriracha.FieldSpec) sriracha.FieldSet {
 	return sriracha.FieldSet{
-		Version: "test-v1",
+		Version: "1.0.0-test",
 		Fields:  fields,
 		BloomParams: sriracha.BloomConfig{
 			SizeBits:   1024,

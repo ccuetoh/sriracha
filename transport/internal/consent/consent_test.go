@@ -161,6 +161,25 @@ func TestValidateReplay(t *testing.T) {
 	assert.ErrorContains(t, err, "replay")
 }
 
+// TestPolicyMessage_NoFieldBoundaryCollision asserts that two policies
+// differing only in how a string is split across adjacent fields produce
+// distinct signing messages. Without length prefixes, ("ab","cd") and
+// ("abcd","") would share the same canonical form.
+func TestPolicyMessage_NoFieldBoundaryCollision(t *testing.T) {
+	t.Parallel()
+
+	a := &srirachav1.ConsentPolicy{
+		PolicyId: "ab", IssuerId: "cd", TargetId: "ef", Purpose: "gh",
+		IssuedAt: 1, ExpiresAt: 2,
+	}
+	b := &srirachav1.ConsentPolicy{
+		PolicyId: "abcd", IssuerId: "", TargetId: "ef", Purpose: "gh",
+		IssuedAt: 1, ExpiresAt: 2,
+	}
+
+	assert.NotEqual(t, policyMessage(a), policyMessage(b))
+}
+
 func BenchmarkValidate(b *testing.B) {
 	const (
 		issuerID = "org.bench.a"

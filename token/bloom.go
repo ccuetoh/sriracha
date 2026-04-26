@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
-	"strconv"
+	"hash"
 
 	"github.com/bits-and-blooms/bitset"
 	bloom "github.com/bits-and-blooms/bloom/v3"
@@ -22,7 +22,11 @@ import (
 func (t *Tokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.TokenRecord, error) {
 	cfg := fs.BloomParams
 	fieldBytes := int(((cfg.SizeBits + 63) / 64) * 8)
-	var payload []byte
+	payload := make([]byte, 0, len(fs.Fields)*fieldBytes)
+
+	// Reuse a single HMAC instance across every field/gram in this record.
+	h := hmac.New(sha256.New, t.secret.Bytes())
+
 	for _, spec := range fs.Fields {
 		raw, ok := record[spec.Path]
 		if !ok || sriracha.IsNotFound(raw) || sriracha.IsNotHeld(raw) {
@@ -38,7 +42,7 @@ func (t *Tokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.F
 		if err != nil {
 			return sriracha.TokenRecord{}, fmt.Errorf("token: normalization failed for field %q: %w", spec.Path, err)
 		}
-		payload = append(payload, t.tokenizeFieldBloom(normalized, spec.Path, cfg)...)
+		payload = append(payload, tokenizeFieldBloom(h, normalized, spec.Path, cfg)...)
 	}
 
 	return sriracha.TokenRecord{
@@ -50,25 +54,33 @@ func (t *Tokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.F
 	}, nil
 }
 
-// tokenizeFieldBloom returns serialized Bloom filter bytes for a single normalized field value.
-// Bit positions are determined by HMAC-SHA256 keyed with the Tokenizer secret, preventing
-// n-gram inference without access to the key.
-func (t *Tokenizer) tokenizeFieldBloom(normalizedValue string, path sriracha.FieldPath, cfg sriracha.BloomConfig) []byte {
+// tokenizeFieldBloom returns serialized Bloom filter bytes for a single
+// normalized field value, using h (which is reset between hashes).
+//
+// Bit positions are derived from HMAC-SHA256 over (gram, path, counter), each
+// component written separately and length-prefixed so distinct (gram, path)
+// or counter values cannot collide via concatenation. Without separators,
+// (gram="ab", path="c.d") and (gram="a", path="bc.d") would hash the same input.
+func tokenizeFieldBloom(h hash.Hash, normalizedValue string, path sriracha.FieldPath, cfg sriracha.BloomConfig) []byte {
 	f := bloom.New(uint(cfg.SizeBits), uint(cfg.HashCount))
 	bs := f.BitSet()
 	grams := ngrams(normalizedValue, cfg.NgramSizes)
-	pathStr := path.String()
+	pathBytes := []byte(path.String())
 
-	// Allocate one HMAC instance and reset it between uses to avoid the cost
-	// of re-keying (hmac.New allocates a new underlying hash each call).
-	h := hmac.New(sha256.New, t.secret.Bytes())
-
+	var lp [4]byte
+	var ib [4]byte
 	for _, g := range grams {
-		prefix := []byte(g + pathStr)
+		gb := []byte(g)
 		for i := range cfg.HashCount {
 			h.Reset()
-			h.Write(prefix)
-			h.Write([]byte(strconv.Itoa(i)))
+			binary.BigEndian.PutUint32(lp[:], uint32(len(gb))) //nolint:gosec // G115: gram length bounded by ngram size
+			h.Write(lp[:])
+			h.Write(gb)
+			binary.BigEndian.PutUint32(lp[:], uint32(len(pathBytes))) //nolint:gosec // G115: field path length bounded by parser
+			h.Write(lp[:])
+			h.Write(pathBytes)
+			binary.BigEndian.PutUint32(ib[:], uint32(i)) //nolint:gosec // i bounded by cfg.HashCount
+			h.Write(ib[:])
 			sum := h.Sum(nil)
 			pos := binary.BigEndian.Uint64(sum[:8]) % uint64(cfg.SizeBits)
 			bs.Set(uint(pos))
