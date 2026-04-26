@@ -34,7 +34,7 @@ transport/       # gRPC client and server (mTLS, consent policy, replay cache)
 - Use `require` for fatal checks (errors that stop the test), `assert` for non-fatal value checks.
 - Table-driven tests with named subtests wherever multiple cases test the same function.
 - Loop variable capture (`tc := tc`) before subtest closures.
-- Target 100% coverage; the only accepted gap is the structurally unreachable `b.Set` error path in `tokenizeFieldBloom`.
+- Target 100% coverage.
 
 ## Running tests
 ```bash

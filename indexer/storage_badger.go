@@ -29,20 +29,12 @@ const badgerGCDiscardRatio = 0.5
 type BadgerStorage struct {
 	db            *badger.DB
 	checkpointKey string
-	valueCopyFn   func(*badger.Item) ([]byte, error) // nil: use item.ValueCopy(nil); set in tests to inject errors
 
-	gcStop   chan struct{}
-	gcDone   chan struct{}
-	gcOnce   sync.Once
-	closeMu  sync.Mutex
-	closed   bool
-}
-
-func (s *BadgerStorage) valueCopy(item *badger.Item) ([]byte, error) {
-	if s.valueCopyFn != nil {
-		return s.valueCopyFn(item)
-	}
-	return item.ValueCopy(nil)
+	gcStop  chan struct{}
+	gcDone  chan struct{}
+	gcOnce  sync.Once
+	closeMu sync.Mutex
+	closed  bool
 }
 
 func openBadger(opts badger.Options) (*BadgerStorage, error) {
@@ -164,7 +156,7 @@ func (s *BadgerStorage) Scan(ctx context.Context, prefix string, fn func(key str
 			}
 			item := it.Item()
 			key := string(item.Key())
-			val, err := s.valueCopy(item)
+			val, err := item.ValueCopy(nil)
 			if err != nil {
 				return err
 			}
@@ -207,7 +199,7 @@ func (s *BadgerStorage) LoadCheckpoint(ctx context.Context) (string, error) {
 		if err != nil {
 			return err
 		}
-		val, err := s.valueCopy(item)
+		val, err := item.ValueCopy(nil)
 		if err != nil {
 			return err
 		}

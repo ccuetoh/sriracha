@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -288,4 +289,55 @@ func TestScanSeedError(t *testing.T) {
 	err := l.scanSeed(&errReader{err: errors.New("read error")})
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "seed scan")
+}
+
+// TestSyncDirOpenError covers the os.Open error branch in syncDir.
+func TestSyncDirOpenError(t *testing.T) {
+	t.Parallel()
+	err := syncDir(filepath.Join(t.TempDir(), "missing"))
+	require.Error(t, err)
+}
+
+// TestSyncOpenDirSyncError covers the d.Sync() error branch in syncOpenDir by
+// passing a directory handle whose underlying fd has already been closed, so
+// Sync returns EBADF.
+func TestSyncOpenDirSyncError(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	d, err := os.Open(dir)
+	require.NoError(t, err)
+	require.NoError(t, d.Close())
+	require.Error(t, syncOpenDir(d))
+}
+
+// TestAppendSyncError covers the l.f.Sync() error branch in Append. A pipe
+// writer accepts Write but its Sync returns EINVAL on Linux, so swapping l.f
+// for a pipe writer triggers the sync error without disturbing production code.
+func TestAppendSyncError(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Pipe Sync semantics differ on Windows")
+	}
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	l := newForTest(t, path)
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = r.Close() })
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(io.Discard, r)
+		close(done)
+	}()
+
+	require.NoError(t, l.f.Close())
+	l.f = w
+
+	err = l.Append(context.Background(), sriracha.AuditEvent{})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "sync")
+
+	require.NoError(t, w.Close())
+	<-done
 }

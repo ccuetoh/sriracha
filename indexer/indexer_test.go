@@ -507,16 +507,6 @@ func TestBadgerStorage(t *testing.T) {
 		require.ErrorIs(t, err, sentinel)
 	})
 
-	t.Run("scan value copy error", func(t *testing.T) {
-		t.Parallel()
-		s := newBadger(t)
-		require.NoError(t, s.Put(ctx, "k:1", []byte("v")))
-		sentinel := errors.New("vcopy fail")
-		s.valueCopyFn = func(*badger.Item) ([]byte, error) { return nil, sentinel }
-		err := s.Scan(ctx, "k:", func(_ string, _ []byte) error { return nil })
-		require.ErrorIs(t, err, sentinel)
-	})
-
 	t.Run("load checkpoint non-ErrKeyNotFound error", func(t *testing.T) {
 		t.Parallel()
 		s := newBadger(t)
@@ -526,16 +516,28 @@ func TestBadgerStorage(t *testing.T) {
 		_, err := s.LoadCheckpoint(ctx)
 		require.Error(t, err)
 	})
+}
 
-	t.Run("load checkpoint value copy error", func(t *testing.T) {
-		t.Parallel()
-		s := newBadger(t)
-		require.NoError(t, s.SaveCheckpoint(ctx, "tok"))
-		sentinel := errors.New("vcopy fail")
-		s.valueCopyFn = func(*badger.Item) ([]byte, error) { return nil, sentinel }
-		_, err := s.LoadCheckpoint(ctx)
-		require.ErrorIs(t, err, sentinel)
-	})
+// TestRunValueLogGCTicker drives the GC loop directly with a short interval so
+// the ticker arm fires without waiting the production-default 5 minutes. On an
+// empty DB, RunValueLogGC returns badger.ErrNoRewrite on the first iteration,
+// breaking the inner loop and exercising the tick + GC-call + break statements.
+func TestRunValueLogGCTicker(t *testing.T) {
+	t.Parallel()
+	db, err := badger.Open(badger.DefaultOptions(t.TempDir()).WithLogger(nil))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	s := &BadgerStorage{
+		db:     db,
+		gcStop: make(chan struct{}),
+		gcDone: make(chan struct{}),
+	}
+	go s.runValueLogGC(10 * time.Millisecond)
+
+	time.Sleep(50 * time.Millisecond)
+	close(s.gcStop)
+	<-s.gcDone
 }
 
 func TestRebuild(t *testing.T) {

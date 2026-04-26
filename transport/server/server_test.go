@@ -610,6 +610,36 @@ func TestQueryIndexerError(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestQueryUnknownMatchMode covers the late ProtoToMatchMode validation in
+// Query. The TokenRecord carries a valid mode so ProtoToTokenRecord succeeds;
+// the indexer mock returns no candidates so Match succeeds; only the request's
+// own MatchMode is invalid, which trips the late check before audit emission.
+func TestQueryUnknownMatchMode(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	client := env.newClient(t)
+
+	tr := testTokenRecord(t)
+	trBytes, err := TokenRecordToProto(tr)
+	require.NoError(t, err)
+
+	env.indexer.EXPECT().
+		Match(mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, nil)
+
+	_, err = client.Query(context.Background(), &srirachav1.QueryRequest{
+		SessionId:       "sess-bad-mode",
+		TokenRecord:     trBytes,
+		FieldsetVersion: "1.0.0-test",
+		MatchMode:       srirachav1.MatchMode(99),
+		Policy:          env.newPolicy(t),
+	})
+	require.Error(t, err)
+	s, _ := status.FromError(err)
+	assert.Equal(t, codes.InvalidArgument, s.Code())
+}
+
 func TestNewServerNilAudit(t *testing.T) {
 	t.Parallel()
 

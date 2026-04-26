@@ -69,6 +69,13 @@ func syncDir(path string) error {
 	if err != nil {
 		return err
 	}
+	return syncOpenDir(d)
+}
+
+// syncOpenDir fsyncs and closes the already-open directory handle. Split out
+// from syncDir so the inner Sync error path is reachable in tests by passing a
+// closed *os.File without altering the syncDir public contract.
+func syncOpenDir(d *os.File) error {
 	if err := d.Sync(); err != nil {
 		_ = d.Close()
 		return err
