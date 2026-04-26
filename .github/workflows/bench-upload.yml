@@ -11,10 +11,12 @@ permissions:
   actions: read  # needed to download artifacts from the triggering workflow
 
 jobs:
-  upload:
+  upload-pr:
     name: Upload Benchmark Results
     runs-on: ubuntu-latest
-    if: github.event.workflow_run.conclusion == 'success'
+    if: |
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
@@ -42,4 +44,30 @@ jobs:
             --adapter go_bench \
             --err \
             --github-actions "${GITHUB_TOKEN}" \
+            < results.txt
+
+  upload-main:
+    name: Upload Main Benchmark Results
+    runs-on: ubuntu-latest
+    if: |
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: bencherdev/bencher@46d007c103827da37db1a25b705dc73d3aaff7e6 # v0.6.3
+      - uses: actions/download-artifact@v4
+        with:
+          name: bench-results-main
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+      - name: Upload to Bencher
+        env:
+          BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+        run: |
+          bencher run \
+            --project sriracha \
+            --branch main \
+            --testbed ubuntu-latest \
+            --adapter go_bench \
+            --err \
             < results.txt

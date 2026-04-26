@@ -28,15 +28,13 @@ jobs:
 
       - name: Track benchmarks (main)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
-        run: |
-          bencher run \
-            --project sriracha \
-            --branch main \
-            --testbed ubuntu-latest \
-            --adapter go_bench \
-            "go test -bench=. -benchmem ./..."
+        run: go test -bench=. -benchmem ./... | tee results.txt
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          name: bench-results-main
+          path: results.txt
 
       - name: Run benchmarks (PR)
         if: github.event_name == 'pull_request'
