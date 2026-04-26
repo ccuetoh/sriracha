@@ -32,7 +32,7 @@ type Log struct {
 // If the file already contains events, the in-memory previous hash is seeded
 // from the last event so that further appends extend the chain correctly.
 func New(path string) (*Log, error) {
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600) //nolint:gosec // path is caller-supplied by design
 	if err != nil {
 		return nil, fmt.Errorf("audit/file: open %s: %w", path, err)
 	}
@@ -56,7 +56,7 @@ func (l *Log) seedHash() error {
 	if err != nil {
 		return fmt.Errorf("audit/file: seed open: %w", err)
 	}
-	defer rf.Close()
+	defer rf.Close() //nolint:errcheck // read-only; close error is not actionable
 	return l.scanSeed(rf)
 }
 
@@ -124,7 +124,7 @@ func (l *Log) Verify(_ context.Context) error {
 	if err != nil {
 		return fmt.Errorf("audit/file: verify open: %w", err)
 	}
-	defer rf.Close()
+	defer rf.Close() //nolint:errcheck // read-only; close error is not actionable
 
 	var prevHash [32]byte
 

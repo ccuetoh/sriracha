@@ -14,6 +14,10 @@ linters:
     - errorlint
     - forcetypeassert
     - gosec
+  settings:
+    gosec:
+      excludes:
+        - G304
 
 formatters:
   enable:

@@ -6,7 +6,7 @@ import "time"
 type AuditEventType int
 
 const (
-	EventQuery         AuditEventType = iota
+	EventQuery AuditEventType = iota
 	EventBulkOpen
 	EventBulkClose
 	EventCapabilities
@@ -18,7 +18,7 @@ const (
 type MatchStatus int
 
 const (
-	MatchStatusUnspecified       MatchStatus = iota
+	MatchStatusUnspecified MatchStatus = iota
 	MatchStatusMatched
 	MatchStatusNoMatch
 	MatchStatusBelowThreshold

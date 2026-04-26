@@ -106,6 +106,28 @@ func TestTokenRecordToProtoInvalidMode(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestProtoToMatchStatus(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		proto srirachav1.MatchStatus
+		want  sriracha.MatchStatus
+	}{
+		{srirachav1.MatchStatus_MATCH_STATUS_MATCHED, sriracha.MatchStatusMatched},
+		{srirachav1.MatchStatus_MATCH_STATUS_NO_MATCH, sriracha.MatchStatusNoMatch},
+		{srirachav1.MatchStatus_MATCH_STATUS_BELOW_THRESHOLD, sriracha.MatchStatusBelowThreshold},
+		{srirachav1.MatchStatus_MATCH_STATUS_MULTIPLE_CANDIDATES, sriracha.MatchStatusMultipleCandidates},
+		{srirachav1.MatchStatus_MATCH_STATUS_UNSPECIFIED, sriracha.MatchStatusUnspecified},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.proto.String(), func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, protoToMatchStatus(tc.proto))
+		})
+	}
+}
+
 func BenchmarkTokenRecordToProto(b *testing.B) {
 	var checksum [32]byte
 	tr := sriracha.TokenRecord{
