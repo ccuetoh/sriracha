@@ -270,7 +270,7 @@ func TestNewTightensPreExistingMode(t *testing.T) {
 	}
 
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	require.NoError(t, os.WriteFile(path, []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(path, []byte{}, 0o644)) //nolint:gosec // G306: deliberately broad mode so New tightens it
 
 	l := newForTest(t, path)
 	_ = l // used via cleanup

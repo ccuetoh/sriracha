@@ -163,14 +163,14 @@ func policyMessage(p *srirachav1.ConsentPolicy) []byte {
 	buf = append(buf, domain...)
 	var lp [4]byte
 	for _, f := range fields {
-		binary.BigEndian.PutUint32(lp[:], uint32(len(f)))
+		binary.BigEndian.PutUint32(lp[:], uint32(len(f))) //nolint:gosec // G115: policy field length bounded by validation
 		buf = append(buf, lp[:]...)
 		buf = append(buf, f...)
 	}
 	var ts [8]byte
-	binary.BigEndian.PutUint64(ts[:], uint64(p.IssuedAt))
+	binary.BigEndian.PutUint64(ts[:], uint64(p.IssuedAt)) //nolint:gosec // G115: bit-pattern serialisation for HMAC; sign is irrelevant
 	buf = append(buf, ts[:]...)
-	binary.BigEndian.PutUint64(ts[:], uint64(p.ExpiresAt))
+	binary.BigEndian.PutUint64(ts[:], uint64(p.ExpiresAt)) //nolint:gosec // G115: bit-pattern serialisation for HMAC; sign is irrelevant
 	buf = append(buf, ts[:]...)
 	return buf
 }

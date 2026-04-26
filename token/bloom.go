@@ -73,10 +73,10 @@ func tokenizeFieldBloom(h hash.Hash, normalizedValue string, path sriracha.Field
 		gb := []byte(g)
 		for i := range cfg.HashCount {
 			h.Reset()
-			binary.BigEndian.PutUint32(lp[:], uint32(len(gb)))
+			binary.BigEndian.PutUint32(lp[:], uint32(len(gb))) //nolint:gosec // G115: gram length bounded by ngram size
 			h.Write(lp[:])
 			h.Write(gb)
-			binary.BigEndian.PutUint32(lp[:], uint32(len(pathBytes)))
+			binary.BigEndian.PutUint32(lp[:], uint32(len(pathBytes))) //nolint:gosec // G115: field path length bounded by parser
 			h.Write(lp[:])
 			h.Write(pathBytes)
 			binary.BigEndian.PutUint32(ib[:], uint32(i)) //nolint:gosec // i bounded by cfg.HashCount

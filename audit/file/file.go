@@ -60,29 +60,6 @@ func New(path string) (sriracha.AuditLog, error) {
 	return newLog(f, path)
 }
 
-// syncDir fsyncs the directory at path. On platforms where directory sync is
-// unsupported (e.g. some Windows filesystems), the open or sync call may
-// fail; callers treat that as a hard error to keep durability guarantees
-// explicit rather than best-effort.
-func syncDir(path string) error {
-	d, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	return syncOpenDir(d)
-}
-
-// syncOpenDir fsyncs and closes the already-open directory handle. Split out
-// from syncDir so the inner Sync error path is reachable in tests by passing a
-// closed *os.File without altering the syncDir public contract.
-func syncOpenDir(d *os.File) error {
-	if err := d.Sync(); err != nil {
-		_ = d.Close()
-		return err
-	}
-	return d.Close()
-}
-
 // newLog initialises a log from an already-open write handle. It seeds the
 // previous hash from the file at seedPath and closes f if seeding fails.
 func newLog(f *os.File, seedPath string) (*log, error) {
