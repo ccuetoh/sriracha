@@ -22,11 +22,23 @@ type errReader struct{ err error }
 
 func (e *errReader) Read(_ []byte) (int, error) { return 0, e.err }
 
+// newForTest opens (or creates) the log at path and registers a cleanup that
+// closes the underlying file handle before t.TempDir() removes the directory.
+// On Windows, open handles prevent directory removal, so this is required.
+func newForTest(t *testing.T, path string) *log {
+	t.Helper()
+	al, err := New(path)
+	require.NoError(t, err)
+	l, ok := al.(*log)
+	require.True(t, ok, "New must return *log")
+	t.Cleanup(func() { _ = l.f.Close() })
+	return l
+}
+
 func TestNewEmptyFile(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	l, err := New(path)
-	require.NoError(t, err)
+	l := newForTest(t, path)
 	var zero [32]byte
 	assert.Equal(t, zero, l.prevHash)
 }
@@ -41,21 +53,18 @@ func TestNewSeedsHashFromExistingFile(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
 
-	l1, err := New(path)
-	require.NoError(t, err)
+	l1 := newForTest(t, path)
 	require.NoError(t, l1.Append(context.Background(), sriracha.AuditEvent{EventType: sriracha.EventCapabilities}))
 	prevHash := l1.prevHash
 
-	l2, err := New(path)
-	require.NoError(t, err)
+	l2 := newForTest(t, path)
 	assert.Equal(t, prevHash, l2.prevHash)
 }
 
 func TestAppendSetsEventID(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	l, err := New(path)
-	require.NoError(t, err)
+	l := newForTest(t, path)
 
 	require.NoError(t, l.Append(context.Background(), sriracha.AuditEvent{}))
 
@@ -71,8 +80,7 @@ func TestAppendSetsEventID(t *testing.T) {
 func TestAppendFirstEventHasZeroPreviousHash(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	l, err := New(path)
-	require.NoError(t, err)
+	l := newForTest(t, path)
 
 	require.NoError(t, l.Append(context.Background(), sriracha.AuditEvent{}))
 
@@ -86,8 +94,7 @@ func TestAppendFirstEventHasZeroPreviousHash(t *testing.T) {
 func TestAppendChainIntegrity(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	l, err := New(path)
-	require.NoError(t, err)
+	l := newForTest(t, path)
 
 	for i := range 5 {
 		require.NoError(t, l.Append(context.Background(), sriracha.AuditEvent{RecordCount: i}))
@@ -110,8 +117,7 @@ func TestAppendChainIntegrity(t *testing.T) {
 func TestAppendUpdatesInMemoryHash(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	l, err := New(path)
-	require.NoError(t, err)
+	l := newForTest(t, path)
 
 	require.NoError(t, l.Append(context.Background(), sriracha.AuditEvent{SessionID: "s1"}))
 	hash1 := l.prevHash
@@ -122,49 +128,44 @@ func TestAppendUpdatesInMemoryHash(t *testing.T) {
 func TestAppendWriteError(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	l, err := New(path)
-	require.NoError(t, err)
+	l := newForTest(t, path)
 
 	require.NoError(t, l.f.Close())
-	err = l.Append(context.Background(), sriracha.AuditEvent{})
+	err := l.Append(context.Background(), sriracha.AuditEvent{})
 	assert.Error(t, err)
 }
 
 func TestAppendKSUIDError(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	l, err := New(path)
-	require.NoError(t, err)
+	l := newForTest(t, path)
 
 	l.newKSUID = func() (ksuid.KSUID, error) { return ksuid.KSUID{}, errors.New("ksuid fail") }
-	err = l.Append(context.Background(), sriracha.AuditEvent{})
+	err := l.Append(context.Background(), sriracha.AuditEvent{})
 	assert.Error(t, err)
 }
 
 func TestAppendMarshalError(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	l, err := New(path)
-	require.NoError(t, err)
+	l := newForTest(t, path)
 
 	l.marshalJSON = func(any) ([]byte, error) { return nil, errors.New("marshal fail") }
-	err = l.Append(context.Background(), sriracha.AuditEvent{})
+	err := l.Append(context.Background(), sriracha.AuditEvent{})
 	assert.Error(t, err)
 }
 
 func TestVerifyEmptyFile(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	l, err := New(path)
-	require.NoError(t, err)
+	l := newForTest(t, path)
 	assert.NoError(t, l.Verify(context.Background()))
 }
 
 func TestVerifyValidChain(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	l, err := New(path)
-	require.NoError(t, err)
+	l := newForTest(t, path)
 
 	for i := range 3 {
 		require.NoError(t, l.Append(context.Background(), sriracha.AuditEvent{RecordCount: i}))
@@ -175,8 +176,7 @@ func TestVerifyValidChain(t *testing.T) {
 func TestVerifyBrokenChain(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	l, err := New(path)
-	require.NoError(t, err)
+	l := newForTest(t, path)
 
 	require.NoError(t, l.Append(context.Background(), sriracha.AuditEvent{SessionID: "first"}))
 	require.NoError(t, l.Append(context.Background(), sriracha.AuditEvent{SessionID: "second"}))
@@ -205,16 +205,14 @@ func TestVerifyEmptyEventID(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, append(raw, '\n'), 0600))
 
-	l, err := New(path)
-	require.NoError(t, err)
+	l := newForTest(t, path)
 	assert.Error(t, l.Verify(context.Background()))
 }
 
 func TestVerifyMissingFile(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	l, err := New(path)
-	require.NoError(t, err)
+	l := newForTest(t, path)
 
 	require.NoError(t, os.Remove(path))
 	assert.Error(t, l.Verify(context.Background()))
@@ -224,14 +222,12 @@ func TestReopenAndExtend(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
 
-	l1, err := New(path)
-	require.NoError(t, err)
+	l1 := newForTest(t, path)
 	for i := range 3 {
 		require.NoError(t, l1.Append(context.Background(), sriracha.AuditEvent{RecordCount: i}))
 	}
 
-	l2, err := New(path)
-	require.NoError(t, err)
+	l2 := newForTest(t, path)
 	for i := range 2 {
 		require.NoError(t, l2.Append(context.Background(), sriracha.AuditEvent{RecordCount: 100 + i}))
 	}
@@ -257,8 +253,7 @@ func TestNewLogSeedHashError(t *testing.T) {
 func TestVerifySkipsEmptyLines(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	l, err := New(path)
-	require.NoError(t, err)
+	l := newForTest(t, path)
 
 	require.NoError(t, l.Append(context.Background(), sriracha.AuditEvent{SessionID: "s1"}))
 
@@ -276,8 +271,7 @@ func TestVerifyInvalidJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
 	require.NoError(t, os.WriteFile(path, []byte("not-json\n"), 0600))
 
-	l, err := New(path)
-	require.NoError(t, err)
+	l := newForTest(t, path)
 	assert.Error(t, l.Verify(context.Background()))
 }
 
@@ -285,10 +279,9 @@ func TestVerifyInvalidJSON(t *testing.T) {
 func TestScanSeedError(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	l, err := New(path)
-	require.NoError(t, err)
+	l := newForTest(t, path)
 
-	err = l.scanSeed(&errReader{err: errors.New("read error")})
+	err := l.scanSeed(&errReader{err: errors.New("read error")})
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "seed scan")
 }
