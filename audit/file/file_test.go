@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -256,6 +257,26 @@ func TestVerifyInvalidJSON(t *testing.T) {
 
 	l := newForTest(t, path)
 	assert.Error(t, l.Verify(context.Background()))
+}
+
+// TestNewTightensPreExistingMode verifies that opening an audit log file with
+// looser permissions tightens it to 0600. O_CREATE alone does not do this for
+// pre-existing files.
+func TestNewTightensPreExistingMode(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX file modes do not apply on Windows")
+	}
+
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	require.NoError(t, os.WriteFile(path, []byte{}, 0o644))
+
+	l := newForTest(t, path)
+	_ = l // used via cleanup
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
 
 // TestScanSeedError covers the sc.Err() branch in scanSeed.

@@ -71,19 +71,42 @@ func (v *validator) Validate(p *srirachav1.ConsentPolicy, peerKey ed25519.Public
 	return nil
 }
 
+// policyMessageDomain prevents cross-protocol signature reuse. Bumping it
+// breaks signature compatibility with prior versions; do not change without a
+// coordinated rollout.
+const policyMessageDomain = "sriracha.consent.v1\x00"
+
 // policyMessage builds the canonical byte sequence to sign/verify:
-// policy_id || issuer_id || target_id || purpose || issued_at (big-endian int64) || expires_at (big-endian int64)
+//
+//	domain || u32(len(policy_id))   || policy_id
+//	       || u32(len(issuer_id))   || issuer_id
+//	       || u32(len(target_id))   || target_id
+//	       || u32(len(purpose))     || purpose
+//	       || u64(issued_at)        || u64(expires_at)
+//
+// All integers are big-endian. The fixed-width length prefixes prevent
+// adjacent-field concatenations from colliding (e.g. ("ab","cd") vs ("abcd","")).
 func policyMessage(p *srirachav1.ConsentPolicy) []byte {
-	var buf []byte
-	buf = append(buf, []byte(p.PolicyId)...)
-	buf = append(buf, []byte(p.IssuerId)...)
-	buf = append(buf, []byte(p.TargetId)...)
-	buf = append(buf, []byte(p.Purpose)...)
+	fields := []string{p.PolicyId, p.IssuerId, p.TargetId, p.Purpose}
+	size := len(policyMessageDomain) + 8 + 8 // timestamps
+	for _, f := range fields {
+		size += 4 + len(f)
+	}
+
+	buf := make([]byte, 0, size)
+	buf = append(buf, policyMessageDomain...)
+
+	var lp [4]byte
+	for _, f := range fields {
+		binary.BigEndian.PutUint32(lp[:], uint32(len(f))) //nolint:gosec // field lengths bounded by message size
+		buf = append(buf, lp[:]...)
+		buf = append(buf, f...)
+	}
 
 	var ts [8]byte
-	binary.BigEndian.PutUint64(ts[:], uint64(p.IssuedAt)) //nolint:gosec // G115: bit-pattern serialisation for HMAC; sign is irrelevant
+	binary.BigEndian.PutUint64(ts[:], uint64(p.IssuedAt)) //nolint:gosec // G115: bit-pattern serialisation; sign is irrelevant
 	buf = append(buf, ts[:]...)
-	binary.BigEndian.PutUint64(ts[:], uint64(p.ExpiresAt)) //nolint:gosec // G115: bit-pattern serialisation for HMAC; sign is irrelevant
+	binary.BigEndian.PutUint64(ts[:], uint64(p.ExpiresAt)) //nolint:gosec // G115: bit-pattern serialisation; sign is irrelevant
 	buf = append(buf, ts[:]...)
 
 	return buf

@@ -21,7 +21,7 @@ import (
 // testFS returns a minimal 2-field FieldSet for tests.
 func testFS() sriracha.FieldSet {
 	return sriracha.FieldSet{
-		Version: "test-v1",
+		Version: "1.0.0-test",
 		Fields: []sriracha.FieldSpec{
 			{Path: sriracha.FieldNameGiven, Required: false, Weight: 1.0},
 			{Path: sriracha.FieldNameFamily, Required: false, Weight: 1.0},
@@ -406,6 +406,25 @@ func TestBadgerStorage(t *testing.T) {
 		t.Parallel()
 		s, err := OpenBadgerInMemory()
 		require.NoError(t, err)
+		require.NoError(t, s.Close())
+	})
+
+	t.Run("close is idempotent", func(t *testing.T) {
+		t.Parallel()
+		s, err := OpenBadgerInMemory()
+		require.NoError(t, err)
+		require.NoError(t, s.Close())
+		// Second Close must be a no-op so deferred cleanups never error.
+		require.NoError(t, s.Close())
+	})
+
+	t.Run("persistent open shuts down GC loop on close", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		s, err := OpenBadger(dir)
+		require.NoError(t, err)
+		// Closing must drain the background GC goroutine; any leak would
+		// keep the badger.DB referenced and trip the race detector under -race.
 		require.NoError(t, s.Close())
 	})
 
@@ -1014,7 +1033,7 @@ func TestMatch_Deterministic(t *testing.T) {
 		t.Parallel()
 		idx := newTestIndexer(t)
 		tr := sriracha.TokenRecord{
-			FieldSetVersion: "test-v1",
+			FieldSetVersion: "1.0.0-test",
 			Mode:            sriracha.Deterministic,
 			Payload:         []byte("somepayload"),
 		}
@@ -1075,7 +1094,7 @@ func TestMatch_Deterministic(t *testing.T) {
 		t.Parallel()
 		idx := newTestIndexer(t)
 		tr := sriracha.TokenRecord{
-			FieldSetVersion: "test-v1",
+			FieldSetVersion: "1.0.0-test",
 			Mode:            sriracha.MatchMode(99),
 		}
 		_, err := idx.Match(ctx, tr, sriracha.MatchConfig{})
@@ -1090,7 +1109,7 @@ func TestMatch_Deterministic(t *testing.T) {
 		storage.EXPECT().Get(mock.Anything, mock.Anything).Return(nil, sentinel)
 		idx.storage = storage
 		tr := sriracha.TokenRecord{
-			FieldSetVersion: "test-v1",
+			FieldSetVersion: "1.0.0-test",
 			Mode:            sriracha.Deterministic,
 			Payload:         []byte("somekey"),
 		}
@@ -1107,7 +1126,7 @@ func TestMatch_Probabilistic(t *testing.T) {
 		t.Parallel()
 		idx := newTestIndexer(t)
 		tr := sriracha.TokenRecord{
-			FieldSetVersion: "test-v1",
+			FieldSetVersion: "1.0.0-test",
 			Mode:            sriracha.Probabilistic,
 			Payload:         make([]byte, 2*fieldFilterBytes(sriracha.DefaultBloomConfig().SizeBits)),
 		}
@@ -1193,7 +1212,7 @@ func TestMatch_Probabilistic(t *testing.T) {
 		t.Parallel()
 		idx := newTestIndexer(t)
 		tr := sriracha.TokenRecord{
-			FieldSetVersion: "test-v1",
+			FieldSetVersion: "1.0.0-test",
 			Mode:            sriracha.Probabilistic,
 			Payload:         []byte("tooshort"),
 		}
@@ -1298,7 +1317,7 @@ func TestMatch_Probabilistic(t *testing.T) {
 		storage.EXPECT().Scan(mock.Anything, mock.Anything, mock.Anything).Return(sentinel)
 		idx.storage = storage
 		tr := sriracha.TokenRecord{
-			FieldSetVersion: "test-v1",
+			FieldSetVersion: "1.0.0-test",
 			Mode:            sriracha.Probabilistic,
 			Payload:         make([]byte, 2*fieldFilterBytes(sriracha.DefaultBloomConfig().SizeBits)),
 		}
@@ -1312,10 +1331,10 @@ func TestMatch_Probabilistic(t *testing.T) {
 		idx, err := New(mem, testFS(), testSecret())
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = idx.Close() })
-		require.NoError(t, mem.Put(ctx, "prob:test-v1:r1", []byte{0xFF}))
+		require.NoError(t, mem.Put(ctx, "prob:1.0.0-test:r1", []byte{0xFF}))
 
 		tr := sriracha.TokenRecord{
-			FieldSetVersion: "test-v1",
+			FieldSetVersion: "1.0.0-test",
 			Mode:            sriracha.Probabilistic,
 			Payload:         make([]byte, 2*fieldFilterBytes(sriracha.DefaultBloomConfig().SizeBits)),
 		}
@@ -1573,7 +1592,7 @@ func TestDeleteRecord(t *testing.T) {
 				t.Helper()
 				storage := mocksriracha.NewMockIndexStorage(t)
 				storage.EXPECT().Get(mock.Anything, "meta:r1").Return(
-					[]byte(`{"det_key":"det:abc","prob_key":"prob:test-v1:r1"}`), nil)
+					[]byte(`{"det_key":"det:abc","prob_key":"prob:1.0.0-test:r1"}`), nil)
 				// Sequential: first Delete fails → no further deletes attempted.
 				storage.EXPECT().Delete(mock.Anything, "det:abc").Return(sentinel)
 				idx.storage = storage
@@ -1585,10 +1604,10 @@ func TestDeleteRecord(t *testing.T) {
 				t.Helper()
 				storage := mocksriracha.NewMockIndexStorage(t)
 				storage.EXPECT().Get(mock.Anything, "meta:r1").Return(
-					[]byte(`{"det_key":"det:abc","prob_key":"prob:test-v1:r1"}`), nil)
+					[]byte(`{"det_key":"det:abc","prob_key":"prob:1.0.0-test:r1"}`), nil)
 				// Sequential: det succeeds, prob fails → meta delete not attempted.
 				storage.EXPECT().Delete(mock.Anything, "det:abc").Return(nil)
-				storage.EXPECT().Delete(mock.Anything, "prob:test-v1:r1").Return(sentinel)
+				storage.EXPECT().Delete(mock.Anything, "prob:1.0.0-test:r1").Return(sentinel)
 				idx.storage = storage
 			},
 		},

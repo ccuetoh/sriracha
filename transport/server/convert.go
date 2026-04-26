@@ -60,8 +60,13 @@ func TokenRecordToProto(tr sriracha.TokenRecord) ([]byte, error) {
 }
 
 // ProtoToMatchMode converts a proto MatchMode to the sriracha equivalent.
+// MATCH_MODE_UNSPECIFIED is accepted and yields the zero MatchMode (callers
+// are expected to derive intent from the TokenRecord); only unknown enum
+// values produce an error.
 func ProtoToMatchMode(m srirachav1.MatchMode) (sriracha.MatchMode, error) {
 	switch m {
+	case srirachav1.MatchMode_MATCH_MODE_UNSPECIFIED:
+		return 0, nil
 	case srirachav1.MatchMode_MATCH_MODE_DETERMINISTIC:
 		return sriracha.Deterministic, nil
 	case srirachav1.MatchMode_MATCH_MODE_PROBABILISTIC:

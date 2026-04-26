@@ -40,7 +40,9 @@ func (t *Tokenizer) Destroy() {
 // Missing required fields return an error.
 // Missing optional fields are silently skipped (no bytes added to Payload).
 func (t *Tokenizer) TokenizeRecord(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.TokenRecord, error) {
-	var buf []byte
+	buf := make([]byte, 0, len(fs.Fields)*sha256.Size)
+	h := hmac.New(sha256.New, t.secret.Bytes())
+
 	for _, spec := range fs.Fields {
 		raw, ok := record[spec.Path]
 		if !ok || sriracha.IsNotFound(raw) || sriracha.IsNotHeld(raw) {
@@ -53,8 +55,11 @@ func (t *Tokenizer) TokenizeRecord(record sriracha.RawRecord, fs sriracha.FieldS
 		if err != nil {
 			return sriracha.TokenRecord{}, fmt.Errorf("token: normalization failed for field %q: %w", spec.Path, err)
 		}
-		fieldToken := t.tokenizeField(normalized, spec.Path)
-		buf = append(buf, fieldToken...)
+		h.Reset()
+		h.Write([]byte(normalized))
+		h.Write([]byte{':'})
+		h.Write([]byte(spec.Path.String()))
+		buf = h.Sum(buf)
 	}
 
 	return sriracha.TokenRecord{
@@ -75,14 +80,4 @@ func ValidateTokenRecord(tr sriracha.TokenRecord) error {
 	}
 
 	return nil
-}
-
-// tokenizeField computes a 32-byte HMAC-SHA256 token for a single normalized field value.
-// The field path is included to prevent cross-field collisions.
-func (t *Tokenizer) tokenizeField(normalizedValue string, path sriracha.FieldPath) []byte {
-	h := hmac.New(sha256.New, t.secret.Bytes())
-	h.Write([]byte(normalizedValue))
-	h.Write([]byte(":"))
-	h.Write([]byte(path.String()))
-	return h.Sum(nil)
 }

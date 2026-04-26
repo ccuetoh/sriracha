@@ -8,6 +8,12 @@ import (
 	"errors"
 )
 
+// alpnH2 is the ALPN identifier for HTTP/2, the only protocol gRPC supports.
+// Setting it explicitly avoids silent fallback to HTTP/1.1 if the config is
+// consumed by something other than google.golang.org/grpc/credentials, which
+// otherwise injects this value internally.
+var alpnH2 = []string{"h2"}
+
 // ServerTLS returns a *tls.Config for the gRPC server side.
 // TLS 1.3 is the minimum version; client certificates are required and verified.
 func ServerTLS(cert tls.Certificate, caPool *x509.CertPool) *tls.Config {
@@ -16,6 +22,7 @@ func ServerTLS(cert tls.Certificate, caPool *x509.CertPool) *tls.Config {
 		ClientCAs:    caPool,
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 		MinVersion:   tls.VersionTLS13,
+		NextProtos:   alpnH2,
 	}
 }
 
@@ -26,6 +33,7 @@ func ClientTLS(cert tls.Certificate, caPool *x509.CertPool) *tls.Config {
 		Certificates: []tls.Certificate{cert},
 		RootCAs:      caPool,
 		MinVersion:   tls.VersionTLS13,
+		NextProtos:   alpnH2,
 	}
 }
 

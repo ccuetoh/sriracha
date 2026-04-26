@@ -10,9 +10,12 @@
 //
 // Package layout:
 //
-//   - sriracha              — core types, field constants, interfaces, errors
-//   - sriracha/normalize    — Unicode normalization pipeline
-//   - sriracha/token        — deterministic and probabilistic tokenization
-//   - sriracha/fieldset     — FieldSet validation and version negotiation
-//   - sriracha/internal/bitset — []uint64-backed bitset for Bloom filters
+//   - sriracha           — core types, field constants, interfaces, errors
+//   - sriracha/normalize — Unicode normalization pipeline
+//   - sriracha/token     — deterministic and probabilistic tokenization
+//   - sriracha/fieldset  — FieldSet validation and semver-based version negotiation
+//   - sriracha/indexer   — TokenIndexer with pluggable storage (in-memory or BadgerDB)
+//   - sriracha/transport — gRPC client and server (mTLS, consent policy, replay cache)
+//
+// Bloom filters are implemented on top of github.com/bits-and-blooms/bitset.
 package sriracha

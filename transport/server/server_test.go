@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/binary"
 	"encoding/pem"
 	"errors"
 	"io"
@@ -153,25 +154,24 @@ func (p *testPKI) signPolicy(policy *srirachav1.ConsentPolicy) {
 	policy.Signature = ed25519.Sign(p.clientPriv, hash[:])
 }
 
-// policyMessage mirrors the internal consent.policyMessage function.
+// policyMessage mirrors the internal consent.policyMessage canonicalization
+// (domain prefix + length-prefixed fields + big-endian timestamps).
 func policyMessage(p *srirachav1.ConsentPolicy) []byte {
+	const domain = "sriracha.consent.v1\x00"
+	fields := []string{p.PolicyId, p.IssuerId, p.TargetId, p.Purpose}
 	var buf []byte
-	buf = append(buf, []byte(p.PolicyId)...)
-	buf = append(buf, []byte(p.IssuerId)...)
-	buf = append(buf, []byte(p.TargetId)...)
-	buf = append(buf, []byte(p.Purpose)...)
-	var ts [8]byte
-	for _, v := range []int64{p.IssuedAt, p.ExpiresAt} {
-		ts[0] = byte(v >> 56)
-		ts[1] = byte(v >> 48)
-		ts[2] = byte(v >> 40)
-		ts[3] = byte(v >> 32)
-		ts[4] = byte(v >> 24)
-		ts[5] = byte(v >> 16)
-		ts[6] = byte(v >> 8)
-		ts[7] = byte(v)
-		buf = append(buf, ts[:]...)
+	buf = append(buf, domain...)
+	var lp [4]byte
+	for _, f := range fields {
+		binary.BigEndian.PutUint32(lp[:], uint32(len(f)))
+		buf = append(buf, lp[:]...)
+		buf = append(buf, f...)
 	}
+	var ts [8]byte
+	binary.BigEndian.PutUint64(ts[:], uint64(p.IssuedAt))
+	buf = append(buf, ts[:]...)
+	binary.BigEndian.PutUint64(ts[:], uint64(p.ExpiresAt))
+	buf = append(buf, ts[:]...)
 	return buf
 }
 
@@ -189,7 +189,7 @@ func testServerConfig() Config {
 			sriracha.FieldNameFamily.String(),
 			sriracha.FieldDateBirth.String(),
 		},
-		FieldSetVersions: []string{"test-v1"},
+		FieldSetVersions: []string{"1.0.0-test"},
 		SupportedModes:   []sriracha.MatchMode{sriracha.Deterministic, sriracha.Probabilistic},
 	}
 }
@@ -223,7 +223,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	require.NoError(t, err)
 
 	go func() { _ = srv.Serve(lis) }()
-	t.Cleanup(srv.GracefulStop)
+	t.Cleanup(func() { srv.GracefulStop(context.Background()) })
 
 	return &testEnv{
 		pki:     pki,
@@ -276,7 +276,7 @@ func TestGetCapabilities(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "0.1.0", resp.SpecVersion)
-	assert.Equal(t, []string{"test-v1"}, resp.FieldsetVersions)
+	assert.Equal(t, []string{"1.0.0-test"}, resp.FieldsetVersions)
 	assert.NotEmpty(t, resp.SupportedFields)
 	assert.NotEmpty(t, resp.MatchModes)
 }
@@ -286,7 +286,7 @@ func testTokenRecord(t *testing.T) sriracha.TokenRecord {
 	var checksum [32]byte
 	checksum[0] = 1
 	return sriracha.TokenRecord{
-		FieldSetVersion: "test-v1",
+		FieldSetVersion: "1.0.0-test",
 		Mode:            sriracha.Deterministic,
 		Algo:            sriracha.AlgoHMACSHA256V1,
 		Payload:         []byte("test-payload"),
@@ -356,7 +356,7 @@ func TestQuery(t *testing.T) {
 			resp, err := client.Query(context.Background(), &srirachav1.QueryRequest{
 				SessionId:       "sess-1",
 				TokenRecord:     trBytes,
-				FieldsetVersion: "test-v1",
+				FieldsetVersion: "1.0.0-test",
 				MatchMode:       srirachav1.MatchMode_MATCH_MODE_DETERMINISTIC,
 				RequestedFields: []string{
 					sriracha.FieldNameGiven.String(),
@@ -386,7 +386,7 @@ func TestQueryMissingPolicy(t *testing.T) {
 	_, err = client.Query(context.Background(), &srirachav1.QueryRequest{
 		SessionId:       "sess-1",
 		TokenRecord:     trBytes,
-		FieldsetVersion: "test-v1",
+		FieldsetVersion: "1.0.0-test",
 	})
 	assert.Error(t, err)
 }
@@ -407,7 +407,7 @@ func TestQueryInvalidPolicy(t *testing.T) {
 	_, err = client.Query(context.Background(), &srirachav1.QueryRequest{
 		SessionId:       "sess-invalid-policy",
 		TokenRecord:     trBytes,
-		FieldsetVersion: "test-v1",
+		FieldsetVersion: "1.0.0-test",
 		Policy:          p,
 	})
 	assert.Error(t, err)
@@ -431,7 +431,7 @@ func TestQueryNotHeld(t *testing.T) {
 	resp, err := client.Query(context.Background(), &srirachav1.QueryRequest{
 		SessionId:       "sess-noteld",
 		TokenRecord:     trBytes,
-		FieldsetVersion: "test-v1",
+		FieldsetVersion: "1.0.0-test",
 		RequestedFields: []string{
 			sriracha.FieldNameGiven.String(),
 			"sriracha::contact::fax", // unsupported field
@@ -517,7 +517,7 @@ func TestQueryMalformedToken(t *testing.T) {
 	_, err := client.Query(context.Background(), &srirachav1.QueryRequest{
 		SessionId:       "sess-bad-token",
 		TokenRecord:     []byte{0xFF, 0xFE, 0x01}, // invalid proto bytes
-		FieldsetVersion: "test-v1",
+		FieldsetVersion: "1.0.0-test",
 		Policy:          env.newPolicy(t),
 	})
 	assert.Error(t, err)
@@ -545,7 +545,7 @@ func TestQuerySingleProbabilisticMatch(t *testing.T) {
 	resp, err := client.Query(context.Background(), &srirachav1.QueryRequest{
 		SessionId:       "sess-prob-single",
 		TokenRecord:     trBytes,
-		FieldsetVersion: "test-v1",
+		FieldsetVersion: "1.0.0-test",
 		RequestedFields: []string{sriracha.FieldNameGiven.String()},
 		Policy:          env.newPolicy(t),
 	})
@@ -604,7 +604,7 @@ func TestQueryIndexerError(t *testing.T) {
 	_, err = client.Query(context.Background(), &srirachav1.QueryRequest{
 		SessionId:       "sess-idx-err",
 		TokenRecord:     trBytes,
-		FieldsetVersion: "test-v1",
+		FieldsetVersion: "1.0.0-test",
 		Policy:          env.newPolicy(t),
 	})
 	assert.Error(t, err)
@@ -628,7 +628,7 @@ func TestNewServerNilAudit(t *testing.T) {
 	require.NoError(t, err)
 
 	go func() { _ = srv.Serve(lis) }()
-	t.Cleanup(srv.GracefulStop)
+	t.Cleanup(func() { srv.GracefulStop(context.Background()) })
 
 	conn, err := grpc.NewClient(lis.Addr().String(),
 		grpc.WithTransportCredentials(credentials.NewTLS(pki.clientTLSConfig())),
@@ -647,7 +647,7 @@ func TestNewServerNilAudit(t *testing.T) {
 	resp, err := stub.Query(context.Background(), &srirachav1.QueryRequest{
 		SessionId:       "sess-nop-audit",
 		TokenRecord:     trBytes,
-		FieldsetVersion: "test-v1",
+		FieldsetVersion: "1.0.0-test",
 		Policy:          env.newPolicy(t),
 	})
 	require.NoError(t, err)
@@ -677,7 +677,7 @@ func TestQueryRecordFieldNotHeld(t *testing.T) {
 	resp, err := client.Query(context.Background(), &srirachav1.QueryRequest{
 		SessionId:       "sess-notheld-rec",
 		TokenRecord:     trBytes,
-		FieldsetVersion: "test-v1",
+		FieldsetVersion: "1.0.0-test",
 		RequestedFields: []string{sriracha.FieldNameGiven.String()},
 		Policy:          env.newPolicy(t),
 	})
@@ -704,7 +704,7 @@ func TestQueryWithMatchConfig(t *testing.T) {
 	resp, err := client.Query(context.Background(), &srirachav1.QueryRequest{
 		SessionId:       "sess-matchcfg",
 		TokenRecord:     trBytes,
-		FieldsetVersion: "test-v1",
+		FieldsetVersion: "1.0.0-test",
 		MatchConfig: &srirachav1.MatchConfig{
 			Threshold:  0.8,
 			MaxResults: 5,
@@ -837,7 +837,7 @@ func TestGetCapabilitiesInvalidMode(t *testing.T) {
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	go func() { _ = srv.Serve(lis) }()
-	t.Cleanup(srv.GracefulStop)
+	t.Cleanup(func() { srv.GracefulStop(context.Background()) })
 
 	conn, err := grpc.NewClient(lis.Addr().String(),
 		grpc.WithTransportCredentials(credentials.NewTLS(pki.clientTLSConfig())),
@@ -870,7 +870,7 @@ func TestQueryFetchError(t *testing.T) {
 	_, err = client.Query(context.Background(), &srirachav1.QueryRequest{
 		SessionId:       "sess-fetch-err",
 		TokenRecord:     trBytes,
-		FieldsetVersion: "test-v1",
+		FieldsetVersion: "1.0.0-test",
 		Policy:          env.newPolicy(t),
 	})
 	assert.Error(t, err)
@@ -1064,7 +1064,7 @@ func TestQueryECDSAClient(t *testing.T) {
 	_, err = stub.Query(context.Background(), &srirachav1.QueryRequest{
 		SessionId:       "sess-ecdsa",
 		TokenRecord:     trBytes,
-		FieldsetVersion: "test-v1",
+		FieldsetVersion: "1.0.0-test",
 		Policy:          env.newPolicy(t),
 	})
 	assert.Error(t, err)
@@ -1305,4 +1305,113 @@ func TestBulkLinkSendError(t *testing.T) {
 		},
 	}
 	assert.Error(t, s.BulkLink(stream))
+}
+
+// TestGracefulStopDeadlineFallback verifies that GracefulStop with an already
+// cancelled context falls back to a hard Stop instead of waiting indefinitely.
+func TestGracefulStopDeadlineFallback(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	env.expectAudit(t)
+	client := env.newClient(t)
+
+	// Open a BulkLink stream so there is in-flight work; do not close it.
+	stream, err := client.BulkLink(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = stream.CloseSend() })
+
+	// We need a fresh server reference; pull it from a parallel construction
+	// rather than reusing newTestEnv's (which already registered Cleanup).
+	pki := env.pki
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	cache := replay.New(ctx)
+	indexer := mocksriracha.NewMockTokenIndexer(t)
+	source := mocksriracha.NewMockRecordSource(t)
+	audit := mocksriracha.NewMockAuditLog(t)
+	audit.EXPECT().Append(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	srv, err := New(testServerConfig(), indexer, source, pki.serverTLSConfig(), cache, audit)
+	require.NoError(t, err)
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	go func() { _ = srv.Serve(lis) }()
+
+	stopCtx, stopCancel := context.WithCancel(context.Background())
+	stopCancel() // already cancelled → forces hard Stop
+	done := make(chan struct{})
+	go func() {
+		srv.GracefulStop(stopCtx)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("GracefulStop did not fall back to hard Stop within 5s")
+	}
+}
+
+// TestBulkLinkRecordCapExceeded verifies that a stream whose cumulative
+// TokenRecords count exceeds Config.MaxBulkRecordsPerStream is rejected
+// with ResourceExhausted, protecting the server against memory pressure
+// from oversized batches.
+func TestBulkLinkRecordCapExceeded(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	env.expectAudit(t)
+
+	// Re-create a server with a low cap; we cannot mutate the existing one.
+	pki := env.pki
+	cfg := testServerConfig()
+	cfg.MaxBulkRecordsPerStream = 1
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	cache := replay.New(ctx)
+	indexer := mocksriracha.NewMockTokenIndexer(t)
+	source := mocksriracha.NewMockRecordSource(t)
+	audit := mocksriracha.NewMockAuditLog(t)
+	audit.EXPECT().Append(mock.Anything, mock.Anything).Return(nil).Maybe()
+	indexer.EXPECT().Match(mock.Anything, mock.Anything, mock.Anything).
+		Return([]sriracha.Candidate{{RecordID: "rec-1", Confidence: 1.0}}, nil).Maybe()
+	source.EXPECT().Fetch(mock.Anything, "rec-1").
+		Return(sriracha.RawRecord{}, nil).Maybe()
+
+	srv, err := New(cfg, indexer, source, pki.serverTLSConfig(), cache, audit)
+	require.NoError(t, err)
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(func() { srv.GracefulStop(context.Background()) })
+
+	conn, err := grpc.NewClient(lis.Addr().String(),
+		grpc.WithTransportCredentials(credentials.NewTLS(pki.clientTLSConfig())),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	client := srirachav1.NewSrirachaServiceClient(conn)
+
+	tr := testTokenRecord(t)
+	trBytes, err := TokenRecordToProto(tr)
+	require.NoError(t, err)
+
+	stream, err := client.BulkLink(context.Background())
+	require.NoError(t, err)
+
+	// Two records on the first batch — exceeds the cap of 1.
+	err = stream.Send(&srirachav1.BulkLinkRequest{
+		SessionId:    "bulk-cap",
+		TokenRecords: [][]byte{trBytes, trBytes},
+		RecordRefs:   []string{"a", "b"},
+		Policy:       env.newPolicy(t),
+	})
+	require.NoError(t, err)
+
+	_, err = stream.Recv()
+	require.Error(t, err)
+	s, _ := status.FromError(err)
+	assert.Equal(t, codes.ResourceExhausted, s.Code())
 }
