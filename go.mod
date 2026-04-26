@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/awnumar/memguard v0.23.0
-	github.com/bits-and-blooms/bitset v1.24.2
+	github.com/bits-and-blooms/bitset v1.24.4
 	github.com/bits-and-blooms/bloom/v3 v3.7.1
 	github.com/dgraph-io/badger/v4 v4.9.1
 	github.com/maypok86/otter v1.2.4
