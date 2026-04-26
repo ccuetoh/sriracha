@@ -44,6 +44,7 @@ jobs:
             --adapter go_bench \
             --err \
             --github-actions "${GITHUB_TOKEN}" \
+            --ci-number "$(cat pr-number.txt)" \
             < results.txt
 
   upload-main:
