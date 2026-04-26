@@ -262,13 +262,14 @@ func (e *testEnv) newPolicy(t *testing.T) *srirachav1.ConsentPolicy {
 
 func (e *testEnv) expectAudit(t *testing.T) {
 	t.Helper()
-	e.audit.EXPECT().Append(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	e.audit.EXPECT().Append(mock.Anything, mock.Anything).Return(nil).Maybe()
 }
 
 func TestGetCapabilities(t *testing.T) {
 	t.Parallel()
 
 	env := newTestEnv(t)
+	env.expectAudit(t)
 	client := env.newClient(t)
 
 	resp, err := client.GetCapabilities(context.Background(), &srirachav1.GetCapabilitiesRequest{})
@@ -375,6 +376,7 @@ func TestQueryMissingPolicy(t *testing.T) {
 	t.Parallel()
 
 	env := newTestEnv(t)
+	env.expectAudit(t)
 	client := env.newClient(t)
 
 	tr := testTokenRecord(t)
@@ -393,6 +395,7 @@ func TestQueryInvalidPolicy(t *testing.T) {
 	t.Parallel()
 
 	env := newTestEnv(t)
+	env.expectAudit(t)
 	client := env.newClient(t)
 
 	trBytes, err := TokenRecordToProto(testTokenRecord(t))
@@ -444,6 +447,7 @@ func TestBulkLink(t *testing.T) {
 	t.Parallel()
 
 	env := newTestEnv(t)
+	env.expectAudit(t)
 	client := env.newClient(t)
 
 	tr := testTokenRecord(t)
@@ -484,6 +488,7 @@ func TestBulkLinkMissingPolicy(t *testing.T) {
 	t.Parallel()
 
 	env := newTestEnv(t)
+	env.expectAudit(t)
 	client := env.newClient(t)
 
 	tr := testTokenRecord(t)
@@ -553,6 +558,7 @@ func TestBulkLinkFetchError(t *testing.T) {
 	t.Parallel()
 
 	env := newTestEnv(t)
+	env.expectAudit(t)
 	client := env.newClient(t)
 
 	tr := testTokenRecord(t)
@@ -874,6 +880,7 @@ func TestBulkLinkNoMatch(t *testing.T) {
 	t.Parallel()
 
 	env := newTestEnv(t)
+	env.expectAudit(t)
 	client := env.newClient(t)
 
 	trBytes, err := TokenRecordToProto(testTokenRecord(t))
@@ -905,6 +912,7 @@ func TestBulkLinkMultipleCandidates(t *testing.T) {
 	t.Parallel()
 
 	env := newTestEnv(t)
+	env.expectAudit(t)
 	client := env.newClient(t)
 
 	trBytes, err := TokenRecordToProto(testTokenRecord(t))
@@ -940,6 +948,7 @@ func TestBulkLinkMalformedToken(t *testing.T) {
 	t.Parallel()
 
 	env := newTestEnv(t)
+	env.expectAudit(t)
 	client := env.newClient(t)
 
 	stream, err := client.BulkLink(context.Background())
@@ -964,6 +973,7 @@ func TestBulkLinkIndexerError(t *testing.T) {
 	t.Parallel()
 
 	env := newTestEnv(t)
+	env.expectAudit(t)
 	client := env.newClient(t)
 
 	trBytes, err := TokenRecordToProto(testTokenRecord(t))
@@ -992,6 +1002,7 @@ func TestBulkLinkInvalidPolicy(t *testing.T) {
 	t.Parallel()
 
 	env := newTestEnv(t)
+	env.expectAudit(t)
 	client := env.newClient(t)
 
 	trBytes, err := TokenRecordToProto(testTokenRecord(t))

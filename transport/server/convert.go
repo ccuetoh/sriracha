@@ -106,6 +106,22 @@ func protoToMatchConfig(mc *srirachav1.MatchConfig) sriracha.MatchConfig {
 	}
 }
 
+// protoToMatchStatus maps a proto MatchStatus to the sriracha equivalent.
+func protoToMatchStatus(st srirachav1.MatchStatus) sriracha.MatchStatus {
+	switch st {
+	case srirachav1.MatchStatus_MATCH_STATUS_MATCHED:
+		return sriracha.MatchStatusMatched
+	case srirachav1.MatchStatus_MATCH_STATUS_NO_MATCH:
+		return sriracha.MatchStatusNoMatch
+	case srirachav1.MatchStatus_MATCH_STATUS_BELOW_THRESHOLD:
+		return sriracha.MatchStatusBelowThreshold
+	case srirachav1.MatchStatus_MATCH_STATUS_MULTIPLE_CANDIDATES:
+		return sriracha.MatchStatusMultipleCandidates
+	default:
+		return sriracha.MatchStatusUnspecified
+	}
+}
+
 // candidatesToStatus maps a candidate list to the appropriate MatchStatus.
 func candidatesToStatus(candidates []sriracha.Candidate) srirachav1.MatchStatus {
 	if len(candidates) == 0 {

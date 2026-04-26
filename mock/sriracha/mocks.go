@@ -1060,16 +1060,16 @@ func (_m *MockAuditLog) EXPECT() *MockAuditLog_Expecter {
 }
 
 // Append provides a mock function for the type MockAuditLog
-func (_mock *MockAuditLog) Append(ctx context.Context, event string, metadata map[string]string) error {
-	ret := _mock.Called(ctx, event, metadata)
+func (_mock *MockAuditLog) Append(ctx context.Context, event sriracha.AuditEvent) error {
+	ret := _mock.Called(ctx, event)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Append")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, map[string]string) error); ok {
-		r0 = returnFunc(ctx, event, metadata)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, sriracha.AuditEvent) error); ok {
+		r0 = returnFunc(ctx, event)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -1083,30 +1083,24 @@ type MockAuditLog_Append_Call struct {
 
 // Append is a helper method to define mock.On call
 //   - ctx context.Context
-//   - event string
-//   - metadata map[string]string
-func (_e *MockAuditLog_Expecter) Append(ctx interface{}, event interface{}, metadata interface{}) *MockAuditLog_Append_Call {
-	return &MockAuditLog_Append_Call{Call: _e.mock.On("Append", ctx, event, metadata)}
+//   - event sriracha.AuditEvent
+func (_e *MockAuditLog_Expecter) Append(ctx interface{}, event interface{}) *MockAuditLog_Append_Call {
+	return &MockAuditLog_Append_Call{Call: _e.mock.On("Append", ctx, event)}
 }
 
-func (_c *MockAuditLog_Append_Call) Run(run func(ctx context.Context, event string, metadata map[string]string)) *MockAuditLog_Append_Call {
+func (_c *MockAuditLog_Append_Call) Run(run func(ctx context.Context, event sriracha.AuditEvent)) *MockAuditLog_Append_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 string
+		var arg1 sriracha.AuditEvent
 		if args[1] != nil {
-			arg1 = args[1].(string)
-		}
-		var arg2 map[string]string
-		if args[2] != nil {
-			arg2 = args[2].(map[string]string)
+			arg1 = args[1].(sriracha.AuditEvent)
 		}
 		run(
 			arg0,
 			arg1,
-			arg2,
 		)
 	})
 	return _c
@@ -1117,7 +1111,7 @@ func (_c *MockAuditLog_Append_Call) Return(err error) *MockAuditLog_Append_Call 
 	return _c
 }
 
-func (_c *MockAuditLog_Append_Call) RunAndReturn(run func(ctx context.Context, event string, metadata map[string]string) error) *MockAuditLog_Append_Call {
+func (_c *MockAuditLog_Append_Call) RunAndReturn(run func(ctx context.Context, event sriracha.AuditEvent) error) *MockAuditLog_Append_Call {
 	_c.Call.Return(run)
 	return _c
 }

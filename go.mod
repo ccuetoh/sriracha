@@ -8,6 +8,7 @@ require (
 	github.com/bits-and-blooms/bloom/v3 v3.7.1
 	github.com/dgraph-io/badger/v4 v4.9.1
 	github.com/maypok86/otter v1.2.4
+	github.com/segmentio/ksuid v1.0.4
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/text v0.36.0
 	google.golang.org/grpc v1.80.0

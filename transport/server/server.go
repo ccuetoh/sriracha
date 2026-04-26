@@ -128,7 +128,7 @@ func (s *server) GracefulStop() {
 }
 
 // GetCapabilities implements SrirachaService.GetCapabilities.
-func (s *server) GetCapabilities(_ context.Context, _ *srirachav1.GetCapabilitiesRequest) (*srirachav1.GetCapabilitiesResponse, error) {
+func (s *server) GetCapabilities(ctx context.Context, _ *srirachav1.GetCapabilitiesRequest) (*srirachav1.GetCapabilitiesResponse, error) {
 	modes := make([]srirachav1.MatchMode, 0, len(s.cfg.SupportedModes))
 	for _, m := range s.cfg.SupportedModes {
 		pm, err := MatchModeToProto(m)
@@ -138,7 +138,7 @@ func (s *server) GetCapabilities(_ context.Context, _ *srirachav1.GetCapabilitie
 		modes = append(modes, pm)
 	}
 
-	return &srirachav1.GetCapabilitiesResponse{
+	resp := &srirachav1.GetCapabilitiesResponse{
 		SpecVersion:      s.cfg.SpecVersion,
 		FieldsetVersions: s.cfg.FieldSetVersions,
 		SupportedFields:  s.cfg.SupportedFields,
@@ -147,7 +147,16 @@ func (s *server) GetCapabilities(_ context.Context, _ *srirachav1.GetCapabilitie
 			QueriesPerMinute:  s.cfg.RateQueriesPerMinute,
 			BulkRecordsPerDay: s.cfg.RateBulkRecordsPerDay,
 		},
-	}, nil
+	}
+
+	_, peerID, _ := s.peerIdentity(ctx)
+	s.emitAudit(ctx, sriracha.AuditEvent{
+		EventType:   sriracha.EventCapabilities,
+		InitiatorID: peerID,
+		TargetID:    s.cfg.InstitutionID,
+	})
+
+	return resp, nil
 }
 
 // Query implements SrirachaService.Query.
@@ -158,10 +167,23 @@ func (s *server) Query(ctx context.Context, req *srirachav1.QueryRequest) (*srir
 	}
 
 	if req.Policy == nil {
+		s.emitAudit(ctx, sriracha.AuditEvent{
+			EventType:   sriracha.EventPolicyRejected,
+			SessionID:   req.SessionId,
+			InitiatorID: peerID,
+			TargetID:    s.cfg.InstitutionID,
+		})
 		return nil, status.Error(codes.PermissionDenied, "consent policy is required")
 	}
 
 	if err := s.consent.Validate(req.Policy, peerKey, peerID); err != nil {
+		s.emitAudit(ctx, sriracha.AuditEvent{
+			EventType:   sriracha.EventPolicyRejected,
+			SessionID:   req.SessionId,
+			PolicyID:    req.Policy.PolicyId,
+			InitiatorID: peerID,
+			TargetID:    s.cfg.InstitutionID,
+		})
 		return nil, status.Error(codes.PermissionDenied, err.Error())
 	}
 
@@ -185,6 +207,7 @@ func (s *server) Query(ctx context.Context, req *srirachav1.QueryRequest) (*srir
 	}
 
 	matchStatus := candidatesToStatus(candidates)
+	matchMode, _ := ProtoToMatchMode(req.MatchMode)
 
 	resp := &srirachav1.QueryResponse{
 		SessionId: req.SessionId,
@@ -196,7 +219,17 @@ func (s *server) Query(ctx context.Context, req *srirachav1.QueryRequest) (*srir
 		if len(candidates) > 0 {
 			resp.Confidence = float32(candidates[0].Confidence)
 		}
-		s.emitAudit(ctx, "query", req.SessionId, req.Policy.PolicyId, matchStatus)
+		s.emitAudit(ctx, sriracha.AuditEvent{
+			EventType:       sriracha.EventQuery,
+			SessionID:       req.SessionId,
+			PolicyID:        req.Policy.PolicyId,
+			InitiatorID:     peerID,
+			TargetID:        s.cfg.InstitutionID,
+			FieldSetVersion: req.FieldsetVersion,
+			MatchMode:       matchMode,
+			MatchStatus:     protoToMatchStatus(matchStatus),
+			RecordCount:     1,
+		})
 		return resp, nil
 	}
 
@@ -210,18 +243,44 @@ func (s *server) Query(ctx context.Context, req *srirachav1.QueryRequest) (*srir
 
 	resp.Fields, resp.NotFound = buildFieldValues(record, held)
 
-	s.emitAudit(ctx, "query", req.SessionId, req.Policy.PolicyId, matchStatus)
+	s.emitAudit(ctx, sriracha.AuditEvent{
+		EventType:       sriracha.EventQuery,
+		SessionID:       req.SessionId,
+		PolicyID:        req.Policy.PolicyId,
+		InitiatorID:     peerID,
+		TargetID:        s.cfg.InstitutionID,
+		FieldSetVersion: req.FieldsetVersion,
+		MatchMode:       matchMode,
+		MatchStatus:     protoToMatchStatus(matchStatus),
+		RecordCount:     1,
+	})
 	return resp, nil
 }
 
 // BulkLink implements SrirachaService.BulkLink.
 func (s *server) BulkLink(stream srirachav1.SrirachaService_BulkLinkServer) error {
 	ctx := stream.Context()
-	policyValidated := false
+	var (
+		policyValidated bool
+		sessionID       string
+		policyID        string
+		initiatorID     string
+		recordCount     int
+	)
 
 	for {
 		batch, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
+			if policyValidated {
+				s.emitAudit(ctx, sriracha.AuditEvent{
+					EventType:   sriracha.EventBulkClose,
+					SessionID:   sessionID,
+					PolicyID:    policyID,
+					InitiatorID: initiatorID,
+					TargetID:    s.cfg.InstitutionID,
+					RecordCount: recordCount,
+				})
+			}
 			return nil
 		}
 		if err != nil {
@@ -235,16 +294,41 @@ func (s *server) BulkLink(stream srirachav1.SrirachaService_BulkLinkServer) erro
 			}
 
 			if batch.Policy == nil {
+				s.emitAudit(ctx, sriracha.AuditEvent{
+					EventType:   sriracha.EventPolicyRejected,
+					SessionID:   batch.SessionId,
+					InitiatorID: peerID,
+					TargetID:    s.cfg.InstitutionID,
+				})
 				return status.Error(codes.PermissionDenied, "consent policy required on first batch")
 			}
 
 			if err := s.consent.Validate(batch.Policy, peerKey, peerID); err != nil {
+				s.emitAudit(ctx, sriracha.AuditEvent{
+					EventType:   sriracha.EventPolicyRejected,
+					SessionID:   batch.SessionId,
+					PolicyID:    batch.Policy.PolicyId,
+					InitiatorID: peerID,
+					TargetID:    s.cfg.InstitutionID,
+				})
 				return status.Error(codes.PermissionDenied, err.Error())
 			}
 
 			policyValidated = true
-			// TODO: enforce s.cfg.RateBulkRecordsPerDay per batch
+			sessionID = batch.SessionId
+			policyID = batch.Policy.PolicyId
+			initiatorID = peerID
+
+			s.emitAudit(ctx, sriracha.AuditEvent{
+				EventType:   sriracha.EventBulkOpen,
+				SessionID:   sessionID,
+				PolicyID:    policyID,
+				InitiatorID: initiatorID,
+				TargetID:    s.cfg.InstitutionID,
+			})
 		}
+
+		recordCount += len(batch.TokenRecords)
 
 		result, err := s.processBatch(ctx, batch)
 		if err != nil {
@@ -356,10 +440,7 @@ func peerInstitutionID(info credentials.TLSInfo) string {
 	return cmp.Or(uri, cert.Subject.CommonName)
 }
 
-func (s *server) emitAudit(ctx context.Context, event, sessionID, policyID string, st srirachav1.MatchStatus) {
-	_ = s.audit.Append(ctx, event, map[string]string{
-		"session_id": sessionID,
-		"policy_id":  policyID,
-		"status":     st.String(),
-	})
+func (s *server) emitAudit(ctx context.Context, ev sriracha.AuditEvent) {
+	ev.Timestamp = time.Now()
+	_ = s.audit.Append(ctx, ev)
 }

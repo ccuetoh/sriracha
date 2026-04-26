@@ -114,7 +114,7 @@ func startTestServer(t *testing.T, pki *testPKI) string {
 	indexer := mocksriracha.NewMockTokenIndexer(t)
 	source := mocksriracha.NewMockRecordSource(t)
 	audit := mocksriracha.NewMockAuditLog(t)
-	audit.EXPECT().Append(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	audit.EXPECT().Append(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	indexer.EXPECT().Match(mock.Anything, mock.Anything, mock.Anything).
 		Return([]sriracha.Candidate{{RecordID: "rec-1", Confidence: 1.0}}, nil).Maybe()
