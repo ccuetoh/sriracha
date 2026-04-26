@@ -2,8 +2,10 @@ package file
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +16,11 @@ import (
 
 	"go.sriracha.dev/sriracha"
 )
+
+// errReader is an io.Reader that always returns an error after n bytes.
+type errReader struct{ err error }
+
+func (e *errReader) Read(_ []byte) (int, error) { return 0, e.err }
 
 func TestNewEmptyFile(t *testing.T) {
 	t.Parallel()
@@ -210,7 +217,7 @@ func TestReopenAndExtend(t *testing.T) {
 
 func TestNewEventIDFormat(t *testing.T) {
 	t.Parallel()
-	id, err := newEventID()
+	id, err := newEventID(rand.Read)
 	require.NoError(t, err)
 
 	parts := strings.Split(id, "-")
@@ -224,9 +231,9 @@ func TestNewEventIDFormat(t *testing.T) {
 
 func TestNewEventIDUnique(t *testing.T) {
 	t.Parallel()
-	id1, err := newEventID()
+	id1, err := newEventID(rand.Read)
 	require.NoError(t, err)
-	id2, err := newEventID()
+	id2, err := newEventID(rand.Read)
 	require.NoError(t, err)
 	assert.NotEqual(t, id1, id2)
 }
@@ -272,4 +279,50 @@ func TestVerifyInvalidJSON(t *testing.T) {
 	l, err := New(path)
 	require.NoError(t, err)
 	assert.Error(t, l.Verify(context.Background()))
+}
+
+// TestScanSeedError covers the sc.Err() branch in scanSeed.
+func TestScanSeedError(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	l, err := New(path)
+	require.NoError(t, err)
+
+	scanErr := errors.New("read error")
+	err = l.scanSeed(&errReader{err: scanErr})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "seed scan")
+}
+
+// TestNewEventIDError covers the rand.Read error branch in newEventID.
+func TestNewEventIDError(t *testing.T) {
+	t.Parallel()
+	_, err := newEventID(func([]byte) (int, error) {
+		return 0, errors.New("rand fail")
+	})
+	assert.Error(t, err)
+}
+
+// TestAppendRandReadError covers the randRead error branch in Append.
+func TestAppendRandReadError(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	l, err := New(path)
+	require.NoError(t, err)
+
+	l.randRead = func([]byte) (int, error) { return 0, errors.New("rand fail") }
+	err = l.Append(context.Background(), sriracha.AuditEvent{})
+	assert.Error(t, err)
+}
+
+// TestAppendMarshalError covers the marshalJSON error branch in Append.
+func TestAppendMarshalError(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	l, err := New(path)
+	require.NoError(t, err)
+
+	l.marshalJSON = func(any) ([]byte, error) { return nil, errors.New("marshal fail") }
+	err = l.Append(context.Background(), sriracha.AuditEvent{})
+	assert.Error(t, err)
 }

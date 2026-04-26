@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 
@@ -18,10 +19,12 @@ var _ sriracha.AuditLog = (*Log)(nil)
 
 // Log is an append-only JSONL audit log with SHA-256 hash chaining.
 type Log struct {
-	mu       sync.Mutex
-	f        *os.File
-	path     string
-	prevHash [32]byte
+	mu          sync.Mutex
+	f           *os.File
+	path        string
+	prevHash    [32]byte
+	randRead    func([]byte) (int, error) // nil → crypto/rand.Read; overridable in tests
+	marshalJSON func(any) ([]byte, error) // nil → json.Marshal; overridable in tests
 }
 
 // New opens or creates the JSONL audit log at path.
@@ -46,24 +49,26 @@ func newLog(f *os.File, seedPath string) (*Log, error) {
 	return l, nil
 }
 
-// seedHash reads any existing events and sets prevHash to SHA-256 of the last
-// event's raw JSON bytes, so subsequent appends extend the chain correctly.
+// seedHash opens the log file for reading and delegates to scanSeed.
 func (l *Log) seedHash() error {
 	rf, err := os.Open(l.path)
 	if err != nil {
 		return fmt.Errorf("audit/file: seed open: %w", err)
 	}
 	defer rf.Close()
+	return l.scanSeed(rf)
+}
 
+// scanSeed reads r line by line and sets prevHash to SHA-256 of the last
+// non-empty line, so subsequent appends extend the chain correctly.
+func (l *Log) scanSeed(r io.Reader) error {
 	var last string
-	sc := bufio.NewScanner(rf)
+	sc := bufio.NewScanner(r)
 	for sc.Scan() {
 		if line := sc.Text(); line != "" {
 			last = line
 		}
 	}
-	// sc.Err() is structurally unreachable for well-formed local files: bufio.Scanner
-	// only sets a non-nil error on underlying I/O failures, which cannot occur here.
 	if err := sc.Err(); err != nil {
 		return fmt.Errorf("audit/file: seed scan: %w", err)
 	}
@@ -73,12 +78,10 @@ func (l *Log) seedHash() error {
 	return nil
 }
 
-// newEventID returns a UUID v4 string generated from crypto/rand.
-func newEventID() (string, error) {
+// newEventID returns a UUID v4 string using readFn as the entropy source.
+func newEventID(readFn func([]byte) (int, error)) (string, error) {
 	var b [16]byte
-	// rand.Read error is structurally unreachable: crypto/rand reads from /dev/urandom
-	// and only returns an error if the OS entropy source is broken.
-	if _, err := rand.Read(b[:]); err != nil {
+	if _, err := readFn(b[:]); err != nil {
 		return "", err
 	}
 	b[6] = (b[6] & 0x0f) | 0x40
@@ -90,10 +93,18 @@ func newEventID() (string, error) {
 // PreviousHash (SHA-256 of the previous event's raw JSON) before writing.
 // The caller must not set EventID or PreviousHash; the implementation owns them.
 func (l *Log) Append(_ context.Context, ev sriracha.AuditEvent) error {
-	id, err := newEventID()
-	// Propagated from rand.Read; structurally unreachable on a functional system.
+	readFn := l.randRead
+	if readFn == nil {
+		readFn = rand.Read
+	}
+	id, err := newEventID(readFn)
 	if err != nil {
 		return fmt.Errorf("audit/file: event ID: %w", err)
+	}
+
+	marshalFn := l.marshalJSON
+	if marshalFn == nil {
+		marshalFn = json.Marshal
 	}
 
 	l.mu.Lock()
@@ -102,8 +113,7 @@ func (l *Log) Append(_ context.Context, ev sriracha.AuditEvent) error {
 	ev.EventID = id
 	ev.PreviousHash = l.prevHash
 
-	raw, err := json.Marshal(ev)
-	// AuditEvent contains only JSON-serializable types; this error is structurally unreachable.
+	raw, err := marshalFn(ev)
 	if err != nil {
 		return fmt.Errorf("audit/file: marshal: %w", err)
 	}
