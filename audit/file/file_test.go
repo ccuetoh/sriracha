@@ -194,6 +194,9 @@ func TestVerifyMissingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
 	l := newForTest(t, path)
 
+	// Close the write handle before removing; on Windows an open handle
+	// prevents deletion even when FILE_SHARE_DELETE is set.
+	require.NoError(t, l.f.Close())
 	require.NoError(t, os.Remove(path))
 	assert.Error(t, l.Verify(context.Background()))
 }
