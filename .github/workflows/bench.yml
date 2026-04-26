@@ -6,21 +6,25 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   benchmark:
     name: Benchmark
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
           go-version-file: go.mod
 
-      - uses: bencherdev/bencher@main
+      - uses: bencherdev/bencher@46d007c103827da37db1a25b705dc73d3aaff7e6 # v0.6.3
 
       - name: Raise memlock limit for memguard
         run: sudo prlimit --pid $PPID --memlock=unlimited:unlimited
@@ -41,16 +45,20 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           bencher run \
             --project sriracha \
-            --branch "${{ github.head_ref }}" \
-            --start-point "${{ github.base_ref }}" \
-            --start-point-hash "${{ github.event.pull_request.base.sha }}" \
+            --branch "${HEAD_REF}" \
+            --start-point "${BASE_REF}" \
+            --start-point-hash "${BASE_SHA}" \
             --start-point-clone-thresholds \
             --start-point-reset \
             --testbed ubuntu-latest \
             --adapter go_bench \
             --err \
-            --github-actions "${{ secrets.GITHUB_TOKEN }}" \
+            --github-actions "${GITHUB_TOKEN}" \
             "go test -bench=. -benchmem ./..."
