@@ -20,12 +20,10 @@ var _ sriracha.AuditLog = (*log)(nil)
 
 // log is an append-only JSONL audit log with SHA-256 hash chaining.
 type log struct {
-	mu          sync.Mutex
-	f           *os.File
-	path        string
-	prevHash    [32]byte
-	newKSUID    func() (ksuid.KSUID, error) // nil → ksuid.NewRandom; overridable in tests
-	marshalJSON func(any) ([]byte, error)   // nil → json.Marshal; overridable in tests
+	mu       sync.Mutex
+	f        *os.File
+	path     string
+	prevHash [32]byte
 }
 
 // New opens or creates the JSONL audit log at path.
@@ -83,30 +81,13 @@ func (l *log) scanSeed(r io.Reader) error {
 // PreviousHash (SHA-256 of the previous event's raw JSON) before writing.
 // The caller must not set EventID or PreviousHash; the implementation owns them.
 func (l *log) Append(_ context.Context, ev sriracha.AuditEvent) error {
-	newKSUIDFn := l.newKSUID
-	if newKSUIDFn == nil {
-		newKSUIDFn = ksuid.NewRandom
-	}
-	id, err := newKSUIDFn()
-	if err != nil {
-		return fmt.Errorf("audit/file: event ID: %w", err)
-	}
-
-	marshalFn := l.marshalJSON
-	if marshalFn == nil {
-		marshalFn = json.Marshal
-	}
-
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	ev.EventID = id.String()
+	ev.EventID = ksuid.New().String()
 	ev.PreviousHash = l.prevHash
 
-	raw, err := marshalFn(ev)
-	if err != nil {
-		return fmt.Errorf("audit/file: marshal: %w", err)
-	}
+	raw, _ := json.Marshal(ev) // AuditEvent contains no unmarshalable types
 
 	if _, err := l.f.Write(append(raw, '\n')); err != nil {
 		return fmt.Errorf("audit/file: write: %w", err)

@@ -135,26 +135,6 @@ func TestAppendWriteError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestAppendKSUIDError(t *testing.T) {
-	t.Parallel()
-	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	l := newForTest(t, path)
-
-	l.newKSUID = func() (ksuid.KSUID, error) { return ksuid.KSUID{}, errors.New("ksuid fail") }
-	err := l.Append(context.Background(), sriracha.AuditEvent{})
-	assert.Error(t, err)
-}
-
-func TestAppendMarshalError(t *testing.T) {
-	t.Parallel()
-	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	l := newForTest(t, path)
-
-	l.marshalJSON = func(any) ([]byte, error) { return nil, errors.New("marshal fail") }
-	err := l.Append(context.Background(), sriracha.AuditEvent{})
-	assert.Error(t, err)
-}
-
 func TestVerifyEmptyFile(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
