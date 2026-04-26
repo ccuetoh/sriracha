@@ -1,5 +1,4 @@
-# Sriracha
-
+# <img height="70" alt="sriracha_logo" src="https://github.com/user-attachments/assets/8932cc91-8d3a-4f16-8b9b-9e8e8b9cecb2" /> Sriracha
 ## Peer-to-peer secure privacy-preserving person record linkage (PPRL)
 
 [![CI](https://github.com/ccuetoh/sriracha/actions/workflows/ci.yml/badge.svg)](https://github.com/ccuetoh/sriracha/actions/workflows/ci.yml)
