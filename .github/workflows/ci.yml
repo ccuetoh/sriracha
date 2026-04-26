@@ -179,15 +179,27 @@ jobs:
           FUZZTIME: 60s
         run: |
           set -euo pipefail
-          failed=0
+          tmpdir=$(mktemp -d)
+          pids=()
+          labels=()
+          outfiles=()
+
           for pkg in $(go list ./...); do
             targets=$(go test -list '^Fuzz' "$pkg" 2>/dev/null | awk '/^Fuzz/')
             for target in $targets; do
-              echo "::group::$pkg $target"
-              if ! go test -fuzz="^${target}$" -fuzztime="$FUZZTIME" "$pkg"; then
-                failed=1
-              fi
-              echo "::endgroup::"
+              outfile=$(mktemp -p "$tmpdir")
+              go test -fuzz="^${target}$" -fuzztime="$FUZZTIME" "$pkg" > "$outfile" 2>&1 &
+              pids+=("$!")
+              labels+=("$pkg $target")
+              outfiles+=("$outfile")
             done
+          done
+
+          failed=0
+          for i in "${!pids[@]}"; do
+            wait "${pids[$i]}" || failed=1
+            echo "::group::${labels[$i]}"
+            cat "${outfiles[$i]}"
+            echo "::endgroup::"
           done
           exit "$failed"
