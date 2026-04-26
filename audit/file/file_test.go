@@ -2,7 +2,6 @@ package file
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -11,13 +10,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/segmentio/ksuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.sriracha.dev/sriracha"
 )
 
-// errReader is an io.Reader that always returns an error after n bytes.
+// errReader is an io.Reader that always returns an error.
 type errReader struct{ err error }
 
 func (e *errReader) Read(_ []byte) (int, error) { return 0, e.err }
@@ -64,6 +64,8 @@ func TestAppendSetsEventID(t *testing.T) {
 	var ev sriracha.AuditEvent
 	require.NoError(t, json.Unmarshal([]byte(strings.TrimRight(string(data), "\n")), &ev))
 	assert.NotEmpty(t, ev.EventID)
+	_, parseErr := ksuid.Parse(ev.EventID)
+	assert.NoError(t, parseErr)
 }
 
 func TestAppendFirstEventHasZeroPreviousHash(t *testing.T) {
@@ -124,6 +126,28 @@ func TestAppendWriteError(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, l.f.Close())
+	err = l.Append(context.Background(), sriracha.AuditEvent{})
+	assert.Error(t, err)
+}
+
+func TestAppendKSUIDError(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	l, err := New(path)
+	require.NoError(t, err)
+
+	l.newKSUID = func() (ksuid.KSUID, error) { return ksuid.KSUID{}, errors.New("ksuid fail") }
+	err = l.Append(context.Background(), sriracha.AuditEvent{})
+	assert.Error(t, err)
+}
+
+func TestAppendMarshalError(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	l, err := New(path)
+	require.NoError(t, err)
+
+	l.marshalJSON = func(any) ([]byte, error) { return nil, errors.New("marshal fail") }
 	err = l.Append(context.Background(), sriracha.AuditEvent{})
 	assert.Error(t, err)
 }
@@ -215,29 +239,6 @@ func TestReopenAndExtend(t *testing.T) {
 	assert.NoError(t, l2.Verify(context.Background()))
 }
 
-func TestNewEventIDFormat(t *testing.T) {
-	t.Parallel()
-	id, err := newEventID(rand.Read)
-	require.NoError(t, err)
-
-	parts := strings.Split(id, "-")
-	require.Len(t, parts, 5)
-	assert.Len(t, parts[0], 8)
-	assert.Len(t, parts[1], 4)
-	assert.Len(t, parts[2], 4)
-	assert.Len(t, parts[3], 4)
-	assert.Len(t, parts[4], 12)
-}
-
-func TestNewEventIDUnique(t *testing.T) {
-	t.Parallel()
-	id1, err := newEventID(rand.Read)
-	require.NoError(t, err)
-	id2, err := newEventID(rand.Read)
-	require.NoError(t, err)
-	assert.NotEqual(t, id1, id2)
-}
-
 // TestNewLogSeedHashError exercises the error-cleanup path in newLog (and
 // transitively the os.Open error branch in seedHash) by supplying a valid
 // write handle with a seedPath that does not exist.
@@ -263,7 +264,6 @@ func TestVerifySkipsEmptyLines(t *testing.T) {
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
-	// Insert a blank line after the first event.
 	require.NoError(t, os.WriteFile(path, append(data, '\n'), 0600))
 
 	assert.NoError(t, l.Verify(context.Background()))
@@ -288,41 +288,7 @@ func TestScanSeedError(t *testing.T) {
 	l, err := New(path)
 	require.NoError(t, err)
 
-	scanErr := errors.New("read error")
-	err = l.scanSeed(&errReader{err: scanErr})
+	err = l.scanSeed(&errReader{err: errors.New("read error")})
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "seed scan")
-}
-
-// TestNewEventIDError covers the rand.Read error branch in newEventID.
-func TestNewEventIDError(t *testing.T) {
-	t.Parallel()
-	_, err := newEventID(func([]byte) (int, error) {
-		return 0, errors.New("rand fail")
-	})
-	assert.Error(t, err)
-}
-
-// TestAppendRandReadError covers the randRead error branch in Append.
-func TestAppendRandReadError(t *testing.T) {
-	t.Parallel()
-	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	l, err := New(path)
-	require.NoError(t, err)
-
-	l.randRead = func([]byte) (int, error) { return 0, errors.New("rand fail") }
-	err = l.Append(context.Background(), sriracha.AuditEvent{})
-	assert.Error(t, err)
-}
-
-// TestAppendMarshalError covers the marshalJSON error branch in Append.
-func TestAppendMarshalError(t *testing.T) {
-	t.Parallel()
-	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	l, err := New(path)
-	require.NoError(t, err)
-
-	l.marshalJSON = func(any) ([]byte, error) { return nil, errors.New("marshal fail") }
-	err = l.Append(context.Background(), sriracha.AuditEvent{})
-	assert.Error(t, err)
 }

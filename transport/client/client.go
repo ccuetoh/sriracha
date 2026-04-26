@@ -2,12 +2,11 @@ package client
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/tls"
-	"encoding/hex"
 	"fmt"
 	"time"
 
+	"github.com/segmentio/ksuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
@@ -137,7 +136,5 @@ func NewQueryRequest(
 }
 
 func newSessionID() string {
-	var b [16]byte
-	_, _ = rand.Read(b[:])
-	return hex.EncodeToString(b[:])
+	return ksuid.New().String()
 }

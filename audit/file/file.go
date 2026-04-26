@@ -3,7 +3,6 @@ package file
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -11,6 +10,8 @@ import (
 	"io"
 	"os"
 	"sync"
+
+	"github.com/segmentio/ksuid"
 
 	"go.sriracha.dev/sriracha"
 )
@@ -23,8 +24,8 @@ type Log struct {
 	f           *os.File
 	path        string
 	prevHash    [32]byte
-	randRead    func([]byte) (int, error) // nil → crypto/rand.Read; overridable in tests
-	marshalJSON func(any) ([]byte, error) // nil → json.Marshal; overridable in tests
+	newKSUID    func() (ksuid.KSUID, error) // nil → ksuid.NewRandom; overridable in tests
+	marshalJSON func(any) ([]byte, error)   // nil → json.Marshal; overridable in tests
 }
 
 // New opens or creates the JSONL audit log at path.
@@ -78,26 +79,15 @@ func (l *Log) scanSeed(r io.Reader) error {
 	return nil
 }
 
-// newEventID returns a UUID v4 string using readFn as the entropy source.
-func newEventID(readFn func([]byte) (int, error)) (string, error) {
-	var b [16]byte
-	if _, err := readFn(b[:]); err != nil {
-		return "", err
-	}
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
-}
-
-// Append writes ev to the log as a JSON line. It sets EventID (UUID v4) and
+// Append writes ev to the log as a JSON line. It sets EventID (KSUID) and
 // PreviousHash (SHA-256 of the previous event's raw JSON) before writing.
 // The caller must not set EventID or PreviousHash; the implementation owns them.
 func (l *Log) Append(_ context.Context, ev sriracha.AuditEvent) error {
-	readFn := l.randRead
-	if readFn == nil {
-		readFn = rand.Read
+	newKSUIDFn := l.newKSUID
+	if newKSUIDFn == nil {
+		newKSUIDFn = ksuid.NewRandom
 	}
-	id, err := newEventID(readFn)
+	id, err := newKSUIDFn()
 	if err != nil {
 		return fmt.Errorf("audit/file: event ID: %w", err)
 	}
@@ -110,7 +100,7 @@ func (l *Log) Append(_ context.Context, ev sriracha.AuditEvent) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	ev.EventID = id
+	ev.EventID = id.String()
 	ev.PreviousHash = l.prevHash
 
 	raw, err := marshalFn(ev)
