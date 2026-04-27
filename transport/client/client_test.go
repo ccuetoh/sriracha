@@ -129,7 +129,14 @@ func startTestServer(t *testing.T, pki *testPKI) string {
 		SupportedModes:   []sriracha.MatchMode{sriracha.Deterministic},
 	}
 
-	srv, err := server.New(cfg, indexer, source, pki.serverTLSConfig(), cache, audit)
+	srv, err := server.New(
+		server.WithConfig(cfg),
+		server.WithTokenIndexer(indexer),
+		server.WithRecordSource(source),
+		server.WithTLSConfig(pki.serverTLSConfig()),
+		server.WithReplayCache(cache),
+		server.WithAuditLog(audit),
+	)
 	require.NoError(t, err)
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")

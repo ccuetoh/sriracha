@@ -29,8 +29,10 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
+	mockratelimit "go.sriracha.dev/mock/ratelimit"
 	mocksriracha "go.sriracha.dev/mock/sriracha"
 	"go.sriracha.dev/sriracha"
+	"go.sriracha.dev/transport/internal/ratelimit"
 	"go.sriracha.dev/transport/internal/replay"
 	"go.sriracha.dev/transport/internal/tlsconf"
 	srirachav1 "go.sriracha.dev/transport/proto/sriracha/v1"
@@ -216,7 +218,14 @@ func newTestEnv(t *testing.T) *testEnv {
 	source := mocksriracha.NewMockRecordSource(t)
 	audit := mocksriracha.NewMockAuditLog(t)
 
-	srv, err := New(testServerConfig(), indexer, source, pki.serverTLSConfig(), cache, audit)
+	srv, err := New(
+		WithConfig(testServerConfig()),
+		WithTokenIndexer(indexer),
+		WithRecordSource(source),
+		WithTLSConfig(pki.serverTLSConfig()),
+		WithReplayCache(cache),
+		WithAuditLog(audit),
+	)
 	require.NoError(t, err)
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
@@ -651,7 +660,15 @@ func TestNewServerNilAudit(t *testing.T) {
 	indexer := mocksriracha.NewMockTokenIndexer(t)
 	source := mocksriracha.NewMockRecordSource(t)
 
-	srv, err := New(testServerConfig(), indexer, source, pki.serverTLSConfig(), cache, nil)
+	srv, err := New(
+		WithConfig(testServerConfig()),
+		WithTokenIndexer(indexer),
+		WithRecordSource(source),
+		WithTLSConfig(pki.serverTLSConfig()),
+		WithReplayCache(cache),
+		WithAuditLog(nil),
+		WithLimiter(nil),
+	)
 	require.NoError(t, err)
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
@@ -818,7 +835,13 @@ func TestNewServerValidation(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := New(tc.cfg, tc.idx, tc.src, tc.tlsCfg, tc.cache, nil)
+			_, err := New(
+				WithConfig(tc.cfg),
+				WithTokenIndexer(tc.idx),
+				WithRecordSource(tc.src),
+				WithTLSConfig(tc.tlsCfg),
+				WithReplayCache(tc.cache),
+			)
 			if tc.wantErr {
 				assert.Error(t, err)
 			} else {
@@ -860,8 +883,13 @@ func TestGetCapabilitiesInvalidMode(t *testing.T) {
 	cfg := testServerConfig()
 	cfg.SupportedModes = []sriracha.MatchMode{sriracha.MatchMode(99)} // invalid — skipped in GetCapabilities
 
-	srv, err := New(cfg, mocksriracha.NewMockTokenIndexer(t), mocksriracha.NewMockRecordSource(t),
-		pki.serverTLSConfig(), cache, nil)
+	srv, err := New(
+		WithConfig(cfg),
+		WithTokenIndexer(mocksriracha.NewMockTokenIndexer(t)),
+		WithRecordSource(mocksriracha.NewMockRecordSource(t)),
+		WithTLSConfig(pki.serverTLSConfig()),
+		WithReplayCache(cache),
+	)
 	require.NoError(t, err)
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
@@ -1204,8 +1232,11 @@ func newWhiteboxServer(t *testing.T) *server {
 	source := mocksriracha.NewMockRecordSource(t)
 
 	srv, err := New(
-		Config{InstitutionID: "org.example.b", SpecVersion: "0.1.0"},
-		indexer, source, tlsCfg, cache, nil,
+		WithConfig(Config{InstitutionID: "org.example.b", SpecVersion: "0.1.0"}),
+		WithTokenIndexer(indexer),
+		WithRecordSource(source),
+		WithTLSConfig(tlsCfg),
+		WithReplayCache(cache),
 	)
 	require.NoError(t, err)
 	s, ok := srv.(*server)
@@ -1362,7 +1393,14 @@ func TestGracefulStopDeadlineFallback(t *testing.T) {
 	audit := mocksriracha.NewMockAuditLog(t)
 	audit.EXPECT().Append(mock.Anything, mock.Anything).Return(nil).Maybe()
 
-	srv, err := New(testServerConfig(), indexer, source, pki.serverTLSConfig(), cache, audit)
+	srv, err := New(
+		WithConfig(testServerConfig()),
+		WithTokenIndexer(indexer),
+		WithRecordSource(source),
+		WithTLSConfig(pki.serverTLSConfig()),
+		WithReplayCache(cache),
+		WithAuditLog(audit),
+	)
 	require.NoError(t, err)
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -1409,7 +1447,14 @@ func TestBulkLinkRecordCapExceeded(t *testing.T) {
 	source.EXPECT().Fetch(mock.Anything, "rec-1").
 		Return(sriracha.RawRecord{}, nil).Maybe()
 
-	srv, err := New(cfg, indexer, source, pki.serverTLSConfig(), cache, audit)
+	srv, err := New(
+		WithConfig(cfg),
+		WithTokenIndexer(indexer),
+		WithRecordSource(source),
+		WithTLSConfig(pki.serverTLSConfig()),
+		WithReplayCache(cache),
+		WithAuditLog(audit),
+	)
 	require.NoError(t, err)
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
@@ -1444,4 +1489,173 @@ func TestBulkLinkRecordCapExceeded(t *testing.T) {
 	require.Error(t, err)
 	s, _ := status.FromError(err)
 	assert.Equal(t, codes.ResourceExhausted, s.Code())
+}
+
+// newRateLimitedEnv builds a testEnv whose server uses the supplied
+// ratelimit.Limiter. It mirrors newTestEnv but lets the caller substitute
+// the rate limiter dependency.
+func newRateLimitedEnv(t *testing.T, lim ratelimit.Limiter) *testEnv {
+	t.Helper()
+
+	pki := newTestPKI(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	cache := replay.New(ctx)
+
+	indexer := mocksriracha.NewMockTokenIndexer(t)
+	source := mocksriracha.NewMockRecordSource(t)
+	audit := mocksriracha.NewMockAuditLog(t)
+
+	srv, err := New(
+		WithConfig(testServerConfig()),
+		WithTokenIndexer(indexer),
+		WithRecordSource(source),
+		WithTLSConfig(pki.serverTLSConfig()),
+		WithReplayCache(cache),
+		WithAuditLog(audit),
+		WithLimiter(lim),
+	)
+	require.NoError(t, err)
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(func() { srv.GracefulStop(context.Background()) })
+
+	return &testEnv{
+		pki:     pki,
+		cache:   cache,
+		indexer: indexer,
+		source:  source,
+		audit:   audit,
+		addr:    lis.Addr().String(),
+	}
+}
+
+// TestQueryRateLimitExceeded verifies Query rejects with ResourceExhausted
+// and emits an EventRateLimitHit audit entry when the limiter denies the
+// request. The indexer is intentionally not expected to be called.
+func TestQueryRateLimitExceeded(t *testing.T) {
+	t.Parallel()
+
+	lim := mockratelimit.NewMockLimiter(t)
+	lim.EXPECT().AllowQuery(mock.Anything, mock.Anything).Return(ratelimit.ErrExceeded)
+
+	env := newRateLimitedEnv(t, lim)
+
+	// Capture the audit event types so we can assert EventRateLimitHit fires.
+	var seenRateHit bool
+	env.audit.EXPECT().Append(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, ev sriracha.AuditEvent) error {
+			if ev.EventType == sriracha.EventRateLimitHit {
+				seenRateHit = true
+			}
+			return nil
+		}).Maybe()
+
+	client := env.newClient(t)
+	trBytes, err := TokenRecordToProto(testTokenRecord(t))
+	require.NoError(t, err)
+
+	_, err = client.Query(context.Background(), &srirachav1.QueryRequest{
+		SessionId:       "sess-rate",
+		TokenRecord:     trBytes,
+		FieldsetVersion: "1.0.0-test",
+		Policy:          env.newPolicy(t),
+	})
+	require.Error(t, err)
+	s, _ := status.FromError(err)
+	assert.Equal(t, codes.ResourceExhausted, s.Code())
+	assert.True(t, seenRateHit, "expected EventRateLimitHit to be emitted")
+}
+
+// TestQueryRateLimitAllowed verifies that when the limiter allows the
+// request, the Query handler proceeds to the indexer.
+func TestQueryRateLimitAllowed(t *testing.T) {
+	t.Parallel()
+
+	lim := mockratelimit.NewMockLimiter(t)
+	lim.EXPECT().AllowQuery(mock.Anything, mock.Anything).Return(nil)
+
+	env := newRateLimitedEnv(t, lim)
+	env.expectAudit(t)
+	env.indexer.EXPECT().
+		Match(mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, nil)
+
+	client := env.newClient(t)
+	trBytes, err := TokenRecordToProto(testTokenRecord(t))
+	require.NoError(t, err)
+
+	resp, err := client.Query(context.Background(), &srirachav1.QueryRequest{
+		SessionId:       "sess-rate-ok",
+		TokenRecord:     trBytes,
+		FieldsetVersion: "1.0.0-test",
+		Policy:          env.newPolicy(t),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, srirachav1.MatchStatus_MATCH_STATUS_NO_MATCH, resp.Status)
+}
+
+// TestBulkLinkRateLimitExceeded verifies BulkLink rejects with
+// ResourceExhausted when the limiter denies the bulk batch.
+func TestBulkLinkRateLimitExceeded(t *testing.T) {
+	t.Parallel()
+
+	lim := mockratelimit.NewMockLimiter(t)
+	lim.EXPECT().AllowBulk(mock.Anything, mock.Anything, mock.Anything).
+		Return(ratelimit.ErrExceeded)
+
+	env := newRateLimitedEnv(t, lim)
+	env.expectAudit(t)
+
+	client := env.newClient(t)
+	trBytes, err := TokenRecordToProto(testTokenRecord(t))
+	require.NoError(t, err)
+
+	stream, err := client.BulkLink(context.Background())
+	require.NoError(t, err)
+
+	err = stream.Send(&srirachav1.BulkLinkRequest{
+		SessionId:    "bulk-rate",
+		TokenRecords: [][]byte{trBytes},
+		RecordRefs:   []string{"ref-r"},
+		Policy:       env.newPolicy(t),
+	})
+	require.NoError(t, err)
+
+	_, err = stream.Recv()
+	require.Error(t, err)
+	s, _ := status.FromError(err)
+	assert.Equal(t, codes.ResourceExhausted, s.Code())
+}
+
+// TestNewServerNilLimiterDefaults verifies that omitting WithLimiter (and
+// passing WithLimiter(nil)) results in a Noop limiter rather than a nil
+// dereference at request time.
+func TestNewServerNilLimiterDefaults(t *testing.T) {
+	t.Parallel()
+
+	pki := newTestPKI(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	cache := replay.New(ctx)
+
+	indexer := mocksriracha.NewMockTokenIndexer(t)
+	source := mocksriracha.NewMockRecordSource(t)
+
+	srv, err := New(
+		WithConfig(testServerConfig()),
+		WithTokenIndexer(indexer),
+		WithRecordSource(source),
+		WithTLSConfig(pki.serverTLSConfig()),
+		WithReplayCache(cache),
+		WithLimiter(nil), // explicitly nil, must be ignored
+	)
+	require.NoError(t, err)
+
+	s, ok := srv.(*server)
+	require.True(t, ok)
+	_, isNoop := s.limiter.(ratelimit.Noop)
+	assert.True(t, isNoop, "expected default ratelimit.Noop, got %T", s.limiter)
 }
