@@ -21,6 +21,7 @@ import (
 	"go.sriracha.dev/fieldset"
 	"go.sriracha.dev/sriracha"
 	"go.sriracha.dev/transport/internal/consent"
+	"go.sriracha.dev/transport/internal/ratelimit"
 	"go.sriracha.dev/transport/internal/replay"
 	"go.sriracha.dev/transport/internal/tlsconf"
 	srirachav1 "go.sriracha.dev/transport/proto/sriracha/v1"
@@ -73,48 +74,102 @@ type server struct {
 	cfg     Config
 	indexer sriracha.TokenIndexer
 	source  sriracha.RecordSource
+	tlsCfg  *tls.Config
+	cache   replay.Cache
 	consent consent.Validator
 	audit   sriracha.AuditLog
+	limiter ratelimit.Limiter
 	grpcSrv *grpc.Server
 }
 
+// Option configures the server. Pass options to New.
+type Option func(*server)
+
+// WithConfig sets the server Config. Required.
+func WithConfig(cfg Config) Option {
+	return func(s *server) { s.cfg = cfg }
+}
+
+// WithTokenIndexer sets the token index used for matching. Required.
+func WithTokenIndexer(idx sriracha.TokenIndexer) Option {
+	return func(s *server) { s.indexer = idx }
+}
+
+// WithRecordSource sets the raw-record source used to populate field
+// values on a successful match. Required.
+func WithRecordSource(src sriracha.RecordSource) Option {
+	return func(s *server) { s.source = src }
+}
+
+// WithTLSConfig sets the mTLS configuration for the gRPC server. Required.
+func WithTLSConfig(tlsCfg *tls.Config) Option {
+	return func(s *server) { s.tlsCfg = tlsCfg }
+}
+
+// WithReplayCache sets the replay-prevention cache used by the consent
+// validator. Required.
+func WithReplayCache(cache replay.Cache) Option {
+	return func(s *server) { s.cache = cache }
+}
+
+// WithAuditLog sets the audit log destination. Optional; defaults to
+// NopAuditLog.
+func WithAuditLog(a sriracha.AuditLog) Option {
+	return func(s *server) {
+		if a != nil {
+			s.audit = a
+		}
+	}
+}
+
+// WithLimiter sets the rate limiter. Optional; defaults to ratelimit.Noop
+// (no enforcement).
+func WithLimiter(l ratelimit.Limiter) Option {
+	return func(s *server) {
+		if l != nil {
+			s.limiter = l
+		}
+	}
+}
+
 // New constructs a Server. Call Serve to begin accepting connections.
-// audit may be nil; in that case a no-op implementation is used.
-func New(
-	cfg Config,
-	idx sriracha.TokenIndexer,
-	src sriracha.RecordSource,
-	tlsCfg *tls.Config,
-	cache replay.Cache,
-	audit sriracha.AuditLog,
-) (Server, error) {
-	if cfg.InstitutionID == "" {
+//
+// WithConfig, WithTokenIndexer, WithRecordSource, WithTLSConfig, and
+// WithReplayCache are required. WithAuditLog defaults to NopAuditLog
+// and WithLimiter defaults to ratelimit.Noop when omitted.
+func New(opts ...Option) (Server, error) {
+	srv := &server{
+		audit:   NopAuditLog{},
+		limiter: ratelimit.Noop{},
+	}
+	for _, opt := range opts {
+		opt(srv)
+	}
+
+	if srv.cfg.InstitutionID == "" {
 		return nil, errors.New("server: InstitutionID must not be empty")
 	}
-	if idx == nil {
+	if srv.indexer == nil {
 		return nil, errors.New("server: TokenIndexer must not be nil")
 	}
-	if src == nil {
+	if srv.source == nil {
 		return nil, errors.New("server: RecordSource must not be nil")
 	}
-	if tlsCfg == nil {
+	if srv.tlsCfg == nil {
 		return nil, errors.New("server: TLS config must not be nil")
 	}
-	if cache == nil {
+	if srv.cache == nil {
 		return nil, errors.New("server: replay cache must not be nil")
 	}
 
-	if audit == nil {
-		audit = NopAuditLog{}
-	}
-
-	maxRecv := cfg.MaxRecvMessageBytes
+	maxRecv := srv.cfg.MaxRecvMessageBytes
 	if maxRecv <= 0 {
 		maxRecv = DefaultMaxRecvMessageBytes
 	}
 
-	grpcSrv := grpc.NewServer(
-		grpc.Creds(credentials.NewTLS(tlsCfg)),
+	srv.consent = consent.NewValidator(srv.cfg.InstitutionID, srv.cache)
+	srv.grpcSrv = grpc.NewServer(
+		grpc.Creds(credentials.NewTLS(srv.tlsCfg)),
 		grpc.MaxRecvMsgSize(maxRecv),
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			Time:             30 * time.Second,
@@ -127,16 +182,7 @@ func New(
 		}),
 	)
 
-	srv := &server{
-		cfg:     cfg,
-		indexer: idx,
-		source:  src,
-		consent: consent.NewValidator(cfg.InstitutionID, cache),
-		audit:   audit,
-		grpcSrv: grpcSrv,
-	}
-
-	srirachav1.RegisterSrirachaServiceServer(grpcSrv, srv)
+	srirachav1.RegisterSrirachaServiceServer(srv.grpcSrv, srv)
 	return srv, nil
 }
 
@@ -220,7 +266,16 @@ func (s *server) Query(ctx context.Context, req *srirachav1.QueryRequest) (*srir
 		return nil, status.Error(codes.PermissionDenied, "consent policy rejected")
 	}
 
-	// TODO: enforce s.cfg.RateQueriesPerMinute
+	if err := s.limiter.AllowQuery(ctx, peerID); err != nil {
+		s.emitAudit(ctx, sriracha.AuditEvent{
+			EventType:   sriracha.EventRateLimitHit,
+			SessionID:   req.SessionId,
+			PolicyID:    req.Policy.PolicyId,
+			InitiatorID: peerID,
+			TargetID:    s.cfg.InstitutionID,
+		})
+		return nil, status.Error(codes.ResourceExhausted, "query rate limit exceeded")
+	}
 
 	if _, err := fieldset.NegotiateVersion(s.cfg.FieldSetVersions, req.FieldsetVersion); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
@@ -370,7 +425,7 @@ func (s *server) BulkLink(stream srirachav1.SrirachaService_BulkLinkServer) erro
 				"bulk record cap exceeded: %d > %d", recordCount, cap)
 		}
 
-		result, err := s.processBatch(ctx, batch)
+		result, err := s.processBatch(ctx, batch, initiatorID)
 		if err != nil {
 			return err
 		}
@@ -381,7 +436,11 @@ func (s *server) BulkLink(stream srirachav1.SrirachaService_BulkLinkServer) erro
 	}
 }
 
-func (s *server) processBatch(ctx context.Context, batch *srirachav1.BulkLinkRequest) (*srirachav1.BulkLinkResponse, error) {
+func (s *server) processBatch(ctx context.Context, batch *srirachav1.BulkLinkRequest, initiatorID string) (*srirachav1.BulkLinkResponse, error) {
+	if err := s.limiter.AllowBulk(ctx, initiatorID, len(batch.TokenRecords)); err != nil {
+		return nil, status.Error(codes.ResourceExhausted, "bulk record rate limit exceeded")
+	}
+
 	entries := make([]*srirachav1.MatchResultEntry, 0, len(batch.TokenRecords))
 
 	for i, trBytes := range batch.TokenRecords {
