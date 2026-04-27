@@ -22,7 +22,7 @@ type passThroughConverter struct{}
 
 func (passThroughConverter) ConvertValue(v any) (driver.Value, error) { return v, nil }
 
-func newRawAdapter(t *testing.T, opts ...Option) (*Adapter, sqlmock.Sqlmock) {
+func newRawAdapter(t *testing.T, opts ...Option) (Adapter, sqlmock.Sqlmock) {
 	t.Helper()
 
 	db, mock, err := sqlmock.New(
@@ -48,7 +48,7 @@ const (
 	testScanSinceQuery = "SELECT __sriracha_record_id, __sriracha_deleted_at, sriracha::name::given AS \"sriracha::name::given\" FROM persons WHERE updated_at > {sriracha_since}"
 )
 
-func newMockAdapter(t *testing.T, opts ...Option) (*Adapter, sqlmock.Sqlmock) {
+func newMockAdapter(t *testing.T, opts ...Option) (Adapter, sqlmock.Sqlmock) {
 	t.Helper()
 
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
@@ -203,10 +203,12 @@ func TestNew(t *testing.T) {
 
 			require.NoError(t, err)
 			require.NotNil(t, a)
-			assert.NotContains(t, a.fetchQuery, PlaceholderRecordID,
+			impl, ok := a.(*adapter)
+			require.True(t, ok)
+			assert.NotContains(t, impl.fetchQuery, PlaceholderRecordID,
 				"placeholder must be substituted at construction time")
-			if a.scanSinceQuery != "" {
-				assert.NotContains(t, a.scanSinceQuery, PlaceholderSince)
+			if impl.scanSinceQuery != "" {
+				assert.NotContains(t, impl.scanSinceQuery, PlaceholderSince)
 			}
 		})
 	}
@@ -228,8 +230,10 @@ func TestNew_DollarPlaceholderSubstitution(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	assert.Equal(t, "SELECT * FROM persons WHERE id = $1", a.fetchQuery)
-	assert.Equal(t, "SELECT * FROM persons WHERE updated_at > $1", a.scanSinceQuery)
+	impl, ok := a.(*adapter)
+	require.True(t, ok)
+	assert.Equal(t, "SELECT * FROM persons WHERE id = $1", impl.fetchQuery)
+	assert.Equal(t, "SELECT * FROM persons WHERE updated_at > $1", impl.scanSinceQuery)
 }
 
 func TestParseColumns(t *testing.T) {

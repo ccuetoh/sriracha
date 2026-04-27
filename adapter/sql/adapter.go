@@ -33,9 +33,13 @@ func PlaceholderQuestion(_ int) string { return "?" }
 // PlaceholderDollar returns "$1", "$2", ... — the parameter marker used by PostgreSQL.
 func PlaceholderDollar(index int) string { return "$" + strconv.Itoa(index) }
 
-// Adapter exposes a database/sql connection as a sriracha.RecordSource and,
-// when ScanSinceQuery is configured, a sriracha.IncrementalRecordSource.
-type Adapter struct {
+// Adapter exposes a database/sql connection as a
+// sriracha.IncrementalRecordSource. Construct one with New.
+type Adapter interface {
+	sriracha.IncrementalRecordSource
+}
+
+type adapter struct {
 	db             *sql.DB
 	scanQuery      string
 	fetchQuery     string
@@ -44,25 +48,25 @@ type Adapter struct {
 }
 
 // Option configures an Adapter. Pass options to New.
-type Option func(*Adapter)
+type Option func(*adapter)
 
 // WithDB sets the database handle. Required.
 func WithDB(db *sql.DB) Option {
-	return func(a *Adapter) { a.db = db }
+	return func(a *adapter) { a.db = db }
 }
 
 // WithScanQuery sets the full-table scan query. Required.
 // The query takes no parameters and must produce a column named
 // __sriracha_record_id alongside any field-path columns.
 func WithScanQuery(q string) Option {
-	return func(a *Adapter) { a.scanQuery = q }
+	return func(a *adapter) { a.scanQuery = q }
 }
 
 // WithFetchQuery sets the single-record lookup query. Required.
 // The query must contain the {sriracha_record_id} placeholder, which is
 // replaced with the driver-specific parameter marker at construction time.
 func WithFetchQuery(q string) Option {
-	return func(a *Adapter) { a.fetchQuery = q }
+	return func(a *adapter) { a.fetchQuery = q }
 }
 
 // WithScanSinceQuery sets the incremental scan query. Optional; when omitted
@@ -70,24 +74,24 @@ func WithFetchQuery(q string) Option {
 // placeholder and may produce a __sriracha_deleted_at column to signal
 // deletions to the indexer.
 func WithScanSinceQuery(q string) Option {
-	return func(a *Adapter) { a.scanSinceQuery = q }
+	return func(a *adapter) { a.scanSinceQuery = q }
 }
 
 // WithPlaceholder overrides the parameter-marker generator. Defaults to
 // PlaceholderQuestion. Use PlaceholderDollar for PostgreSQL.
 func WithPlaceholder(fn func(index int) string) Option {
-	return func(a *Adapter) { a.placeholder = fn }
+	return func(a *adapter) { a.placeholder = fn }
 }
 
-var _ sriracha.IncrementalRecordSource = (*Adapter)(nil)
+var _ Adapter = (*adapter)(nil)
 
 // New constructs an Adapter from the supplied options.
 //
 // WithDB, WithScanQuery, and WithFetchQuery are required. WithScanSinceQuery
 // is optional; without it ScanSince returns an error. WithPlaceholder defaults
 // to PlaceholderQuestion (MySQL, SQLite).
-func New(opts ...Option) (*Adapter, error) {
-	a := &Adapter{placeholder: PlaceholderQuestion}
+func New(opts ...Option) (Adapter, error) {
+	a := &adapter{placeholder: PlaceholderQuestion}
 	for _, opt := range opts {
 		opt(a)
 	}
@@ -176,7 +180,7 @@ func buildRecord(cm columnMap, values []sql.NullString) sriracha.RawRecord {
 
 // Scan iterates every row produced by the configured ScanQuery and invokes fn
 // for each record. Iteration stops on the first error returned by fn.
-func (a *Adapter) Scan(ctx context.Context, fn func(id string, r sriracha.RawRecord) error) error {
+func (a *adapter) Scan(ctx context.Context, fn func(id string, r sriracha.RawRecord) error) error {
 	rows, err := a.db.QueryContext(ctx, a.scanQuery)
 	if err != nil {
 		return err
@@ -219,7 +223,7 @@ func (a *Adapter) Scan(ctx context.Context, fn func(id string, r sriracha.RawRec
 
 // Fetch retrieves a single record by ID using the configured FetchQuery.
 // Returns sriracha.ErrRecordNotFound when the query yields no rows.
-func (a *Adapter) Fetch(ctx context.Context, id string) (sriracha.RawRecord, error) {
+func (a *adapter) Fetch(ctx context.Context, id string) (sriracha.RawRecord, error) {
 	rows, err := a.db.QueryContext(ctx, a.fetchQuery, id)
 	if err != nil {
 		return nil, err
@@ -261,7 +265,7 @@ func (a *Adapter) Fetch(ctx context.Context, id string) (sriracha.RawRecord, err
 // with a nil RawRecord, signalling deletion to the indexer.
 //
 // Returns an error if the adapter was constructed without ScanSinceQuery.
-func (a *Adapter) ScanSince(ctx context.Context, checkpoint string, fn func(id string, r sriracha.RawRecord) error) error {
+func (a *adapter) ScanSince(ctx context.Context, checkpoint string, fn func(id string, r sriracha.RawRecord) error) error {
 	if a.scanSinceQuery == "" {
 		return errors.New("adapter/sql: ScanSinceQuery not configured")
 	}
