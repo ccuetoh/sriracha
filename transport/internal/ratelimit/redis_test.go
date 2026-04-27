@@ -2,83 +2,80 @@ package ratelimit
 
 import (
 	"context"
-	"os"
 	"testing"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
 
-// redisClientForTest dials REDIS_ADDR (e.g. "localhost:6379") and returns a
-// connected client. The test is skipped when REDIS_ADDR is not set so the
-// suite stays runnable in environments without Redis.
-func redisClientForTest(t testing.TB) *redis.Client {
+// startMiniredis spins up an in-process Redis server so the GCRA Lua
+// script in redis_rate can execute without an external dependency.
+func startMiniredis(t testing.TB) *redis.Client {
 	t.Helper()
-	addr := os.Getenv("REDIS_ADDR")
-	if addr == "" {
-		t.Skip("REDIS_ADDR not set; skipping Redis integration test")
-	}
-	rdb := redis.NewClient(&redis.Options{Addr: addr})
-	if err := rdb.Ping(context.Background()).Err(); err != nil {
-		t.Skipf("Redis not reachable at %s: %v", addr, err)
-	}
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
 	return rdb
 }
 
 func TestRedisAllowQuery(t *testing.T) {
 	t.Parallel()
-	rdb := redisClientForTest(t)
-
-	t.Run("unlimited", func(t *testing.T) {
-		t.Parallel()
-		l := NewRedis(rdb, 0, 0)
-		for i := 0; i < 10; i++ {
-			require.NoError(t, l.AllowQuery(context.Background(), "org.unlimited"))
-		}
-	})
+	rdb := startMiniredis(t)
 
 	t.Run("rejects after burst", func(t *testing.T) {
 		t.Parallel()
 		l := NewRedis(rdb, 3, 0)
-		key := "org.query.test." + t.Name()
-		_ = rdb.Del(context.Background(), "rate:sriracha:rate_limit:queries_per_minute:"+key).Err()
+		ctx := context.Background()
 
 		for i := 0; i < 3; i++ {
-			require.NoError(t, l.AllowQuery(context.Background(), key))
+			require.NoError(t, l.AllowQuery(ctx, "org.query.burst"))
 		}
-		require.ErrorIs(t, l.AllowQuery(context.Background(), key), ErrExceeded)
+		require.ErrorIs(t, l.AllowQuery(ctx, "org.query.burst"), ErrExceeded)
+	})
+
+	t.Run("isolated per institution", func(t *testing.T) {
+		t.Parallel()
+		l := NewRedis(rdb, 1, 0)
+		ctx := context.Background()
+
+		require.NoError(t, l.AllowQuery(ctx, "org.query.iso.a"))
+		require.ErrorIs(t, l.AllowQuery(ctx, "org.query.iso.a"), ErrExceeded)
+
+		// Different institution has its own bucket.
+		require.NoError(t, l.AllowQuery(ctx, "org.query.iso.b"))
 	})
 }
 
 func TestRedisAllowBulk(t *testing.T) {
 	t.Parallel()
-	rdb := redisClientForTest(t)
-
-	t.Run("unlimited", func(t *testing.T) {
-		t.Parallel()
-		l := NewRedis(rdb, 0, 0)
-		require.NoError(t, l.AllowBulk(context.Background(), "org.unlimited", 1_000_000))
-	})
+	rdb := startMiniredis(t)
 
 	t.Run("rejects when cost exceeds remaining", func(t *testing.T) {
 		t.Parallel()
 		l := NewRedis(rdb, 0, 100)
-		key := "org.bulk.test." + t.Name()
-		_ = rdb.Del(context.Background(), "rate:sriracha:rate_limit:bulk_records_per_day:"+key).Err()
+		ctx := context.Background()
 
-		require.NoError(t, l.AllowBulk(context.Background(), key, 60))
-		require.ErrorIs(t, l.AllowBulk(context.Background(), key, 50), ErrExceeded)
+		require.NoError(t, l.AllowBulk(ctx, "org.bulk.cost", 60))
+		require.ErrorIs(t, l.AllowBulk(ctx, "org.bulk.cost", 50), ErrExceeded)
 	})
 
 	t.Run("non-positive cost coerced to 1", func(t *testing.T) {
 		t.Parallel()
 		l := NewRedis(rdb, 0, 1)
-		key := "org.bulk.coerce." + t.Name()
-		_ = rdb.Del(context.Background(), "rate:sriracha:rate_limit:bulk_records_per_day:"+key).Err()
+		ctx := context.Background()
 
-		require.NoError(t, l.AllowBulk(context.Background(), key, 0))
-		require.ErrorIs(t, l.AllowBulk(context.Background(), key, -10), ErrExceeded)
+		require.NoError(t, l.AllowBulk(ctx, "org.bulk.coerce", 0))
+		require.ErrorIs(t, l.AllowBulk(ctx, "org.bulk.coerce", -10), ErrExceeded)
+	})
+
+	t.Run("split across batches at limit", func(t *testing.T) {
+		t.Parallel()
+		l := NewRedis(rdb, 0, 100)
+		ctx := context.Background()
+
+		require.NoError(t, l.AllowBulk(ctx, "org.bulk.split", 50))
+		require.NoError(t, l.AllowBulk(ctx, "org.bulk.split", 50))
 	})
 }
 
@@ -114,7 +111,7 @@ func TestRedisUnlimitedNoCall(t *testing.T) {
 }
 
 func BenchmarkRedisLimiter_AllowQuery(b *testing.B) {
-	rdb := redisClientForTest(b)
+	rdb := startMiniredis(b)
 	l := NewRedis(rdb, 1_000_000, 0)
 	ctx := context.Background()
 	b.ResetTimer()
@@ -124,7 +121,7 @@ func BenchmarkRedisLimiter_AllowQuery(b *testing.B) {
 }
 
 func BenchmarkRedisLimiter_AllowBulk(b *testing.B) {
-	rdb := redisClientForTest(b)
+	rdb := startMiniredis(b)
 	l := NewRedis(rdb, 0, 1_000_000_000)
 	ctx := context.Background()
 	b.ResetTimer()
