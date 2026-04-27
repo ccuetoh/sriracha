@@ -156,6 +156,117 @@ func TestNew(t *testing.T) {
 			errContain: "placeholder function must not be nil",
 		},
 		{
+			name: "fetch query with duplicate record id placeholder",
+			opts: func(t *testing.T) []Option {
+				return []Option{
+					WithDB(openMockDB(t)),
+					WithScanQuery(testScanQuery),
+					WithFetchQuery("SELECT __sriracha_record_id FROM persons WHERE id = {sriracha_record_id} OR alt_id = {sriracha_record_id}"),
+				}
+			},
+			wantErr:    true,
+			errContain: "exactly once",
+		},
+		{
+			name: "scan since query with duplicate since placeholder",
+			opts: func(t *testing.T) []Option {
+				return []Option{
+					WithDB(openMockDB(t)),
+					WithScanQuery(testScanQuery),
+					WithFetchQuery(testFetchQuery),
+					WithScanSinceQuery("SELECT __sriracha_record_id FROM persons WHERE created_at > {sriracha_since} OR updated_at > {sriracha_since}"),
+				}
+			},
+			wantErr:    true,
+			errContain: "exactly once",
+		},
+		{
+			name: "scan query with stray record id placeholder",
+			opts: func(t *testing.T) []Option {
+				return []Option{
+					WithDB(openMockDB(t)),
+					WithScanQuery("SELECT __sriracha_record_id FROM persons WHERE id = {sriracha_record_id}"),
+					WithFetchQuery(testFetchQuery),
+				}
+			},
+			wantErr:    true,
+			errContain: "unknown placeholder " + PlaceholderRecordID,
+		},
+		{
+			name: "fetch query with stray since placeholder",
+			opts: func(t *testing.T) []Option {
+				return []Option{
+					WithDB(openMockDB(t)),
+					WithScanQuery(testScanQuery),
+					WithFetchQuery("SELECT __sriracha_record_id FROM persons WHERE id = {sriracha_record_id} AND created_at > {sriracha_since}"),
+				}
+			},
+			wantErr:    true,
+			errContain: "unknown placeholder " + PlaceholderSince,
+		},
+		{
+			name: "scan since query with stray record id placeholder",
+			opts: func(t *testing.T) []Option {
+				return []Option{
+					WithDB(openMockDB(t)),
+					WithScanQuery(testScanQuery),
+					WithFetchQuery(testFetchQuery),
+					WithScanSinceQuery("SELECT __sriracha_record_id FROM persons WHERE updated_at > {sriracha_since} AND id = {sriracha_record_id}"),
+				}
+			},
+			wantErr:    true,
+			errContain: "unknown placeholder " + PlaceholderRecordID,
+		},
+		{
+			name: "fetch query with typoed placeholder",
+			opts: func(t *testing.T) []Option {
+				return []Option{
+					WithDB(openMockDB(t)),
+					WithScanQuery(testScanQuery),
+					WithFetchQuery("SELECT __sriracha_record_id FROM persons WHERE id = {sriracha_id}"),
+				}
+			},
+			wantErr:    true,
+			errContain: "unknown placeholder {sriracha_id}",
+		},
+		{
+			name: "scan query missing record id column reference",
+			opts: func(t *testing.T) []Option {
+				return []Option{
+					WithDB(openMockDB(t)),
+					WithScanQuery("SELECT id, name FROM persons"),
+					WithFetchQuery(testFetchQuery),
+				}
+			},
+			wantErr:    true,
+			errContain: "ScanQuery must reference column " + ColumnRecordID,
+		},
+		{
+			name: "fetch query missing record id column reference",
+			opts: func(t *testing.T) []Option {
+				return []Option{
+					WithDB(openMockDB(t)),
+					WithScanQuery(testScanQuery),
+					WithFetchQuery("SELECT id, name FROM persons WHERE id = {sriracha_record_id}"),
+				}
+			},
+			wantErr:    true,
+			errContain: "FetchQuery must reference column " + ColumnRecordID,
+		},
+		{
+			name: "scan since query missing record id column reference",
+			opts: func(t *testing.T) []Option {
+				return []Option{
+					WithDB(openMockDB(t)),
+					WithScanQuery(testScanQuery),
+					WithFetchQuery(testFetchQuery),
+					WithScanSinceQuery("SELECT id, name FROM persons WHERE updated_at > {sriracha_since}"),
+				}
+			},
+			wantErr:    true,
+			errContain: "ScanSinceQuery must reference column " + ColumnRecordID,
+		},
+		{
 			name: "happy path with question placeholder",
 			opts: func(t *testing.T) []Option {
 				return []Option{
@@ -224,16 +335,16 @@ func TestNew_DollarPlaceholderSubstitution(t *testing.T) {
 	a, err := New(
 		WithDB(db),
 		WithScanQuery(testScanQuery),
-		WithFetchQuery("SELECT * FROM persons WHERE id = {sriracha_record_id}"),
-		WithScanSinceQuery("SELECT * FROM persons WHERE updated_at > {sriracha_since}"),
+		WithFetchQuery("SELECT __sriracha_record_id FROM persons WHERE id = {sriracha_record_id}"),
+		WithScanSinceQuery("SELECT __sriracha_record_id FROM persons WHERE updated_at > {sriracha_since}"),
 		WithPlaceholder(PlaceholderDollar),
 	)
 	require.NoError(t, err)
 
 	impl, ok := a.(*adapter)
 	require.True(t, ok)
-	assert.Equal(t, "SELECT * FROM persons WHERE id = $1", impl.fetchQuery)
-	assert.Equal(t, "SELECT * FROM persons WHERE updated_at > $1", impl.scanSinceQuery)
+	assert.Equal(t, "SELECT __sriracha_record_id FROM persons WHERE id = $1", impl.fetchQuery)
+	assert.Equal(t, "SELECT __sriracha_record_id FROM persons WHERE updated_at > $1", impl.scanSinceQuery)
 }
 
 func TestParseColumns(t *testing.T) {

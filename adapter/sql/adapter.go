@@ -5,11 +5,17 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"go.sriracha.dev/sriracha"
 )
+
+// srirachaTokenRE matches every {sriracha_*} placeholder occurrence so we can
+// reject typos like {sriracha_id} that would otherwise survive substitution
+// and reach the database verbatim.
+var srirachaTokenRE = regexp.MustCompile(`\{sriracha_[^}]*\}`)
 
 const (
 	// ColumnRecordID is the reserved column name carrying the record identifier.
@@ -108,11 +114,17 @@ func New(opts ...Option) (Adapter, error) {
 	if a.placeholder == nil {
 		return nil, errors.New("adapter/sql: placeholder function must not be nil")
 	}
-	if !strings.Contains(a.fetchQuery, PlaceholderRecordID) {
-		return nil, fmt.Errorf("adapter/sql: FetchQuery must contain %s placeholder", PlaceholderRecordID)
+
+	if err := validateQueryTemplate("ScanQuery", a.scanQuery, nil); err != nil {
+		return nil, err
 	}
-	if a.scanSinceQuery != "" && !strings.Contains(a.scanSinceQuery, PlaceholderSince) {
-		return nil, fmt.Errorf("adapter/sql: ScanSinceQuery must contain %s placeholder", PlaceholderSince)
+	if err := validateQueryTemplate("FetchQuery", a.fetchQuery, []string{PlaceholderRecordID}); err != nil {
+		return nil, err
+	}
+	if a.scanSinceQuery != "" {
+		if err := validateQueryTemplate("ScanSinceQuery", a.scanSinceQuery, []string{PlaceholderSince}); err != nil {
+			return nil, err
+		}
 	}
 
 	a.fetchQuery = strings.ReplaceAll(a.fetchQuery, PlaceholderRecordID, a.placeholder(1))
@@ -121,6 +133,34 @@ func New(opts ...Option) (Adapter, error) {
 	}
 
 	return a, nil
+}
+
+// validateQueryTemplate enforces the construction-time contract on a query
+// template: every required placeholder appears exactly once, no other
+// {sriracha_*} tokens are present (typos like {sriracha_id} or
+// cross-query leakage), and ColumnRecordID is referenced literally so the
+// result set is guaranteed to carry the record identifier.
+func validateQueryTemplate(name, query string, required []string) error {
+	allowed := make(map[string]struct{}, len(required))
+	for _, p := range required {
+		allowed[p] = struct{}{}
+	}
+	for _, m := range srirachaTokenRE.FindAllString(query, -1) {
+		if _, ok := allowed[m]; !ok {
+			return fmt.Errorf("adapter/sql: %s contains unknown placeholder %s", name, m)
+		}
+	}
+
+	for _, p := range required {
+		if c := strings.Count(query, p); c != 1 {
+			return fmt.Errorf("adapter/sql: %s must contain placeholder %s exactly once (found %d)", name, p, c)
+		}
+	}
+
+	if !strings.Contains(query, ColumnRecordID) {
+		return fmt.Errorf("adapter/sql: %s must reference column %s", name, ColumnRecordID)
+	}
+	return nil
 }
 
 type columnField struct {

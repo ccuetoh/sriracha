@@ -32,6 +32,14 @@
 // Values are always passed as parameter arguments — never interpolated into
 // the SQL string — so user data cannot influence the query plan.
 //
+// New rejects templates that violate the contract:
+//
+//   - the query's required placeholder must appear exactly once,
+//   - no other {sriracha_*} tokens are permitted (catches typos like
+//     {sriracha_id} and cross-query placeholder leakage), and
+//   - each query must reference the __sriracha_record_id column literally
+//     so the result set is guaranteed to carry the record identifier.
+//
 // # NULL handling
 //
 // NULL values in non-reserved columns are surfaced to the indexer as the
