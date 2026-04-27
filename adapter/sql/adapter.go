@@ -181,7 +181,7 @@ func (a *Adapter) Scan(ctx context.Context, fn func(id string, r sriracha.RawRec
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck // close error is not actionable; iteration error is already surfaced via rows.Err()
 
 	names, err := rows.Columns()
 	if err != nil {
@@ -224,7 +224,7 @@ func (a *Adapter) Fetch(ctx context.Context, id string) (sriracha.RawRecord, err
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck // close error is not actionable; iteration error is already surfaced via rows.Err()
 
 	names, err := rows.Columns()
 	if err != nil {
@@ -270,7 +270,7 @@ func (a *Adapter) ScanSince(ctx context.Context, checkpoint string, fn func(id s
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck // close error is not actionable; iteration error is already surfaced via rows.Err()
 
 	names, err := rows.Columns()
 	if err != nil {

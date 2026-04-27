@@ -190,7 +190,6 @@ func TestNew(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -280,7 +279,6 @@ func TestParseColumns(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -731,7 +729,7 @@ func BenchmarkScan(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	a, err := New(
 		WithDB(db),
@@ -761,7 +759,7 @@ func BenchmarkFetch(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	a, err := New(
 		WithDB(db),
