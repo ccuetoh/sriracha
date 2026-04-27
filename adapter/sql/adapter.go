@@ -103,16 +103,16 @@ func New(opts ...Option) (Adapter, error) {
 	}
 
 	if a.db == nil {
-		return nil, errors.New("adapter/sql: DB must not be nil")
+		return nil, errors.New("DB must not be nil")
 	}
 	if a.scanQuery == "" {
-		return nil, errors.New("adapter/sql: ScanQuery must not be empty")
+		return nil, errors.New("ScanQuery must not be empty")
 	}
 	if a.fetchQuery == "" {
-		return nil, errors.New("adapter/sql: FetchQuery must not be empty")
+		return nil, errors.New("FetchQuery must not be empty")
 	}
 	if a.placeholder == nil {
-		return nil, errors.New("adapter/sql: placeholder function must not be nil")
+		return nil, errors.New("placeholder function must not be nil")
 	}
 
 	if err := validateQueryTemplate("ScanQuery", a.scanQuery, nil); err != nil {
@@ -147,18 +147,18 @@ func validateQueryTemplate(name, query string, required []string) error {
 	}
 	for _, m := range srirachaTokenRE.FindAllString(query, -1) {
 		if _, ok := allowed[m]; !ok {
-			return fmt.Errorf("adapter/sql: %s contains unknown placeholder %s", name, m)
+			return fmt.Errorf("%s contains unknown placeholder %s", name, m)
 		}
 	}
 
 	for _, p := range required {
 		if c := strings.Count(query, p); c != 1 {
-			return fmt.Errorf("adapter/sql: %s must contain placeholder %s exactly once (found %d)", name, p, c)
+			return fmt.Errorf("%s must contain placeholder %s exactly once (found %d)", name, p, c)
 		}
 	}
 
 	if !strings.Contains(query, ColumnRecordID) {
-		return fmt.Errorf("adapter/sql: %s must reference column %s", name, ColumnRecordID)
+		return fmt.Errorf("%s must reference column %s", name, ColumnRecordID)
 	}
 	return nil
 }
@@ -197,7 +197,7 @@ func parseColumns(names []string) (columnMap, error) {
 	}
 
 	if cm.recordIDIndex == -1 {
-		return columnMap{}, fmt.Errorf("adapter/sql: result set missing %s column", ColumnRecordID)
+		return columnMap{}, fmt.Errorf("result set missing %s column", ColumnRecordID)
 	}
 
 	return cm, nil
@@ -250,7 +250,7 @@ func (a *adapter) Scan(ctx context.Context, fn func(id string, r sriracha.RawRec
 
 		idVal := values[cm.recordIDIndex]
 		if !idVal.Valid || idVal.String == "" {
-			return errors.New("adapter/sql: record ID column is NULL or empty")
+			return errors.New("record ID column is NULL or empty")
 		}
 
 		if err := fn(idVal.String, buildRecord(cm, values)); err != nil {
@@ -307,7 +307,7 @@ func (a *adapter) Fetch(ctx context.Context, id string) (sriracha.RawRecord, err
 // Returns an error if the adapter was constructed without ScanSinceQuery.
 func (a *adapter) ScanSince(ctx context.Context, checkpoint string, fn func(id string, r sriracha.RawRecord) error) error {
 	if a.scanSinceQuery == "" {
-		return errors.New("adapter/sql: ScanSinceQuery not configured")
+		return errors.New("ScanSinceQuery not configured")
 	}
 
 	rows, err := a.db.QueryContext(ctx, a.scanSinceQuery, checkpoint)
@@ -339,7 +339,7 @@ func (a *adapter) ScanSince(ctx context.Context, checkpoint string, fn func(id s
 
 		idVal := values[cm.recordIDIndex]
 		if !idVal.Valid || idVal.String == "" {
-			return errors.New("adapter/sql: record ID column is NULL or empty")
+			return errors.New("record ID column is NULL or empty")
 		}
 
 		if cm.deletedAtIndex != -1 && values[cm.deletedAtIndex].Valid {
