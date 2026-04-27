@@ -3,7 +3,9 @@ module go.sriracha.dev
 go 1.25.0
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/Masterminds/semver/v3 v3.4.0
+	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/awnumar/memguard v0.23.0
 	github.com/bits-and-blooms/bitset v1.24.4
 	github.com/bits-and-blooms/bloom/v3 v3.7.1
@@ -20,7 +22,6 @@ require (
 )
 
 require (
-	github.com/alicebob/miniredis/v2 v2.37.0 // indirect
 	github.com/awnumar/memcall v0.4.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
