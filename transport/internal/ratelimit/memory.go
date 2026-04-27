@@ -8,19 +8,45 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// MemoryLimiter is an in-memory Limiter backed by golang.org/x/time/rate
+// memoryLimiter is an in-memory Limiter backed by golang.org/x/time/rate
 // token buckets. One bucket per institution per dimension is created
 // lazily on first use and retained for the lifetime of the limiter.
 //
-// MemoryLimiter is intended for single-instance deployments. For
-// multi-instance deployments use a RedisLimiter so quota is shared
+// It is intended for single-instance deployments. For multi-instance
+// deployments use the limiter returned by NewRedis so quota is shared
 // across replicas.
-type MemoryLimiter struct {
+type memoryLimiter struct {
 	queryLimit uint32
 	bulkLimit  uint32
 
-	queries sync.Map // institutionID string -> *rate.Limiter
-	bulk    sync.Map // institutionID string -> *rate.Limiter
+	queries limiterMap
+	bulk    limiterMap
+}
+
+// limiterMap is a goroutine-safe map of institution ID to *rate.Limiter.
+// It is the typed equivalent of a sync.Map specialised for this package
+// and avoids unchecked type assertions at the call site.
+type limiterMap struct {
+	mu sync.Mutex
+	m  map[string]*rate.Limiter
+}
+
+// loadOrCreate returns the *rate.Limiter for institutionID, creating
+// one with capacity n over the given window if none exists. The single
+// lock keeps the contention path cheap relative to the rate.Limiter's
+// own atomic work that follows.
+func (lm *limiterMap) loadOrCreate(institutionID string, n uint32, window time.Duration) *rate.Limiter {
+	lm.mu.Lock()
+	defer lm.mu.Unlock()
+	if lim, ok := lm.m[institutionID]; ok {
+		return lim
+	}
+	if lm.m == nil {
+		lm.m = make(map[string]*rate.Limiter)
+	}
+	lim := rate.NewLimiter(rate.Every(window/time.Duration(n)), int(n))
+	lm.m[institutionID] = lim
+	return lim
 }
 
 // NewMemory returns an in-memory Limiter.
@@ -28,50 +54,32 @@ type MemoryLimiter struct {
 // queryLimit is the maximum number of Query RPCs permitted per institution
 // per minute (0 = unlimited). bulkLimit is the maximum number of bulk
 // records permitted per institution per day (0 = unlimited).
-func NewMemory(queryLimit, bulkLimit uint32) *MemoryLimiter {
-	return &MemoryLimiter{
+func NewMemory(queryLimit, bulkLimit uint32) Limiter {
+	return &memoryLimiter{
 		queryLimit: queryLimit,
 		bulkLimit:  bulkLimit,
 	}
 }
 
-// AllowQuery implements Limiter.AllowQuery.
-func (m *MemoryLimiter) AllowQuery(_ context.Context, institutionID string) error {
+func (m *memoryLimiter) AllowQuery(_ context.Context, institutionID string) error {
 	if m.queryLimit == 0 {
 		return nil
 	}
-	lim := loadOrCreate(&m.queries, institutionID, m.queryLimit, time.Minute)
-	if !lim.Allow() {
+	if !m.queries.loadOrCreate(institutionID, m.queryLimit, time.Minute).Allow() {
 		return ErrExceeded
 	}
 	return nil
 }
 
-// AllowBulk implements Limiter.AllowBulk.
-func (m *MemoryLimiter) AllowBulk(_ context.Context, institutionID string, cost int) error {
+func (m *memoryLimiter) AllowBulk(_ context.Context, institutionID string, cost int) error {
 	if m.bulkLimit == 0 {
 		return nil
 	}
 	if cost < 1 {
 		cost = 1
 	}
-	lim := loadOrCreate(&m.bulk, institutionID, m.bulkLimit, 24*time.Hour)
-	if !lim.AllowN(time.Now(), cost) {
+	if !m.bulk.loadOrCreate(institutionID, m.bulkLimit, 24*time.Hour).AllowN(time.Now(), cost) {
 		return ErrExceeded
 	}
 	return nil
-}
-
-// loadOrCreate returns the *rate.Limiter for institutionID, creating one
-// with capacity n over the given window if none exists. Concurrent first
-// callers may briefly construct redundant limiters; LoadOrStore guarantees
-// only one is retained.
-func loadOrCreate(m *sync.Map, institutionID string, n uint32, window time.Duration) *rate.Limiter {
-	if v, ok := m.Load(institutionID); ok {
-		return v.(*rate.Limiter)
-	}
-	burst := int(n)
-	lim := rate.NewLimiter(rate.Every(window/time.Duration(n)), burst)
-	actual, _ := m.LoadOrStore(institutionID, lim)
-	return actual.(*rate.Limiter)
 }

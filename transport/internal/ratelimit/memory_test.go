@@ -27,7 +27,6 @@ func TestMemoryAllowQuery(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			lim := NewMemory(tc.queryLimit, 0)
@@ -63,7 +62,6 @@ func TestMemoryAllowBulk(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			lim := NewMemory(0, tc.bulkLimit)
@@ -107,7 +105,6 @@ func TestMemoryConcurrentLazyInit(t *testing.T) {
 	wg.Add(goroutines)
 	errs := make([]error, goroutines)
 	for i := 0; i < goroutines; i++ {
-		i := i
 		go func() {
 			defer wg.Done()
 			errs[i] = lim.AllowQuery(ctx, "org.race")

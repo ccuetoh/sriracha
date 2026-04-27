@@ -9,13 +9,13 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// RedisLimiter is a Limiter backed by Redis using the GCRA algorithm
+// redisLimiter is a Limiter backed by Redis using the GCRA algorithm
 // implemented by redis_rate. Quota state is shared across all clients
 // pointed at the same Redis instance, which is the intended deployment
 // shape for multi-replica Sriracha servers.
 //
 // The caller owns the *redis.Client lifecycle.
-type RedisLimiter struct {
+type redisLimiter struct {
 	queryLimit uint32
 	bulkLimit  uint32
 	limiter    *redis_rate.Limiter
@@ -27,16 +27,15 @@ type RedisLimiter struct {
 // of Query RPCs permitted per institution per minute (0 = unlimited).
 // bulkLimit is the maximum number of bulk records permitted per
 // institution per day (0 = unlimited).
-func NewRedis(rdb *redis.Client, queryLimit, bulkLimit uint32) *RedisLimiter {
-	return &RedisLimiter{
+func NewRedis(rdb *redis.Client, queryLimit, bulkLimit uint32) Limiter {
+	return &redisLimiter{
 		queryLimit: queryLimit,
 		bulkLimit:  bulkLimit,
 		limiter:    redis_rate.NewLimiter(rdb),
 	}
 }
 
-// AllowQuery implements Limiter.AllowQuery.
-func (r *RedisLimiter) AllowQuery(ctx context.Context, institutionID string) error {
+func (r *redisLimiter) AllowQuery(ctx context.Context, institutionID string) error {
 	if r.queryLimit == 0 {
 		return nil
 	}
@@ -56,8 +55,7 @@ func (r *RedisLimiter) AllowQuery(ctx context.Context, institutionID string) err
 	return nil
 }
 
-// AllowBulk implements Limiter.AllowBulk.
-func (r *RedisLimiter) AllowBulk(ctx context.Context, institutionID string, cost int) error {
+func (r *redisLimiter) AllowBulk(ctx context.Context, institutionID string, cost int) error {
 	if r.bulkLimit == 0 {
 		return nil
 	}
