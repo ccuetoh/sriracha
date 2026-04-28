@@ -1,8 +1,6 @@
 package token
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"hash"
@@ -19,8 +17,9 @@ func (t *tokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.F
 	fieldBytes := int(((cfg.SizeBits + 63) / 64) * 8)
 	fields := make([][]byte, len(fs.Fields))
 
-	// Reuse a single HMAC instance across every field/gram in this record.
-	h := hmac.New(sha256.New, t.secret.Bytes())
+	// Reuse a single pooled HMAC across every field/gram in this record.
+	h := t.acquire()
+	defer t.release(h)
 
 	for i, spec := range fs.Fields {
 		raw, ok := record[spec.Path]
@@ -41,6 +40,7 @@ func (t *tokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.F
 
 	return sriracha.BloomToken{
 		FieldSetVersion: fs.Version,
+		KeyID:           t.keyID,
 		BloomParams:     cfg,
 		Fields:          fields,
 	}, nil

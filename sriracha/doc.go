@@ -17,4 +17,7 @@
 //   - sriracha/fieldset  — FieldSet validation and the canonical v0.1 schema
 //
 // Bloom filters are implemented on top of github.com/bits-and-blooms/bitset.
+//
+// Tokens encode to JSON via the encoding/json interface. The Tokenizer is
+// safe for concurrent use until Destroy is called.
 package sriracha

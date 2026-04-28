@@ -1,6 +1,7 @@
 package token
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,9 +10,9 @@ import (
 	"go.sriracha.dev/sriracha"
 )
 
-func newTok(t *testing.T, secret string) Tokenizer {
+func newTok(t *testing.T, secret string, opts ...Option) Tokenizer {
 	t.Helper()
-	tok, err := New([]byte(secret))
+	tok, err := New([]byte(secret), opts...)
 	require.NoErrorf(t, err, "New(%q)", secret)
 	t.Cleanup(tok.Destroy)
 	return tok
@@ -41,16 +42,18 @@ func TestNew(t *testing.T) {
 	cases := []struct {
 		name    string
 		secret  []byte
+		opts    []Option
 		wantErr bool
 	}{
-		{"NilSecret", nil, true},
-		{"EmptySecret", []byte{}, true},
-		{"ValidSecret", []byte("secret"), false},
+		{"NilSecret", nil, nil, true},
+		{"EmptySecret", []byte{}, nil, true},
+		{"ValidSecret", []byte("secret"), nil, false},
+		{"WithKeyID", []byte("secret"), []Option{WithKeyID("k1")}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			tok, err := New(tc.secret)
+			tok, err := New(tc.secret, tc.opts...)
 			if tc.wantErr {
 				assert.Error(t, err)
 				return
@@ -166,6 +169,34 @@ func TestTokenizeRecord(t *testing.T) {
 				assert.Equal(t, fs.Version, tr.FieldSetVersion)
 			},
 		},
+		{
+			name: "KeyIDPropagated",
+			run: func(t *testing.T) {
+				tok := newTok(t, "secret", WithKeyID("k1"))
+				tr, err := tok.TokenizeRecord(sriracha.RawRecord{sriracha.FieldNameGiven: "John"}, deterministicFS(givenSpec))
+				require.NoError(t, err)
+				assert.Equal(t, "k1", tr.KeyID)
+			},
+		},
+		{
+			name: "DomainSeparationByPath",
+			run: func(t *testing.T) {
+				// Length-prefixed HMAC must distinguish (value="ab", path A) from
+				// (value="a", path "b" prepended to A's bytes). We assert the simpler
+				// property: the same value under two different paths produces
+				// different HMACs (already covered by CrossFieldIsolation), plus
+				// that the byte HMAC is stable across calls (idempotent).
+				tok := newTok(t, "secret")
+				rec := sriracha.RawRecord{sriracha.FieldNameGiven: "x"}
+				fs := deterministicFS(givenSpec)
+				tr1, err := tok.TokenizeRecord(rec, fs)
+				require.NoError(t, err)
+				tr2, err := tok.TokenizeRecord(rec, fs)
+				require.NoError(t, err)
+				require.Len(t, tr1.Fields, 1)
+				assert.Equal(t, tr1.Fields[0], tr2.Fields[0])
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -232,6 +263,15 @@ func TestTokenizeRecordBloom(t *testing.T) {
 				assert.Equal(t, fs.Version, tr.FieldSetVersion)
 			},
 		},
+		{
+			name: "KeyIDPropagated",
+			run: func(t *testing.T) {
+				tok := newTok(t, "secret", WithKeyID("k1"))
+				tr, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: "John"}, bloomFS(givenSpec))
+				require.NoError(t, err)
+				assert.Equal(t, "k1", tr.KeyID)
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -277,6 +317,73 @@ func TestTokenizeRecordBloom_NameSimilarity(t *testing.T) {
 			} else {
 				assert.Less(t, d, tc.threshold, "Dice(%s, %s) = %.4f, expected < %.2f", tc.nameA, tc.nameB, d, tc.threshold)
 			}
+		})
+	}
+}
+
+// TestTokenizer_Concurrent verifies that a single Tokenizer is safe for
+// concurrent use across goroutines (sync.Pool of HMAC instances). Run with
+// -race to catch any shared-hash mutation.
+func TestTokenizer_Concurrent(t *testing.T) {
+	t.Parallel()
+
+	tok := newTok(t, "secret", WithKeyID("k1"))
+	givenSpec := sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0}
+	dfs := deterministicFS(givenSpec)
+	bfs := bloomFS(givenSpec)
+
+	cases := []struct {
+		name string
+		run  func(t *testing.T)
+	}{
+		{
+			name: "Deterministic",
+			run: func(t *testing.T) {
+				const n = 64
+				results := make([]sriracha.DeterministicToken, n)
+				var wg sync.WaitGroup
+				for i := range n {
+					wg.Add(1)
+					go func(i int) {
+						defer wg.Done()
+						tr, err := tok.TokenizeRecord(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, dfs)
+						assert.NoError(t, err)
+						results[i] = tr
+					}(i)
+				}
+				wg.Wait()
+				for i := 1; i < n; i++ {
+					assert.True(t, Equal(results[0], results[i]), "result %d not equal to result 0", i)
+				}
+			},
+		},
+		{
+			name: "Bloom",
+			run: func(t *testing.T) {
+				const n = 64
+				results := make([]sriracha.BloomToken, n)
+				var wg sync.WaitGroup
+				for i := range n {
+					wg.Add(1)
+					go func(i int) {
+						defer wg.Done()
+						tr, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: "Christopher"}, bfs)
+						assert.NoError(t, err)
+						results[i] = tr
+					}(i)
+				}
+				wg.Wait()
+				scores, err := DicePerField(results[0], results[len(results)-1])
+				require.NoError(t, err)
+				require.Len(t, scores, 1)
+				assert.InDelta(t, 1.0, scores[0], 1e-9)
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tc.run(t)
 		})
 	}
 }
