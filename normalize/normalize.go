@@ -107,7 +107,10 @@ func normalizeIdentifier(s string) string {
 
 // normalizeName strips Unicode combining marks (category Mn) so that
 // "José" and "Jose" produce the same output. Re-applies NFKD afterwards for
-// the same idempotency reason as normalizeIdentifier.
+// the same idempotency reason as normalizeIdentifier, and re-collapses /
+// trims whitespace because stripping a Mn-only run between spaces (e.g.
+// "x ݈" → "x ") would otherwise leave a trailing space that the next
+// call would trim, breaking idempotency.
 func normalizeName(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
@@ -116,7 +119,8 @@ func normalizeName(s string) string {
 			b.WriteRune(r)
 		}
 	}
-	return nfkdDecompose(b.String())
+	out := nfkdDecompose(b.String())
+	return strings.TrimSpace(strings.Join(strings.Fields(out), " "))
 }
 
 // normalizeEmail splits the address on its single '@', strips any trailing
