@@ -1,6 +1,5 @@
 ignore:
   - "mock"
-  - "transport/proto"
 
 comment:
   layout: " diff, flags, files"

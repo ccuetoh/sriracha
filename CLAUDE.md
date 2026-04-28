@@ -10,7 +10,7 @@
 sriracha/        # go.sriracha.dev/sriracha — root types, fields, errors, interfaces
 normalize/       # Unicode normalization pipeline
 token/           # HMAC-SHA256 deterministic + Bloom filter probabilistic tokenizers (uses bits-and-blooms/bitset)
-fieldset/        # FieldSet validation, compatibility, semver-based version negotiation, canonical V0.1
+fieldset/        # FieldSet validation and canonical V0.1 schema
 ```
 
 ## Hard rules

@@ -3,7 +3,6 @@ module go.sriracha.dev
 go 1.25.0
 
 require (
-	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/awnumar/memguard v0.23.0
 	github.com/bits-and-blooms/bitset v1.24.4
 	github.com/bits-and-blooms/bloom/v3 v3.7.1
