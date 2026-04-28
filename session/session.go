@@ -13,9 +13,42 @@ import (
 	"go.sriracha.dev/token"
 )
 
-// Session pairs a Tokenizer with a validated FieldSet. The zero value is not
-// usable; construct with New.
-type Session struct {
+// Session pairs a Tokenizer with a validated FieldSet. Construct with New.
+//
+// Session is safe for concurrent use until Destroy is called; the underlying
+// HMAC instances are pooled inside the Tokenizer. Calling any tokenize /
+// match method after Destroy is undefined.
+type Session interface {
+	// FieldSet returns a deep copy of the Session's FieldSet so callers can
+	// inspect it without risking mutation of the stored schema.
+	FieldSet() sriracha.FieldSet
+	// Tokenize produces a deterministic token for record using the Session's
+	// FieldSet.
+	Tokenize(record sriracha.RawRecord) (sriracha.DeterministicToken, error)
+	// TokenizeBloom produces a probabilistic token for record using the
+	// Session's FieldSet.
+	TokenizeBloom(record sriracha.RawRecord) (sriracha.BloomToken, error)
+	// TokenizeField returns the deterministic 32-byte HMAC for a single
+	// (value, path) pair. Useful for stable indexing of one field outside
+	// the FieldSet flow; see token.Tokenizer.TokenizeField.
+	TokenizeField(value string, path sriracha.FieldPath) ([]byte, error)
+	// Equal reports whether a and b are bit-identical. See token.Equal.
+	Equal(a, b sriracha.DeterministicToken) bool
+	// Match runs the canonical probabilistic comparison against the Session's
+	// FieldSet. See token.Match for semantics around absent fields and
+	// thresholds.
+	Match(a, b sriracha.BloomToken, threshold float64) (token.MatchResult, error)
+	// ValidateRecord pre-checks record against the Session's FieldSet. See
+	// fieldset.ValidateRecord.
+	ValidateRecord(record sriracha.RawRecord) []error
+	// Destroy wipes the Session's underlying tokenizer. Callers must not
+	// share the Session after Destroy.
+	Destroy()
+}
+
+// session is the default Session implementation backed by a token.Tokenizer
+// and a stored FieldSet.
+type session struct {
 	tok token.Tokenizer
 	fs  sriracha.FieldSet
 }
@@ -26,7 +59,7 @@ type Session struct {
 // allocating locked memory.
 //
 // opts are forwarded to token.New unchanged.
-func New(secret []byte, fs sriracha.FieldSet, opts ...token.Option) (*Session, error) {
+func New(secret []byte, fs sriracha.FieldSet, opts ...token.Option) (Session, error) {
 	if err := fieldset.Validate(fs); err != nil {
 		return nil, err
 	}
@@ -34,12 +67,10 @@ func New(secret []byte, fs sriracha.FieldSet, opts ...token.Option) (*Session, e
 	if err != nil {
 		return nil, err
 	}
-	return &Session{tok: tok, fs: fs}, nil
+	return &session{tok: tok, fs: fs}, nil
 }
 
-// FieldSet returns a deep copy of the Session's FieldSet so callers can
-// inspect it without risking mutation of the Session's stored schema.
-func (s *Session) FieldSet() sriracha.FieldSet {
+func (s *session) FieldSet() sriracha.FieldSet {
 	out := sriracha.FieldSet{
 		Version:     s.fs.Version,
 		Fields:      append([]sriracha.FieldSpec(nil), s.fs.Fields...),
@@ -49,47 +80,30 @@ func (s *Session) FieldSet() sriracha.FieldSet {
 	return out
 }
 
-// Tokenize produces a deterministic token for record using the Session's
-// FieldSet.
-func (s *Session) Tokenize(record sriracha.RawRecord) (sriracha.DeterministicToken, error) {
+func (s *session) Tokenize(record sriracha.RawRecord) (sriracha.DeterministicToken, error) {
 	return s.tok.TokenizeRecord(record, s.fs)
 }
 
-// TokenizeBloom produces a probabilistic token for record using the Session's
-// FieldSet.
-func (s *Session) TokenizeBloom(record sriracha.RawRecord) (sriracha.BloomToken, error) {
+func (s *session) TokenizeBloom(record sriracha.RawRecord) (sriracha.BloomToken, error) {
 	return s.tok.TokenizeRecordBloom(record, s.fs)
 }
 
-// TokenizeField returns the deterministic 32-byte HMAC for a single
-// (value, path) pair. Useful for stable indexing of one field outside the
-// FieldSet flow; see token.Tokenizer.TokenizeField.
-func (s *Session) TokenizeField(value string, path sriracha.FieldPath) ([]byte, error) {
+func (s *session) TokenizeField(value string, path sriracha.FieldPath) ([]byte, error) {
 	return s.tok.TokenizeField(value, path)
 }
 
-// Equal reports whether a and b are bit-identical. See token.Equal.
-func (s *Session) Equal(a, b sriracha.DeterministicToken) bool {
+func (s *session) Equal(a, b sriracha.DeterministicToken) bool {
 	return token.Equal(a, b)
 }
 
-// Match runs the canonical probabilistic comparison against the Session's
-// FieldSet. See token.Match for semantics around absent fields and
-// thresholds.
-func (s *Session) Match(a, b sriracha.BloomToken, threshold float64) (token.MatchResult, error) {
+func (s *session) Match(a, b sriracha.BloomToken, threshold float64) (token.MatchResult, error) {
 	return token.Match(a, b, s.fs, threshold)
 }
 
-// ValidateRecord pre-checks record against the Session's FieldSet. See
-// fieldset.ValidateRecord.
-func (s *Session) ValidateRecord(record sriracha.RawRecord) []error {
+func (s *session) ValidateRecord(record sriracha.RawRecord) []error {
 	return fieldset.ValidateRecord(record, s.fs)
 }
 
-// Destroy wipes the Session's underlying tokenizer. Callers must not share
-// the Session after Destroy, and must not call Destroy directly on the
-// underlying Tokenizer if they have somehow obtained a reference to it
-// (the Session does not expose one).
-func (s *Session) Destroy() {
+func (s *session) Destroy() {
 	s.tok.Destroy()
 }

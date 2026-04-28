@@ -10,7 +10,7 @@ import (
 	"go.sriracha.dev/token"
 )
 
-func newSess(t *testing.T) *Session {
+func newSess(t *testing.T) Session {
 	t.Helper()
 	fs := sriracha.FieldSet{
 		Version: "v1-test",
