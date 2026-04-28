@@ -14,13 +14,7 @@ import (
 	"go.sriracha.dev/sriracha"
 )
 
-// TokenizeRecordBloom tokenizes a RawRecord in probabilistic (Bloom filter) mode.
-// Each field gets its own Bloom filter of fs.BloomParams.SizeBits bits, serialized
-// as little-endian uint64 words. The returned token's Fields slice is aligned with
-// fs.Fields: present fields contain the populated filter, absent optional fields
-// contain an all-zero filter of the same length.
-// Missing required fields return an error.
-func (t *Tokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.BloomToken, error) {
+func (t *tokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.BloomToken, error) {
 	cfg := fs.BloomParams
 	fieldBytes := int(((cfg.SizeBits + 63) / 64) * 8)
 	fields := make([][]byte, len(fs.Fields))

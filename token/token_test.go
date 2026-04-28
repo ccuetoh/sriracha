@@ -9,7 +9,7 @@ import (
 	"go.sriracha.dev/sriracha"
 )
 
-func newTok(t *testing.T, secret string) *Tokenizer {
+func newTok(t *testing.T, secret string) Tokenizer {
 	t.Helper()
 	tok, err := New([]byte(secret))
 	require.NoErrorf(t, err, "New(%q)", secret)
