@@ -93,6 +93,18 @@ func TestEqual_Cases(t *testing.T) {
 			b:    sriracha.DeterministicToken{FieldSetVersion: "v1", KeyID: "k2", Fields: [][]byte{{0x01}}},
 			want: false,
 		},
+		{
+			name: "FingerprintMismatchBothSet",
+			a:    sriracha.DeterministicToken{FieldSetVersion: "v1", FieldSetFingerprint: "aa", Fields: [][]byte{{0x01}}},
+			b:    sriracha.DeterministicToken{FieldSetVersion: "v1", FieldSetFingerprint: "bb", Fields: [][]byte{{0x01}}},
+			want: false,
+		},
+		{
+			name: "FingerprintOneSetSkipsCheck",
+			a:    sriracha.DeterministicToken{FieldSetVersion: "v1", FieldSetFingerprint: "aa", Fields: [][]byte{{0x01}}},
+			b:    sriracha.DeterministicToken{FieldSetVersion: "v1", Fields: [][]byte{{0x01}}},
+			want: true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -206,6 +218,11 @@ func TestDicePerField_Errors(t *testing.T) {
 			a:    sriracha.BloomToken{FieldSetVersion: "v1", KeyID: "k1", BloomParams: cfg, Fields: [][]byte{{0x00}}},
 			b:    sriracha.BloomToken{FieldSetVersion: "v1", KeyID: "k2", BloomParams: cfg, Fields: [][]byte{{0x00}}},
 		},
+		{
+			name: "FingerprintMismatchBothSet",
+			a:    sriracha.BloomToken{FieldSetVersion: "v1", FieldSetFingerprint: "aa", BloomParams: cfg, Fields: [][]byte{{0x00}}},
+			b:    sriracha.BloomToken{FieldSetVersion: "v1", FieldSetFingerprint: "bb", BloomParams: cfg, Fields: [][]byte{{0x00}}},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -214,6 +231,20 @@ func TestDicePerField_Errors(t *testing.T) {
 			assert.Error(t, err)
 		})
 	}
+}
+
+func TestDicePerField_FingerprintOneSideSkipsCheck(t *testing.T) {
+	t.Parallel()
+	tok := newTok(t, "secret")
+	fs := bloomFS(sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
+
+	a, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
+	require.NoError(t, err)
+	b := a
+	b.FieldSetFingerprint = ""
+
+	_, err = DicePerField(a, b)
+	assert.NoError(t, err, "missing fingerprint on one side must skip the check, not error")
 }
 
 func TestScore(t *testing.T) {
@@ -333,9 +364,41 @@ func TestMatch(t *testing.T) {
 	t.Run("AllFieldsAbsentBothSides", func(t *testing.T) {
 		t.Parallel()
 		empty := tokenize(t, sriracha.RawRecord{})
-		_, err := Match(empty, empty, fs, 0.5)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no comparable fields")
+		res, err := Match(empty, empty, fs, 0.5)
+		require.NoError(t, err, "all-absent must not error; check ComparableFields instead")
+		assert.False(t, res.IsMatch)
+		assert.Equal(t, 0.0, res.Score)
+		assert.Equal(t, 0, res.ComparableFields)
+		assert.Len(t, res.Paths, len(fs.Fields))
+		assert.Len(t, res.PerField, len(fs.Fields))
+	})
+
+	t.Run("PathsAndComparableFieldsPopulated", func(t *testing.T) {
+		t.Parallel()
+		res, err := Match(identical, identical, fs, 0.9)
+		require.NoError(t, err)
+		require.Len(t, res.Paths, 2)
+		assert.Equal(t, sriracha.FieldNameGiven, res.Paths[0])
+		assert.Equal(t, sriracha.FieldNameFamily, res.Paths[1])
+		assert.Equal(t, 2, res.ComparableFields)
+	})
+
+	t.Run("ScoreForAndByPath", func(t *testing.T) {
+		t.Parallel()
+		res, err := Match(identical, identical, fs, 0.9)
+		require.NoError(t, err)
+
+		got, ok := res.ScoreFor(sriracha.FieldNameGiven)
+		assert.True(t, ok)
+		assert.InDelta(t, 1.0, got, 1e-9)
+
+		_, ok = res.ScoreFor(sriracha.FieldDateBirth)
+		assert.False(t, ok, "ScoreFor must report missing paths as not found")
+
+		byPath := res.ByPath()
+		require.Len(t, byPath, 2)
+		assert.InDelta(t, 1.0, byPath[sriracha.FieldNameGiven], 1e-9)
+		assert.InDelta(t, 1.0, byPath[sriracha.FieldNameFamily], 1e-9)
 	})
 
 	t.Run("ThresholdOutOfRange", func(t *testing.T) {

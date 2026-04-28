@@ -160,6 +160,53 @@ func TestDefaultFieldSet_IsCopy(t *testing.T) {
 	assert.NotEqual(t, 999.0, fs2.Fields[0].Weight, "DefaultFieldSet() should return independent copies")
 }
 
+func TestValidateRecord(t *testing.T) {
+	t.Parallel()
+
+	fs := sriracha.FieldSet{
+		Version: "v1",
+		Fields: []sriracha.FieldSpec{
+			{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0},
+			{Path: sriracha.FieldNameFamily, Required: false, Weight: 1.0},
+			{Path: sriracha.FieldDateBirth, Required: false, Weight: 1.0},
+		},
+		BloomParams: sriracha.DefaultBloomConfig(),
+	}
+
+	t.Run("Valid", func(t *testing.T) {
+		t.Parallel()
+		errs := ValidateRecord(sriracha.RawRecord{
+			sriracha.FieldNameGiven:  "Alice",
+			sriracha.FieldNameFamily: "Smith",
+			sriracha.FieldDateBirth:  "1990-01-01",
+		}, fs)
+		assert.Empty(t, errs)
+	})
+
+	t.Run("ReturnsAllErrors", func(t *testing.T) {
+		t.Parallel()
+		// Required missing + bad date + unknown path: must surface all three.
+		errs := ValidateRecord(sriracha.RawRecord{
+			sriracha.FieldNameFamily:   "Smith",
+			sriracha.FieldDateBirth:    "not-a-date",
+			sriracha.FieldContactEmail: "alice@example.com",
+		}, fs)
+		require.Len(t, errs, 3)
+		joined := errs[0].Error() + "|" + errs[1].Error() + "|" + errs[2].Error()
+		assert.Contains(t, joined, "required")
+		assert.Contains(t, joined, "ISO 8601")
+		assert.Contains(t, joined, "unknown field")
+	})
+
+	t.Run("OptionalAbsent", func(t *testing.T) {
+		t.Parallel()
+		errs := ValidateRecord(sriracha.RawRecord{
+			sriracha.FieldNameGiven: "Alice",
+		}, fs)
+		assert.Empty(t, errs, "absent optional fields must not be flagged")
+	})
+}
+
 func TestDefaultFieldSet_NgramSizesIndependent(t *testing.T) {
 	t.Parallel()
 	fs1 := DefaultFieldSet()

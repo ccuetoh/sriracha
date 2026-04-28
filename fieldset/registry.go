@@ -26,8 +26,27 @@ var defaultV01 = sriracha.FieldSet{
 }
 
 // DefaultFieldSet returns a deep copy of the canonical Sriracha v0.1 FieldSet
-// with all 16 standard fields. Weights are relative; the probabilistic scoring
-// formula normalizes by their sum.
+// with all 16 standard fields.
+//
+// Weights are unitless relative magnitudes used as the denominator in the
+// weighted average computed by token.Score. They are not probabilities or
+// information-content estimates — only their ratios matter, so doubling
+// every weight produces identical scores. The defaults below are tuned for
+// the typical PPRL trade-off (high-uniqueness identifiers > stable name
+// fields > address > optional contact > low-information geo):
+//
+//   - 3.0 — national_id, passport: high cardinality, near-unique per person
+//   - 2.5 — tax_id, family name: high cardinality, frequently disagrees
+//     across institutions only via typo
+//   - 2.0 — given name, date of birth, email: stable, fairly unique
+//   - 1.5 — full name, phone: noisier formatting / lower cardinality
+//   - 1.0 — middle name, date of death, locality, postal code
+//   - 0.5 — country, admin area, registration date: low information / heavy
+//     ties across populations
+//
+// Tune them for your population by running token.Calibrate against a labeled
+// pair set; the defaults are a reasonable starting point, not a tuned
+// answer.
 func DefaultFieldSet() sriracha.FieldSet {
 	fields := make([]sriracha.FieldSpec, len(defaultV01.Fields))
 	copy(fields, defaultV01.Fields)
