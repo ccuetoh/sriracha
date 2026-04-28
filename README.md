@@ -22,7 +22,7 @@ available via `token.Equal` (deterministic) and `token.DicePerField` (probabilis
 - HMAC-SHA256 deterministic tokenization (exact match) with length-prefixed domain separation
 - Bloom filter probabilistic tokenization (fuzzy match, typo-tolerant)
 - Unicode normalization pipeline (names with diacritic folding, dates, addresses, identifiers, email and phone)
-- Canonical v0.1 field set with structured `FieldPath` identifiers and a `Register`/`Lookup` registry
+- Canonical v0.1 field set with structured `FieldPath` identifiers
 - Weighted aggregate `Score` and threshold `Match` over per-field Dice scores
 - Optional `KeyID` on tokens to surface secret-rotation mismatches
 - `Tokenizer` is safe for concurrent use; HMAC instances are pooled
