@@ -22,6 +22,4 @@ to the consumer.
 - HMAC-SHA256 deterministic tokenization (exact match)
 - Bloom filter probabilistic tokenization (fuzzy match, typo-tolerant)
 - Unicode normalization pipeline (names, dates, addresses, identifiers)
-- Hash-chained audit log for compliance
-- Incremental index sync with checkpoint tokens
-- Bulk streaming mode
+- Semver-based field set version negotiation

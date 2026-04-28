@@ -11,8 +11,6 @@ sriracha/        # go.sriracha.dev/sriracha — root types, fields, errors, inte
 normalize/       # Unicode normalization pipeline
 token/           # HMAC-SHA256 deterministic + Bloom filter probabilistic tokenizers (uses bits-and-blooms/bitset)
 fieldset/        # FieldSet validation, compatibility, semver-based version negotiation, canonical V0.1
-indexer/         # TokenIndexer with pluggable IndexStorage (MemoryStorage or BadgerStorage)
-audit/file/      # Append-only JSONL audit log with SHA-256 hash chaining
 ```
 
 ## Hard rules
