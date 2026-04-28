@@ -36,125 +36,209 @@ func bloomFS(fields ...sriracha.FieldSpec) sriracha.FieldSet {
 	}
 }
 
-func TestTokenizeRecord_Idempotent(t *testing.T) {
+func TestNew(t *testing.T) {
 	t.Parallel()
-	tok := newTok(t, "secret")
-	rec := sriracha.RawRecord{sriracha.FieldNameGiven: "John"}
-	fs := deterministicFS(sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
-
-	tr1, err := tok.TokenizeRecord(rec, fs)
-	require.NoError(t, err)
-	tr2, err := tok.TokenizeRecord(rec, fs)
-	require.NoError(t, err)
-	assert.True(t, Equal(tr1, tr2), "idempotency: tokens differ for identical input")
-}
-
-func TestTokenizeRecord_CrossFieldIsolation(t *testing.T) {
-	t.Parallel()
-	tok := newTok(t, "secret")
-	rec := sriracha.RawRecord{
-		sriracha.FieldNameGiven:  "John",
-		sriracha.FieldNameFamily: "John",
+	cases := []struct {
+		name    string
+		secret  []byte
+		wantErr bool
+	}{
+		{"NilSecret", nil, true},
+		{"EmptySecret", []byte{}, true},
+		{"ValidSecret", []byte("secret"), false},
 	}
-	fs := deterministicFS(
-		sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0},
-		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: true, Weight: 1.0},
-	)
-
-	tr, err := tok.TokenizeRecord(rec, fs)
-	require.NoError(t, err)
-	require.Len(t, tr.Fields, 2, "expected 2 field entries")
-	require.Len(t, tr.Fields[0], 32, "expected 32-byte HMAC for given name")
-	require.Len(t, tr.Fields[1], 32, "expected 32-byte HMAC for family name")
-	assert.NotEqual(t, tr.Fields[0], tr.Fields[1], "cross-field isolation: same value with different paths produced identical tokens")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tok, err := New(tc.secret)
+			if tc.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			tok.Destroy()
+		})
+	}
 }
 
-func TestTokenizeRecord_DifferentSecret(t *testing.T) {
+func TestTokenizeRecord(t *testing.T) {
 	t.Parallel()
-	rec := sriracha.RawRecord{sriracha.FieldNameGiven: "John"}
-	fs := deterministicFS(sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
+	givenSpec := sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0}
+	familySpec := sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: true, Weight: 1.0}
+	givenOptional := sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: false, Weight: 1.0}
+	familyOptional := sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 0.5}
 
-	tr1, err := newTok(t, "secret-a").TokenizeRecord(rec, fs)
-	require.NoError(t, err)
-	tr2, err := newTok(t, "secret-b").TokenizeRecord(rec, fs)
-	require.NoError(t, err)
-	assert.False(t, Equal(tr1, tr2), "different secrets produced identical tokens")
+	cases := []struct {
+		name string
+		run  func(t *testing.T)
+	}{
+		{
+			name: "Idempotent",
+			run: func(t *testing.T) {
+				tok := newTok(t, "secret")
+				rec := sriracha.RawRecord{sriracha.FieldNameGiven: "John"}
+				fs := deterministicFS(givenSpec)
+
+				tr1, err := tok.TokenizeRecord(rec, fs)
+				require.NoError(t, err)
+				tr2, err := tok.TokenizeRecord(rec, fs)
+				require.NoError(t, err)
+				assert.True(t, Equal(tr1, tr2), "identical inputs should produce equal tokens")
+			},
+		},
+		{
+			name: "CrossFieldIsolation",
+			run: func(t *testing.T) {
+				tok := newTok(t, "secret")
+				rec := sriracha.RawRecord{
+					sriracha.FieldNameGiven:  "John",
+					sriracha.FieldNameFamily: "John",
+				}
+				tr, err := tok.TokenizeRecord(rec, deterministicFS(givenSpec, familySpec))
+				require.NoError(t, err)
+				require.Len(t, tr.Fields, 2)
+				assert.Len(t, tr.Fields[0], 32, "expected 32-byte HMAC for given name")
+				assert.Len(t, tr.Fields[1], 32, "expected 32-byte HMAC for family name")
+				assert.NotEqual(t, tr.Fields[0], tr.Fields[1], "same value with different paths should differ")
+			},
+		},
+		{
+			name: "DifferentSecret",
+			run: func(t *testing.T) {
+				rec := sriracha.RawRecord{sriracha.FieldNameGiven: "John"}
+				fs := deterministicFS(givenSpec)
+
+				tr1, err := newTok(t, "secret-a").TokenizeRecord(rec, fs)
+				require.NoError(t, err)
+				tr2, err := newTok(t, "secret-b").TokenizeRecord(rec, fs)
+				require.NoError(t, err)
+				assert.False(t, Equal(tr1, tr2), "different secrets should produce different tokens")
+			},
+		},
+		{
+			name: "MissingRequired",
+			run: func(t *testing.T) {
+				tok := newTok(t, "secret")
+				_, err := tok.TokenizeRecord(sriracha.RawRecord{}, deterministicFS(givenSpec))
+				assert.Error(t, err)
+			},
+		},
+		{
+			name: "MissingOptionalNilEntry",
+			run: func(t *testing.T) {
+				tok := newTok(t, "secret")
+				rec := sriracha.RawRecord{sriracha.FieldNameGiven: "John"}
+				tr, err := tok.TokenizeRecord(rec, deterministicFS(givenSpec, familyOptional))
+				require.NoError(t, err)
+				require.Len(t, tr.Fields, 2)
+				assert.Len(t, tr.Fields[0], 32, "present field should have 32-byte HMAC")
+				assert.Nil(t, tr.Fields[1], "absent optional field should be nil")
+			},
+		},
+		{
+			name: "EmptyAllOptional",
+			run: func(t *testing.T) {
+				tok := newTok(t, "secret")
+				tr, err := tok.TokenizeRecord(sriracha.RawRecord{}, deterministicFS(givenOptional, familyOptional))
+				require.NoError(t, err)
+				require.Len(t, tr.Fields, 2)
+				assert.Nil(t, tr.Fields[0])
+				assert.Nil(t, tr.Fields[1])
+			},
+		},
+		{
+			name: "NormalizationError",
+			run: func(t *testing.T) {
+				tok := newTok(t, "secret")
+				rec := sriracha.RawRecord{sriracha.FieldDateBirth: "not-a-date"}
+				fs := deterministicFS(sriracha.FieldSpec{Path: sriracha.FieldDateBirth, Required: true, Weight: 1.0})
+				_, err := tok.TokenizeRecord(rec, fs)
+				assert.Error(t, err)
+			},
+		},
+		{
+			name: "VersionPropagated",
+			run: func(t *testing.T) {
+				tok := newTok(t, "secret")
+				fs := deterministicFS(givenSpec)
+				tr, err := tok.TokenizeRecord(sriracha.RawRecord{sriracha.FieldNameGiven: "John"}, fs)
+				require.NoError(t, err)
+				assert.Equal(t, fs.Version, tr.FieldSetVersion)
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tc.run(t)
+		})
+	}
 }
 
-func TestTokenizeRecord_MissingRequired(t *testing.T) {
+func TestTokenizeRecordBloom(t *testing.T) {
 	t.Parallel()
-	tok := newTok(t, "secret")
-	fs := deterministicFS(sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
+	givenSpec := sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0}
+	familySpec := sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: true, Weight: 1.0}
+	familyOptional := sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 0.5}
 
-	_, err := tok.TokenizeRecord(sriracha.RawRecord{}, fs)
-	assert.Error(t, err, "expected error for missing required field")
-}
-
-func TestTokenizeRecord_MissingOptionalNilEntry(t *testing.T) {
-	t.Parallel()
-	tok := newTok(t, "secret")
-	rec := sriracha.RawRecord{sriracha.FieldNameGiven: "John"}
-	fs := deterministicFS(
-		sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0},
-		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 0.5},
-	)
-
-	tr, err := tok.TokenizeRecord(rec, fs)
-	require.NoError(t, err)
-	require.Len(t, tr.Fields, 2, "expected positional alignment with FieldSet")
-	assert.Len(t, tr.Fields[0], 32, "present field should have 32-byte HMAC")
-	assert.Nil(t, tr.Fields[1], "absent optional field should be nil")
-}
-
-func TestTokenizeRecord_EmptyAllOptional(t *testing.T) {
-	t.Parallel()
-	tok := newTok(t, "secret")
-	fs := deterministicFS(
-		sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: false, Weight: 1.0},
-		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 0.5},
-	)
-
-	tr, err := tok.TokenizeRecord(sriracha.RawRecord{}, fs)
-	require.NoError(t, err)
-	require.Len(t, tr.Fields, 2)
-	assert.Nil(t, tr.Fields[0], "absent optional field should be nil")
-	assert.Nil(t, tr.Fields[1], "absent optional field should be nil")
-}
-
-func TestTokenizeRecord_NormalizationError(t *testing.T) {
-	t.Parallel()
-	tok := newTok(t, "secret")
-	// Date fields reject non-ISO-8601 values, triggering a normalization error.
-	rec := sriracha.RawRecord{sriracha.FieldDateBirth: "not-a-date"}
-	fs := deterministicFS(sriracha.FieldSpec{Path: sriracha.FieldDateBirth, Required: true, Weight: 1.0})
-	_, err := tok.TokenizeRecord(rec, fs)
-	assert.Error(t, err, "expected normalization error for invalid date")
-}
-
-func TestTokenizeRecord_VersionPropagated(t *testing.T) {
-	t.Parallel()
-	tok := newTok(t, "secret")
-	fs := deterministicFS(sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
-	tr, err := tok.TokenizeRecord(sriracha.RawRecord{sriracha.FieldNameGiven: "John"}, fs)
-	require.NoError(t, err)
-	assert.Equal(t, fs.Version, tr.FieldSetVersion, "FieldSetVersion should be carried on the token")
-}
-
-func TestTokenizeRecordBloom_MissingRequired(t *testing.T) {
-	t.Parallel()
-	tok := newTok(t, "secret")
-	fs := bloomFS(sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
-	_, err := tok.TokenizeRecordBloom(sriracha.RawRecord{}, fs)
-	assert.Error(t, err, "expected error for missing required field")
-}
-
-func TestTokenizeRecordBloom_NormalizationError(t *testing.T) {
-	t.Parallel()
-	tok := newTok(t, "secret")
-	rec := sriracha.RawRecord{sriracha.FieldDateBirth: "not-a-date"}
-	fs := bloomFS(sriracha.FieldSpec{Path: sriracha.FieldDateBirth, Required: true, Weight: 1.0})
-	_, err := tok.TokenizeRecordBloom(rec, fs)
-	assert.Error(t, err, "expected normalization error for invalid date")
+	cases := []struct {
+		name string
+		run  func(t *testing.T)
+	}{
+		{
+			name: "MissingRequired",
+			run: func(t *testing.T) {
+				tok := newTok(t, "secret")
+				_, err := tok.TokenizeRecordBloom(sriracha.RawRecord{}, bloomFS(givenSpec))
+				assert.Error(t, err)
+			},
+		},
+		{
+			name: "NormalizationError",
+			run: func(t *testing.T) {
+				tok := newTok(t, "secret")
+				rec := sriracha.RawRecord{sriracha.FieldDateBirth: "not-a-date"}
+				fs := bloomFS(sriracha.FieldSpec{Path: sriracha.FieldDateBirth, Required: true, Weight: 1.0})
+				_, err := tok.TokenizeRecordBloom(rec, fs)
+				assert.Error(t, err)
+			},
+		},
+		{
+			name: "MissingOptionalZeroFilter",
+			run: func(t *testing.T) {
+				tok := newTok(t, "secret")
+				fs := bloomFS(givenSpec, familyOptional)
+				tr, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: "John"}, fs)
+				require.NoError(t, err)
+				require.Len(t, tr.Fields, 2)
+				assert.Equal(t, make([]byte, 128), tr.Fields[1], "absent optional field should be all-zero filter")
+			},
+		},
+		{
+			name: "FieldLayoutAndMetadata",
+			run: func(t *testing.T) {
+				tok := newTok(t, "secret")
+				fs := bloomFS(givenSpec, familySpec)
+				rec := sriracha.RawRecord{
+					sriracha.FieldNameGiven:  "John",
+					sriracha.FieldNameFamily: "Doe",
+				}
+				tr, err := tok.TokenizeRecordBloom(rec, fs)
+				require.NoError(t, err)
+				require.Len(t, tr.Fields, 2, "expected one filter per FieldSet entry")
+				assert.Len(t, tr.Fields[0], 128, "expected 128 bytes per 1024-bit filter")
+				assert.Len(t, tr.Fields[1], 128, "expected 128 bytes per 1024-bit filter")
+				assert.Equal(t, fs.BloomParams, tr.BloomParams)
+				assert.Equal(t, fs.Version, tr.FieldSetVersion)
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tc.run(t)
+		})
+	}
 }
 
 // "John" vs "Jon" yields very few bigrams/trigrams and unreliable Dice scores,
@@ -195,61 +279,6 @@ func TestTokenizeRecordBloom_NameSimilarity(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestTokenizeRecordBloom_MissingOptionalZeroFilter(t *testing.T) {
-	t.Parallel()
-	tok := newTok(t, "secret")
-	fs := bloomFS(
-		sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0},
-		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 0.5},
-	)
-
-	tr, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: "John"}, fs)
-	require.NoError(t, err)
-	require.Len(t, tr.Fields, 2)
-	require.Len(t, tr.Fields[1], 128, "absent optional field should have full-length zero filter")
-	for _, b := range tr.Fields[1] {
-		if b != 0 {
-			assert.Fail(t, "missing optional field should produce all-zero filter")
-			break
-		}
-	}
-}
-
-func TestTokenizeRecordBloom_FieldLayout(t *testing.T) {
-	t.Parallel()
-	tok := newTok(t, "secret")
-	fs := bloomFS(
-		sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0},
-		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: true, Weight: 1.0},
-	)
-	rec := sriracha.RawRecord{
-		sriracha.FieldNameGiven:  "John",
-		sriracha.FieldNameFamily: "Doe",
-	}
-
-	tr, err := tok.TokenizeRecordBloom(rec, fs)
-	require.NoError(t, err)
-	require.Len(t, tr.Fields, 2, "expected one filter per FieldSet entry")
-	assert.Len(t, tr.Fields[0], 128, "expected 128 bytes per 1024-bit filter")
-	assert.Len(t, tr.Fields[1], 128, "expected 128 bytes per 1024-bit filter")
-	assert.Equal(t, fs.BloomParams, tr.BloomParams, "BloomParams should be carried on the token")
-	assert.Equal(t, fs.Version, tr.FieldSetVersion, "FieldSetVersion should be carried on the token")
-}
-
-func TestNew_ErrorOnEmptySecret(t *testing.T) {
-	t.Parallel()
-	_, err := New(nil)
-	assert.Error(t, err, "expected error for nil secret")
-	_, err = New([]byte{})
-	assert.Error(t, err, "expected error for empty secret")
-}
-
-func TestTokenizer_Destroy(t *testing.T) {
-	t.Parallel()
-	tok := newTok(t, "secret")
-	tok.Destroy()
 }
 
 func TestNgrams(t *testing.T) {
@@ -375,6 +404,7 @@ func FuzzNgrams(f *testing.F) {
 	f.Add("a", 1)
 
 	f.Fuzz(func(t *testing.T, s string, size int) {
+		// Skip out-of-domain sizes; only positive, bounded sizes are valid input.
 		if size <= 0 || size > 20 {
 			return
 		}
@@ -386,7 +416,6 @@ func FuzzNgrams(f *testing.F) {
 				t.Fatalf("ngrams(%q, [%d]): got gram %q with len %d, want %d", s, size, g, len(gr), size)
 			}
 		}
-		// Count must match expected sliding-window count.
 		n := len(runes)
 		want := 0
 		if n >= size {
@@ -417,6 +446,7 @@ func FuzzTokenizeRecord(f *testing.F) {
 			sriracha.FieldNameFamily: family,
 		}
 		tr1, err := tok.TokenizeRecord(rec, fs)
+		// Skip inputs that legitimately fail tokenization (e.g. invalid normalization).
 		if err != nil {
 			return
 		}
@@ -451,6 +481,7 @@ func FuzzTokenizeRecordBloom(f *testing.F) {
 			sriracha.FieldNameFamily: family,
 		}
 		tr, err := tok.TokenizeRecordBloom(rec, fs)
+		// Skip inputs that legitimately fail tokenization (e.g. invalid normalization).
 		if err != nil {
 			return
 		}
@@ -467,8 +498,8 @@ func FuzzTokenizeRecordBloom(f *testing.F) {
 			t.Fatalf("DicePerField against self: %v", err)
 		}
 		for i, s := range scores {
-			// A token compared against itself should score either 1 (any bits set)
-			// or 0 (all-zero filter). Anything else indicates a bug.
+			// A token compared against itself scores 1 (any bits set) or 0
+			// (all-zero filter). Anything else indicates a bug.
 			if s != 0 && s != 1 {
 				t.Fatalf("DicePerField self-comparison field %d = %v, want 0 or 1", i, s)
 			}
