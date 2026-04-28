@@ -1,27 +1,15 @@
 package sriracha
 
-import (
-	"errors"
-	"fmt"
-)
-
-// ErrNotFound is returned by IndexStorage.Get when the key does not exist.
-var ErrNotFound = errors.New("not found")
+import "fmt"
 
 // ErrorCode identifies the class of a Sriracha error.
 type ErrorCode int
 
 const (
-	CodePolicyMissing        ErrorCode = 1001
-	CodeTokenMalformed       ErrorCode = 1002
-	CodeFieldSetIncompatible ErrorCode = 1003
-	CodeNormalizationFailed  ErrorCode = 1004
-	CodeChecksumMismatch     ErrorCode = 1005
-	CodeRecordNotFound       ErrorCode = 1006
-	CodeIndexCorrupted       ErrorCode = 1007
-	CodeAuditViolation       ErrorCode = 1008
-	CodeVersionUnsupported   ErrorCode = 1009
-	CodeInternalError        ErrorCode = 1010
+	CodeTokenMalformed       ErrorCode = 1001
+	CodeFieldSetIncompatible ErrorCode = 1002
+	CodeNormalizationFailed  ErrorCode = 1003
+	CodeChecksumMismatch     ErrorCode = 1004
 )
 
 // Error is the standard error type returned by this package.
@@ -48,11 +36,6 @@ func (e *Error) Is(target error) bool {
 	return e.Code == t.Code
 }
 
-// ErrPolicyMissing returns an error indicating a required policy is absent.
-func ErrPolicyMissing() *Error {
-	return &Error{Code: CodePolicyMissing, Message: "policy missing"}
-}
-
 // ErrTokenMalformed returns an error indicating a token is malformed.
 func ErrTokenMalformed(field FieldPath) *Error {
 	return &Error{Code: CodeTokenMalformed, Message: fmt.Sprintf("token malformed for field %q", field)}
@@ -71,29 +54,4 @@ func ErrNormalizationFailed(field FieldPath, reason string) *Error {
 // ErrChecksumMismatch returns an error indicating a checksum does not match.
 func ErrChecksumMismatch() *Error {
 	return &Error{Code: CodeChecksumMismatch, Message: "checksum mismatch"}
-}
-
-// ErrRecordNotFound returns an error indicating a record was not found.
-func ErrRecordNotFound(id string) *Error {
-	return &Error{Code: CodeRecordNotFound, Message: fmt.Sprintf("record not found: %q", id)}
-}
-
-// ErrIndexCorrupted returns an error indicating index corruption.
-func ErrIndexCorrupted(reason string) *Error {
-	return &Error{Code: CodeIndexCorrupted, Message: fmt.Sprintf("index corrupted: %s", reason)}
-}
-
-// ErrAuditViolation returns an error indicating an audit integrity violation.
-func ErrAuditViolation(reason string) *Error {
-	return &Error{Code: CodeAuditViolation, Message: fmt.Sprintf("audit violation: %s", reason)}
-}
-
-// ErrVersionUnsupported returns an error indicating an unsupported protocol version.
-func ErrVersionUnsupported(version string) *Error {
-	return &Error{Code: CodeVersionUnsupported, Message: fmt.Sprintf("version unsupported: %q", version)}
-}
-
-// ErrInternalError returns an error indicating an internal error.
-func ErrInternalError(reason string) *Error {
-	return &Error{Code: CodeInternalError, Message: fmt.Sprintf("internal error: %s", reason)}
 }

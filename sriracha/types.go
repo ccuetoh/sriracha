@@ -1,7 +1,5 @@
 package sriracha
 
-import "time"
-
 // MatchMode indicates whether tokens use deterministic or probabilistic encoding.
 type MatchMode int
 
@@ -53,31 +51,4 @@ type FieldSet struct {
 	Version     string
 	Fields      []FieldSpec
 	BloomParams BloomConfig
-}
-
-// FieldWeight overrides the weight of a field at query time.
-type FieldWeight struct {
-	Path   FieldPath
-	Weight float64
-}
-
-// MatchConfig controls matching behavior at query time.
-type MatchConfig struct {
-	Threshold    float32
-	MaxResults   uint32
-	FieldWeights []FieldWeight
-}
-
-// Candidate is a matching record returned by the index.
-type Candidate struct {
-	RecordID   string
-	Confidence float64
-}
-
-// IndexStats describes the current state of a token index.
-type IndexStats struct {
-	RecordCount    int64
-	LastRebuild    time.Time
-	LastSync       time.Time
-	IndexSizeBytes int64
 }
