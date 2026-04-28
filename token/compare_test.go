@@ -9,6 +9,14 @@ import (
 	"go.sriracha.dev/sriracha"
 )
 
+func detTok(version string, fields ...[]byte) sriracha.DeterministicToken {
+	return sriracha.DeterministicToken{FieldSetVersion: version, Fields: fields}
+}
+
+func bloomTokWith(version string, params sriracha.BloomConfig, fields ...[]byte) sriracha.BloomToken {
+	return sriracha.BloomToken{FieldSetVersion: version, BloomParams: params, Fields: fields}
+}
+
 func TestEqual_IdenticalTokens(t *testing.T) {
 	t.Parallel()
 	tok := newTok(t, "secret")
@@ -42,39 +50,50 @@ func TestEqual_DifferentInputs(t *testing.T) {
 	assert.False(t, Equal(a, b), "different inputs should produce unequal tokens")
 }
 
-func TestEqual_VersionMismatch(t *testing.T) {
+func TestEqual_Cases(t *testing.T) {
 	t.Parallel()
-	a := sriracha.DeterministicToken{FieldSetVersion: "v1", Fields: [][]byte{{0x01}}}
-	b := sriracha.DeterministicToken{FieldSetVersion: "v2", Fields: [][]byte{{0x01}}}
-	assert.False(t, Equal(a, b), "different FieldSetVersion should compare unequal")
-}
-
-func TestEqual_FieldCountMismatch(t *testing.T) {
-	t.Parallel()
-	a := sriracha.DeterministicToken{FieldSetVersion: "v1", Fields: [][]byte{{0x01}}}
-	b := sriracha.DeterministicToken{FieldSetVersion: "v1", Fields: [][]byte{{0x01}, {0x02}}}
-	assert.False(t, Equal(a, b), "different field counts should compare unequal")
-}
-
-func TestEqual_FieldLengthMismatch(t *testing.T) {
-	t.Parallel()
-	a := sriracha.DeterministicToken{FieldSetVersion: "v1", Fields: [][]byte{{0x01}}}
-	b := sriracha.DeterministicToken{FieldSetVersion: "v1", Fields: [][]byte{{0x01, 0x02}}}
-	assert.False(t, Equal(a, b), "different per-field byte lengths should compare unequal")
-}
-
-func TestEqual_BothNilField(t *testing.T) {
-	t.Parallel()
-	a := sriracha.DeterministicToken{FieldSetVersion: "v1", Fields: [][]byte{nil}}
-	b := sriracha.DeterministicToken{FieldSetVersion: "v1", Fields: [][]byte{nil}}
-	assert.True(t, Equal(a, b), "tokens with matching nil-on-both-sides fields should compare equal")
-}
-
-func TestEqual_OneSideNil(t *testing.T) {
-	t.Parallel()
-	a := sriracha.DeterministicToken{FieldSetVersion: "v1", Fields: [][]byte{nil}}
-	b := sriracha.DeterministicToken{FieldSetVersion: "v1", Fields: [][]byte{{0x01}}}
-	assert.False(t, Equal(a, b), "nil vs non-nil field should compare unequal")
+	cases := []struct {
+		name string
+		a, b sriracha.DeterministicToken
+		want bool
+	}{
+		{
+			name: "VersionMismatch",
+			a:    detTok("v1", []byte{0x01}),
+			b:    detTok("v2", []byte{0x01}),
+			want: false,
+		},
+		{
+			name: "FieldCountMismatch",
+			a:    detTok("v1", []byte{0x01}),
+			b:    detTok("v1", []byte{0x01}, []byte{0x02}),
+			want: false,
+		},
+		{
+			name: "FieldLengthMismatch",
+			a:    detTok("v1", []byte{0x01}),
+			b:    detTok("v1", []byte{0x01, 0x02}),
+			want: false,
+		},
+		{
+			name: "BothNilField",
+			a:    detTok("v1", nil),
+			b:    detTok("v1", nil),
+			want: true,
+		},
+		{
+			name: "OneSideNil",
+			a:    detTok("v1", nil),
+			b:    detTok("v1", []byte{0x01}),
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, Equal(tc.a, tc.b))
+		})
+	}
 }
 
 func TestDicePerField_IdenticalRecords(t *testing.T) {
@@ -137,7 +156,6 @@ func TestDicePerField_MissingFieldZero(t *testing.T) {
 		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 0.5},
 	)
 
-	// Both records omit the optional family field, producing zero-filters there.
 	a, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
 	require.NoError(t, err)
 	b, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
@@ -150,54 +168,59 @@ func TestDicePerField_MissingFieldZero(t *testing.T) {
 	assert.Equal(t, 0.0, scores[1], "absent (zero-filter) field should score 0.0")
 }
 
-func TestDicePerField_VersionMismatch(t *testing.T) {
-	t.Parallel()
-	a := sriracha.BloomToken{FieldSetVersion: "v1"}
-	b := sriracha.BloomToken{FieldSetVersion: "v2"}
-	_, err := DicePerField(a, b)
-	assert.Error(t, err, "version mismatch should error")
-}
-
-func TestDicePerField_BloomParamsMismatch(t *testing.T) {
-	t.Parallel()
-	a := sriracha.BloomToken{
-		FieldSetVersion: "v1",
-		BloomParams:     sriracha.BloomConfig{SizeBits: 1024, NgramSizes: []int{2}, HashCount: 2},
-	}
-	b := sriracha.BloomToken{
-		FieldSetVersion: "v1",
-		BloomParams:     sriracha.BloomConfig{SizeBits: 2048, NgramSizes: []int{2}, HashCount: 2},
-	}
-	_, err := DicePerField(a, b)
-	assert.Error(t, err, "differing BloomParams should error")
-}
-
-func TestDicePerField_FieldCountMismatch(t *testing.T) {
+func TestDicePerField_Errors(t *testing.T) {
 	t.Parallel()
 	cfg := sriracha.BloomConfig{SizeBits: 8, NgramSizes: []int{2}, HashCount: 1}
-	a := sriracha.BloomToken{FieldSetVersion: "v1", BloomParams: cfg, Fields: [][]byte{{0x00}}}
-	b := sriracha.BloomToken{FieldSetVersion: "v1", BloomParams: cfg, Fields: [][]byte{{0x00}, {0x00}}}
-	_, err := DicePerField(a, b)
-	assert.Error(t, err, "differing field counts should error")
-}
-
-func TestDicePerField_FieldByteLengthMismatch(t *testing.T) {
-	t.Parallel()
-	cfg := sriracha.BloomConfig{SizeBits: 8, NgramSizes: []int{2}, HashCount: 1}
-	a := sriracha.BloomToken{FieldSetVersion: "v1", BloomParams: cfg, Fields: [][]byte{{0x00}}}
-	b := sriracha.BloomToken{FieldSetVersion: "v1", BloomParams: cfg, Fields: [][]byte{{0x00, 0x00}}}
-	_, err := DicePerField(a, b)
-	assert.Error(t, err, "differing per-field byte lengths should error")
+	cases := []struct {
+		name string
+		a, b sriracha.BloomToken
+	}{
+		{
+			name: "VersionMismatch",
+			a:    sriracha.BloomToken{FieldSetVersion: "v1"},
+			b:    sriracha.BloomToken{FieldSetVersion: "v2"},
+		},
+		{
+			name: "BloomParamsMismatch",
+			a:    bloomTokWith("v1", sriracha.BloomConfig{SizeBits: 1024, NgramSizes: []int{2}, HashCount: 2}),
+			b:    bloomTokWith("v1", sriracha.BloomConfig{SizeBits: 2048, NgramSizes: []int{2}, HashCount: 2}),
+		},
+		{
+			name: "FieldCountMismatch",
+			a:    bloomTokWith("v1", cfg, []byte{0x00}),
+			b:    bloomTokWith("v1", cfg, []byte{0x00}, []byte{0x00}),
+		},
+		{
+			name: "FieldByteLengthMismatch",
+			a:    bloomTokWith("v1", cfg, []byte{0x00}),
+			b:    bloomTokWith("v1", cfg, []byte{0x00, 0x00}),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := DicePerField(tc.a, tc.b)
+			assert.Error(t, err)
+		})
+	}
 }
 
 func TestDice_DirectCases(t *testing.T) {
 	t.Parallel()
-	// Both empty (no bits set on either side): cardinality 0 → score 0.
-	assert.Equal(t, 0.0, dice([]byte{0x00}, []byte{0x00}), "all-zero on both sides scores 0")
-	// Identical pattern.
-	assert.InDelta(t, 1.0, dice([]byte{0xff}, []byte{0xff}), 1e-9, "identical bit pattern scores 1.0")
-	// Disjoint patterns: 0xf0 vs 0x0f share no bits → score 0.
-	assert.Equal(t, 0.0, dice([]byte{0xf0}, []byte{0x0f}), "disjoint bit patterns score 0")
-	// Half-overlap: 0xff (8 bits) vs 0xf0 (4 bits), intersection 4 → 2*4/(8+4) = 0.6666...
-	assert.InDelta(t, 2.0*4.0/12.0, dice([]byte{0xff}, []byte{0xf0}), 1e-9, "half-overlap score")
+	cases := []struct {
+		name string
+		a, b []byte
+		want float64
+	}{
+		{"AllZero", []byte{0x00}, []byte{0x00}, 0.0},
+		{"Identical", []byte{0xff}, []byte{0xff}, 1.0},
+		{"Disjoint", []byte{0xf0}, []byte{0x0f}, 0.0},
+		{"HalfOverlap", []byte{0xff}, []byte{0xf0}, 2.0 * 4.0 / 12.0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.InDelta(t, tc.want, dice(tc.a, tc.b), 1e-9)
+		})
+	}
 }

@@ -125,33 +125,31 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+const expectedDefaultFieldCount = 16
+
 func TestDefaultFieldSetContents(t *testing.T) {
 	t.Parallel()
 	fs := DefaultFieldSet()
-	require.Len(t, fs.Fields, 16, "DefaultFieldSet() should have 16 fields")
+	require.Len(t, fs.Fields, expectedDefaultFieldCount)
 
-	checks := []struct {
-		path   sriracha.FieldPath
-		weight float64
-	}{
-		{sriracha.FieldIdentifierNationalID, 3.0},
-		{sriracha.FieldNameFamily, 2.5},
-		{sriracha.FieldDateBirth, 2.0},
-		{sriracha.FieldContactEmail, 2.0},
-		{sriracha.FieldAddressCountry, 0.5},
-	}
 	weights := make(map[string]float64, len(fs.Fields))
 	for _, f := range fs.Fields {
 		weights[f.Path.String()] = f.Weight
 	}
-	for _, c := range checks {
-		got, ok := weights[c.path.String()]
-		if assert.True(t, ok, "DefaultFieldSet() missing field %s", c.path) {
-			assert.Equal(t, c.weight, got, "field %s weight", c.path)
+	wantWeights := map[sriracha.FieldPath]float64{
+		sriracha.FieldIdentifierNationalID: 3.0,
+		sriracha.FieldNameFamily:           2.5,
+		sriracha.FieldDateBirth:            2.0,
+		sriracha.FieldContactEmail:         2.0,
+		sriracha.FieldAddressCountry:       0.5,
+	}
+	for path, want := range wantWeights {
+		got, ok := weights[path.String()]
+		if assert.Truef(t, ok, "DefaultFieldSet() missing field %s", path) {
+			assert.Equalf(t, want, got, "field %s weight", path)
 		}
 	}
-	def := sriracha.DefaultBloomConfig()
-	assert.Equal(t, def.SizeBits, fs.BloomParams.SizeBits, "BloomParams.SizeBits")
+	assert.Equal(t, sriracha.DefaultBloomConfig().SizeBits, fs.BloomParams.SizeBits)
 }
 
 func TestDefaultFieldSet_IsCopy(t *testing.T) {

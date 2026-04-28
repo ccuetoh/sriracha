@@ -96,6 +96,8 @@ func FuzzParseFieldPath(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, s string) {
 		fp, err := ParseFieldPath(s)
+		// Skip inputs that legitimately fail validation; the property under
+		// test is the roundtrip on successful parses.
 		if err != nil {
 			return
 		}
