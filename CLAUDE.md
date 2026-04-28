@@ -7,7 +7,7 @@
 
 ## Package layout
 ```
-sriracha/        # go.sriracha.dev/sriracha — root types, fields, errors, interfaces
+sriracha/        # go.sriracha.dev/sriracha — root types, fields, interfaces
 normalize/       # Unicode normalization pipeline
 token/           # HMAC-SHA256 deterministic + Bloom filter probabilistic tokenizers (uses bits-and-blooms/bitset)
 fieldset/        # FieldSet validation and canonical V0.1 schema
@@ -21,8 +21,6 @@ fieldset/        # FieldSet validation and canonical V0.1 schema
 ## Key design decisions
 - `FieldPath` is a struct with precomputed `org`, `namespace`, `localName` fields — never split the string at call time.
 - `ParseFieldPath(s)` is the validated constructor (returns error); `MustParsePath(s)` panics and is only for package-level `var` declarations.
-- `Sentinel` is a typed string (`type Sentinel string`); use `IsNotFound` / `IsNotHeld` helpers — never compare directly.
-- `*Error` implements `errors.Is` by `ErrorCode` equality and `Unwrap` for chain traversal.
 - `DefaultFieldSet()` returns a deep copy — the internal `defaultV01` is unexported.
 - `TokenizeRecord` is deterministic-only; `TokenizeRecordBloom` is probabilistic-only — no internal mode dispatch.
 

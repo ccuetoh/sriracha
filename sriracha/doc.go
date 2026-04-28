@@ -18,6 +18,6 @@
 //
 // Bloom filters are implemented on top of github.com/bits-and-blooms/bitset.
 //
-// Tokens encode to JSON via the encoding/json interface. The Tokenizer is
-// safe for concurrent use until Destroy is called.
+// Tokens encode to JSON via the standard encoding/json reflection path.
+// The Tokenizer is safe for concurrent use until Destroy is called.
 package sriracha

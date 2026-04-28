@@ -16,7 +16,7 @@ import (
 )
 
 // Tokenizer produces tokens from RawRecords using a shared secret.
-// Call Destroy when finished to wipe the key from memory.
+// Call Destroy when finished to wipe the source secret buffer.
 //
 // Tokenizer is safe for concurrent use by multiple goroutines until Destroy
 // is called; HMAC instances are pooled internally. Calling any tokenize
@@ -33,8 +33,10 @@ type Tokenizer interface {
 	// contain an all-zero filter of the same length. Missing required fields
 	// return an error.
 	TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.BloomToken, error)
-	// Destroy wipes the HMAC key from memory. The Tokenizer must not be used
-	// after this call.
+	// Destroy wipes the secret buffer that backs this Tokenizer. Pooled HMAC
+	// instances created from the secret may still hold derived key material
+	// (inner/outer pad) on the heap until garbage-collected. The Tokenizer
+	// must not be used after this call.
 	Destroy()
 }
 
