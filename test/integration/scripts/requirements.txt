@@ -1,0 +1,10 @@
+# Maintainer-only Python dependencies for regenerating the FEBRL fixture.
+# CI does not install these; the integration suite runs against the frozen
+# CSV under ../testdata/.
+#
+# FEBRL itself (https://sourceforge.net/projects/febrl/) is GPL-licensed and
+# pinning its exact version is impractical because it is no longer published
+# to PyPI. Install it manually per its upstream README, then run prepfixture.py
+# against the CSV that febrl's `ds-gen` tool produces.
+#
+# The script's pure post-processing has no third-party imports.

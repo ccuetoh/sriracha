@@ -1,0 +1,61 @@
+rec_id,cluster_id,given_name,surname,date_of_birth,suburb,state,postcode,soc_sec_id
+cluster-001-a,cluster-001,michael,anderson,1972-04-18,sydney,nsw,2000,123-45-6701
+cluster-001-b,cluster-001,michel,anderson,1972-04-18,sydney,nsw,2000,123-45-6701
+cluster-002-a,cluster-002,jennifer,thompson,1985-11-03,melbourne,vic,3000,234-56-7802
+cluster-002-b,cluster-002,jenifer,thompson,1985-11-03,melbourne,vic,3000,234-56-7802
+cluster-003-a,cluster-003,david,rodriguez,1968-07-22,brisbane,qld,4000,345-67-8903
+cluster-003-b,cluster-003,david,rodriguez,1968-07-22,brisbane,qld,4001,345-67-8903
+cluster-004-a,cluster-004,sarah,williams,1991-02-14,perth,wa,6000,456-78-9004
+cluster-004-b,cluster-004,sara,williams,1991-02-14,perth,wa,6000,456-78-9004
+cluster-005-a,cluster-005,christopher,nguyen,1979-09-30,adelaide,sa,5000,567-89-0105
+cluster-005-b,cluster-005,christopher,nguyen,1979-09-30,adelaide,sa,5000,567-89-0105
+cluster-006-a,cluster-006,emily,patel,1988-05-07,canberra,act,2600,678-90-1206
+cluster-006-b,cluster-006,emilly,patel,1988-05-07,canberra,act,2600,678-90-1206
+cluster-007-a,cluster-007,matthew,kowalski,1974-12-19,hobart,tas,7000,789-01-2307
+cluster-007-b,cluster-007,matthew,kowalski,1974-12-19,hobart,tas,7000,789-01-2307
+cluster-008-a,cluster-008,jessica,obrien,1995-08-25,darwin,nt,800,890-12-3408
+cluster-008-b,cluster-008,jesica,obrien,1995-08-25,darwin,nt,800,890-12-3408
+cluster-009-a,cluster-009,andrew,fitzgerald,1962-03-11,newcastle,nsw,2300,901-23-4509
+cluster-009-b,cluster-009,andrew,fitzgerald,1962-03-11,newcastle,nsw,2300,901-23-4509
+cluster-010-a,cluster-010,nicole,vasquez,1983-06-04,geelong,vic,3220,012-34-5610
+cluster-010-b,cluster-010,nichole,vasquez,1983-06-04,geelong,vic,3220,012-34-5610
+cluster-011-a,cluster-011,robert,sandstrom,1977-10-28,wollongong,nsw,2500,123-45-6711
+cluster-011-b,cluster-011,robert,sandstrom,1977-10-28,wollongong,nsw,2500,123-45-6711
+cluster-012-a,cluster-012,laura,kim,1989-01-15,gold coast,qld,4217,234-56-7812
+cluster-012-b,cluster-012,laura,kim,1989-01-15,gold coast,qld,4217,234-56-7812
+cluster-013-a,cluster-013,steven,chowdhury,1971-04-09,cairns,qld,4870,345-67-8913
+cluster-013-b,cluster-013,steve,chowdhury,1971-04-09,cairns,qld,4870,345-67-8913
+cluster-014-a,cluster-014,amanda,robinson,1986-07-21,townsville,qld,4810,456-78-9014
+cluster-014-b,cluster-014,amanda,robinson,1986-07-21,townsville,qld,4810,456-78-9014
+cluster-015-a,cluster-015,daniel,horowitz,1965-11-12,launceston,tas,7250,567-89-0115
+cluster-015-b,cluster-015,daniel,horwitz,1965-11-12,launceston,tas,7250,567-89-0115
+cluster-016-a,cluster-016,michelle,park,1992-02-26,toowoomba,qld,4350,678-90-1216
+cluster-016-b,cluster-016,michelle,park,1992-02-26,toowoomba,qld,4350,678-90-1216
+cluster-017-a,cluster-017,brandon,oconnor,1980-06-17,bendigo,vic,3550,789-01-2317
+cluster-017-b,cluster-017,brandon,oconnor,1980-06-17,bendigo,vic,3550,789-01-2317
+cluster-018-a,cluster-018,stephanie,blackwood,1976-09-08,ballarat,vic,3350,890-12-3418
+cluster-018-b,cluster-018,stephany,blackwood,1976-09-08,ballarat,vic,3350,890-12-3418
+cluster-019-a,cluster-019,jonathan,larkin,1990-12-30,mackay,qld,4740,901-23-4519
+cluster-019-b,cluster-019,jonathan,larkin,1990-12-30,mackay,qld,4740,901-23-4519
+cluster-020-a,cluster-020,kimberly,vasilakopoulos,1984-03-22,bunbury,wa,6230,012-34-5620
+cluster-020-b,cluster-020,kimberly,vasilakopolous,1984-03-22,bunbury,wa,6230,012-34-5620
+cluster-021-a,cluster-021,ryan,abernathy,1973-05-13,rockhampton,qld,4700,123-45-6721
+cluster-021-b,cluster-021,ryan,abernathy,1973-05-13,rockhampton,qld,4700,123-45-6721
+cluster-022-a,cluster-022,heather,svendsen,1987-08-04,bendigo,vic,3550,234-56-7822
+cluster-022-b,cluster-022,heather,svensen,1987-08-04,bendigo,vic,3550,234-56-7822
+cluster-023-a,cluster-023,joshua,kallikrates,1969-10-26,maitland,nsw,2320,345-67-8923
+cluster-023-b,cluster-023,joshua,kallikrates,1969-10-26,maitland,nsw,2320,345-67-8923
+cluster-024-a,cluster-024,rachel,burdick,1981-01-08,wagga wagga,nsw,2650,456-78-9024
+cluster-024-b,cluster-024,rachael,burdick,1981-01-08,wagga wagga,nsw,2650,456-78-9024
+cluster-025-a,cluster-025,kevin,ramachandran,1978-04-29,albury,nsw,2640,567-89-0125
+cluster-025-b,cluster-025,kevin,ramachandran,1978-04-29,albury,nsw,2640,567-89-0125
+single-a-001,single-a-001,olivia,jankowski,1993-07-11,coffs harbour,nsw,2450,111-22-3331
+single-a-002,single-a-002,ethan,fernandez,1966-02-23,port macquarie,nsw,2444,222-33-4441
+single-a-003,single-a-003,grace,delacroix,1989-05-16,tweed heads,nsw,2485,333-44-5551
+single-a-004,single-a-004,liam,svetozar,1972-08-09,gladstone,qld,4680,444-55-6661
+single-a-005,single-a-005,zoe,papadopoulos,1986-11-30,bundaberg,qld,4670,555-66-7771
+single-b-001,single-b-001,noah,liang,1981-03-04,hervey bay,qld,4655,666-77-8881
+single-b-002,single-b-002,ava,bartholomew,1968-06-27,sunshine coast,qld,4551,777-88-9991
+single-b-003,single-b-003,mason,verhoeven,1995-09-19,ipswich,qld,4305,888-99-0001
+single-b-004,single-b-004,sophia,radhakrishnan,1979-12-12,logan city,qld,4114,999-00-1112
+single-b-005,single-b-005,jackson,oluwasegun,1984-01-25,redcliffe,qld,4020,000-11-2222

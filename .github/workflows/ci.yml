@@ -40,6 +40,41 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  integration:
+    name: Integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install gotestsum
+        run: go install gotest.tools/gotestsum@v1.13.0
+
+      - name: Raise memlock limit for memguard
+        run: sudo prlimit --pid $PPID --memlock=unlimited:unlimited
+
+      - name: Integration tests
+        run: gotestsum --junitfile integration-results.xml -- -tags=integration -race -timeout 10m -coverprofile=integration-coverage.out -coverpkg=./... -run TestIntegration ./test/integration/...
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@aa56896cf108bd10b5eb883cd1d24196da57f695 # v5.5.4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: integration-coverage.out
+          flags: integration
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@6ba3fdeec616fb91fd6a389b788a2366835a0fa2 # v1.2.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: integration-results.xml
+          flags: integration
+
   lint:
     name: Lint
     runs-on: ubuntu-latest

@@ -28,7 +28,9 @@ jobs:
 
       - name: Track benchmarks (main)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: go test -bench=. -benchmem ./... | tee results.txt
+        run: |
+          go test -bench=. -benchmem ./... | tee results.txt
+          go test -tags=integration -bench=. -benchmem -run='^$' ./test/integration/... | tee -a results.txt
 
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -38,7 +40,9 @@ jobs:
 
       - name: Run benchmarks (PR)
         if: github.event_name == 'pull_request'
-        run: go test -bench=. -benchmem ./... | tee results.txt
+        run: |
+          go test -bench=. -benchmem ./... | tee results.txt
+          go test -tags=integration -bench=. -benchmem -run='^$' ./test/integration/... | tee -a results.txt
 
       - name: Save PR metadata
         if: github.event_name == 'pull_request'

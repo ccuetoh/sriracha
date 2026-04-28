@@ -1,6 +1,19 @@
 ignore:
   - "mock"
   - "transport/proto"
+  - "test/integration"
+
+flags:
+  integration:
+    paths:
+      - "transport/"
+      - "indexer/"
+      - "audit/"
+      - "token/"
+      - "fieldset/"
+      - "normalize/"
+      - "sriracha/"
+    carryforward: true
 
 comment:
   layout: " diff, flags, files"
