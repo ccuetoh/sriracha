@@ -37,43 +37,61 @@ func runNormalizeCases(t *testing.T, cases []normalizeCase) {
 	}
 }
 
-// TestNormalize_Unicode covers NFKD decomposition, lowercasing, and whitespace
-// handling — the steps that run for every field path.
+// TestNormalize_Unicode covers NFKD decomposition, lowercasing, whitespace
+// handling, and the diacritic-stripping applied to name-namespace paths.
 func TestNormalize_Unicode(t *testing.T) {
 	t.Parallel()
 	runNormalizeCases(t, []normalizeCase{
 		{
-			name:  "NFKDPrecomposedEAcute",
-			value: "é", // é precomposed
+			name:  "NFKDPrecomposedEAcuteName",
+			value: "é", // é precomposed; name path strips combining marks
 			path:  sriracha.FieldNameGiven,
-			want:  "é", // e + combining acute after NFKD + lower
+			want:  "e",
 		},
 		{
-			name:  "NFKDDecomposedEAcute",
-			value: "é", // already decomposed
+			name:  "NFKDDecomposedEAcuteName",
+			value: "é", // already decomposed; name path strips combining marks
 			path:  sriracha.FieldNameGiven,
-			want:  "é",
+			want:  "e",
 		},
 		{
 			name:  "NonBreakingSpaceCollapse",
 			value: " hello world ",
-			path:  sriracha.FieldNameGiven,
+			path:  sriracha.FieldAddressLocality,
 			want:  "hello world",
 		},
 		{
 			// NFKD decomposes U+0130 (İ) → I + U+0307 (combining dot above);
-			// lowercasing then yields "i" + U+0307, not bare "i". This documents
-			// the language-independent fold (no Turkish-aware special-casing).
-			name:  "TurkishIWithDotAbove",
+			// lowercasing yields "i" + U+0307. The name namespace then strips
+			// the combining mark, producing bare "i". Non-name paths preserve it.
+			name:  "TurkishIWithDotAboveName",
 			value: "İ",
 			path:  sriracha.FieldNameGiven,
+			want:  "i",
+		},
+		{
+			name:  "TurkishIWithDotAboveNonName",
+			value: "İ",
+			path:  sriracha.FieldAddressLocality,
 			want:  "i̇",
 		},
 		{
 			name:  "NameWithSpacesAndAccent",
 			value: "  José  ",
 			path:  sriracha.FieldNameGiven,
-			want:  "josé",
+			want:  "jose",
+		},
+		{
+			name:  "NameMullerStrippedNotFolded",
+			value: "Müller",
+			path:  sriracha.FieldNameFamily,
+			want:  "muller",
+		},
+		{
+			name:  "NameInvalidUTF8Replaced",
+			value: "ab\xffcd",
+			path:  sriracha.FieldNameGiven,
+			want:  "ab�cd",
 		},
 	})
 }
@@ -186,22 +204,115 @@ func TestNormalize_Country(t *testing.T) {
 	})
 }
 
+// TestNormalize_Email covers the contact-email normalizer.
+func TestNormalize_Email(t *testing.T) {
+	t.Parallel()
+	runNormalizeCases(t, []normalizeCase{
+		{
+			name:  "LowercaseAndTrim",
+			value: "  Hello@Example.COM  ",
+			path:  sriracha.FieldContactEmail,
+			want:  "hello@example.com",
+		},
+		{
+			name:  "TrailingDotsStripped",
+			value: "alice@example.com..",
+			path:  sriracha.FieldContactEmail,
+			want:  "alice@example.com",
+		},
+		{
+			name:        "MultiAtRejected",
+			value:       "a@b@c.com",
+			path:        sriracha.FieldContactEmail,
+			wantErr:     true,
+			errContains: "exactly one '@'",
+		},
+		{
+			name:        "NoAtRejected",
+			value:       "missing-at-sign",
+			path:        sriracha.FieldContactEmail,
+			wantErr:     true,
+			errContains: "exactly one '@'",
+		},
+		{
+			name:        "InternalSpaceRejected",
+			value:       "alice @example.com",
+			path:        sriracha.FieldContactEmail,
+			wantErr:     true,
+			errContains: "whitespace",
+		},
+		{
+			name:        "EmptyLocalRejected",
+			value:       "@example.com",
+			path:        sriracha.FieldContactEmail,
+			wantErr:     true,
+			errContains: "non-empty",
+		},
+		{
+			name:        "EmptyDomainRejected",
+			value:       "alice@",
+			path:        sriracha.FieldContactEmail,
+			wantErr:     true,
+			errContains: "non-empty",
+		},
+		{
+			name:        "DomainAllDotsRejected",
+			value:       "alice@...",
+			path:        sriracha.FieldContactEmail,
+			wantErr:     true,
+			errContains: "non-empty",
+		},
+	})
+}
+
+// TestNormalize_Phone covers best-effort phone normalization (digits + leading +).
+func TestNormalize_Phone(t *testing.T) {
+	t.Parallel()
+	runNormalizeCases(t, []normalizeCase{
+		{
+			name:  "StripFormattingKeepLeadingPlus",
+			value: "  +1 (800) 555-1234  ",
+			path:  sriracha.FieldContactPhone,
+			want:  "+18005551234",
+		},
+		{
+			name:  "PlusOnlyAtStart",
+			value: "1+800+5551234",
+			path:  sriracha.FieldContactPhone,
+			want:  "18005551234",
+		},
+		{
+			name:  "NoPlus",
+			value: "8005551234",
+			path:  sriracha.FieldContactPhone,
+			want:  "8005551234",
+		},
+		{
+			name:        "TooShortRejected",
+			value:       "12345",
+			path:        sriracha.FieldContactPhone,
+			wantErr:     true,
+			errContains: "at least 7 digits",
+		},
+	})
+}
+
 // TestNormalize_Default covers paths with no field-specific transform —
 // only steps 1–4 of the pipeline run.
 func TestNormalize_Default(t *testing.T) {
 	t.Parallel()
 	runNormalizeCases(t, []normalizeCase{
 		{
-			name:  "EmailLowercaseAndTrim",
-			value: "  Hello@Example.COM  ",
-			path:  sriracha.FieldContactEmail,
-			want:  "hello@example.com",
+			name:  "AddressLocalityLowercaseAndTrim",
+			value: "  Buenos Aires  ",
+			path:  sriracha.FieldAddressLocality,
+			want:  "buenos aires",
 		},
 		{
-			name:  "PhoneTrimAndCollapse",
-			value: "  +1 800 555 1234  ",
-			path:  sriracha.FieldContactPhone,
-			want:  "+1 800 555 1234",
+			name:  "AddressPostalCodeUntouched",
+			value: "  K1A 0B1  ",
+			path:  sriracha.FieldAddressPostalCode,
+			want:  "k1a 0b1",
 		},
 	})
 }
@@ -248,7 +359,7 @@ func BenchmarkNormalizeCountry(b *testing.B) {
 // FuzzNormalize verifies that Normalize never panics and is idempotent for
 // non-date, non-country fields (name, identifier, address, contact).
 func FuzzNormalize(f *testing.F) {
-	seeds := []string{"", "Alice", "  hello world  ", "123-456.789", "é", "İ", " test "}
+	seeds := []string{"", "Alice", "  hello world  ", "123-456.789", "é", "İ", " test ", "user@example.com", "+1 800 555 1234"}
 	for _, s := range seeds {
 		f.Add(s)
 	}
@@ -258,6 +369,7 @@ func FuzzNormalize(f *testing.F) {
 		sriracha.FieldNameFamily,
 		sriracha.FieldIdentifierNationalID,
 		sriracha.FieldContactEmail,
+		sriracha.FieldContactPhone,
 		sriracha.FieldAddressLocality,
 	}
 

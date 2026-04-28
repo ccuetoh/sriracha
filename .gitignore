@@ -13,6 +13,7 @@
 *.out
 *.test
 coverage.html
+testdata/fuzz/
 
 # OS
 .DS_Store

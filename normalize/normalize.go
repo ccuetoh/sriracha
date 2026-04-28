@@ -42,6 +42,12 @@ func Normalize(value string, path sriracha.FieldPath) (string, error) {
 		// combining marks in non-canonical combining-class order, which NFKD
 		// would reorder on the next call and break idempotency.
 		return nfkdDecompose(normalizeIdentifier(value)), nil
+	case path.InNamespace(sriracha.NamespaceName):
+		return normalizeName(value), nil
+	case path == sriracha.FieldContactEmail:
+		return normalizeEmail(value)
+	case path == sriracha.FieldContactPhone:
+		return normalizePhone(value)
 	// Country is the only address field with special normalization;
 	// other address fields fall through to default (steps 1-4 only).
 	case path == sriracha.FieldAddressCountry:
@@ -97,6 +103,66 @@ func normalizeIdentifier(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// normalizeName strips Unicode combining marks (category Mn) so that
+// "José" and "Jose" produce the same output. Re-applies NFKD afterwards for
+// the same idempotency reason as normalizeIdentifier, and re-collapses /
+// trims whitespace because stripping a Mn-only run between spaces (e.g.
+// "x ݈" → "x ") would otherwise leave a trailing space that the next
+// call would trim, breaking idempotency.
+func normalizeName(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if !unicode.Is(unicode.Mn, r) {
+			b.WriteRune(r)
+		}
+	}
+	out := nfkdDecompose(b.String())
+	return strings.TrimSpace(strings.Join(strings.Fields(out), " "))
+}
+
+// normalizeEmail splits the address on its single '@', strips any trailing
+// dots from the domain (FQDN canonicalisation), and rejects internal
+// whitespace or empty parts. The default pipeline has already lowercased,
+// NFKD-decomposed, and trimmed leading/trailing whitespace.
+func normalizeEmail(s string) (string, error) {
+	if strings.ContainsAny(s, " \t\r\n") {
+		return "", fmt.Errorf("email must not contain whitespace, got %q", s)
+	}
+	at := strings.IndexByte(s, '@')
+	if at < 0 || strings.IndexByte(s[at+1:], '@') >= 0 {
+		return "", fmt.Errorf("email must contain exactly one '@', got %q", s)
+	}
+	local, domain := s[:at], s[at+1:]
+	domain = strings.TrimRight(domain, ".")
+	if local == "" || domain == "" {
+		return "", fmt.Errorf("email must have non-empty local and domain parts, got %q", s)
+	}
+	return local + "@" + domain, nil
+}
+
+// normalizePhone keeps only digits and a single leading '+'. Errors when the
+// final digit count is below 7. Best-effort: no country awareness, no E.164
+// validation.
+func normalizePhone(s string) (string, error) {
+	var b strings.Builder
+	b.Grow(len(s))
+	digits := 0
+	for i, r := range s {
+		switch {
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+			digits++
+		case r == '+' && i == 0:
+			b.WriteRune(r)
+		}
+	}
+	if digits < 7 {
+		return "", fmt.Errorf("phone must contain at least 7 digits, got %q", s)
+	}
+	return b.String(), nil
 }
 
 // normalizeCountry validates and uppercases a 2-letter ISO 3166-1 alpha-2 code.
