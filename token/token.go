@@ -3,7 +3,6 @@ package token
 import (
 	"crypto/hmac"
 	"crypto/sha256"
-	"crypto/subtle"
 	"errors"
 	"fmt"
 
@@ -13,7 +12,7 @@ import (
 	"go.sriracha.dev/sriracha"
 )
 
-// Tokenizer produces TokenRecords from RawRecords using a shared secret.
+// Tokenizer produces tokens from RawRecords using a shared secret.
 // Call Destroy when finished to wipe the key from memory.
 type Tokenizer struct {
 	secret *memguard.LockedBuffer
@@ -36,48 +35,34 @@ func (t *Tokenizer) Destroy() {
 }
 
 // TokenizeRecord tokenizes a RawRecord in deterministic mode (HMAC-SHA256 per field).
-// Fields are processed in FieldSet order.
+// The returned token's Fields slice is aligned with fs.Fields: each entry is a
+// 32-byte HMAC for a present field, or nil for an absent optional field.
 // Missing required fields return an error.
-// Missing optional fields are silently skipped (no bytes added to Payload).
-func (t *Tokenizer) TokenizeRecord(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.TokenRecord, error) {
-	buf := make([]byte, 0, len(fs.Fields)*sha256.Size)
+func (t *Tokenizer) TokenizeRecord(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.DeterministicToken, error) {
+	fields := make([][]byte, len(fs.Fields))
 	h := hmac.New(sha256.New, t.secret.Bytes())
 
-	for _, spec := range fs.Fields {
+	for i, spec := range fs.Fields {
 		raw, ok := record[spec.Path]
-		if !ok || sriracha.IsNotFound(raw) || sriracha.IsNotHeld(raw) {
+		if !ok {
 			if spec.Required {
-				return sriracha.TokenRecord{}, fmt.Errorf("token: required field %q missing", spec.Path)
+				return sriracha.DeterministicToken{}, fmt.Errorf("token: required field %q missing", spec.Path)
 			}
 			continue
 		}
 		normalized, err := normalize.Normalize(raw, spec.Path)
 		if err != nil {
-			return sriracha.TokenRecord{}, fmt.Errorf("token: normalization failed for field %q: %w", spec.Path, err)
+			return sriracha.DeterministicToken{}, fmt.Errorf("token: normalization failed for field %q: %w", spec.Path, err)
 		}
 		h.Reset()
 		h.Write([]byte(normalized))
 		h.Write([]byte{':'})
 		h.Write([]byte(spec.Path.String()))
-		buf = h.Sum(buf)
+		fields[i] = h.Sum(nil)
 	}
 
-	return sriracha.TokenRecord{
+	return sriracha.DeterministicToken{
 		FieldSetVersion: fs.Version,
-		Mode:            sriracha.Deterministic,
-		Algo:            sriracha.AlgoHMACSHA256V1,
-		Payload:         buf,
-		Checksum:        sha256.Sum256(buf),
+		Fields:          fields,
 	}, nil
-}
-
-// ValidateTokenRecord verifies that the Payload matches the Checksum.
-// Uses constant-time comparison to prevent timing attacks.
-func ValidateTokenRecord(tr sriracha.TokenRecord) error {
-	expected := sha256.Sum256(tr.Payload)
-	if subtle.ConstantTimeCompare(expected[:], tr.Checksum[:]) != 1 {
-		return errors.New("token: checksum mismatch")
-	}
-
-	return nil
 }

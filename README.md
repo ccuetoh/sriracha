@@ -14,8 +14,8 @@
 Sriracha is a Go library for privacy-preserving record linkage. Institutions in health, government, and research
 routinely need to find shared person records across organizational boundaries — without transmitting raw PII.
 Sriracha provides the building blocks: records are normalized and tokenized with a shared secret, producing tokens
-that can be compared without exposing the underlying identifiers. Transport, storage, and matching are left to the
-consumer.
+that can be compared without exposing the underlying identifiers. Storage is left to the consumer; matching is
+available via `token.Equal` (deterministic) and `token.DicePerField` (probabilistic).
 
 ## Features
 

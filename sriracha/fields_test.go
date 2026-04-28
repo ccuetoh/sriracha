@@ -7,31 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSentinels(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name        string
-		input       string
-		wantFound   bool
-		wantNotHeld bool
-	}{
-		{name: "empty string", input: "", wantFound: false, wantNotHeld: false},
-		{name: "arbitrary value", input: "some value", wantFound: false, wantNotHeld: false},
-		{name: "NotHeld sentinel", input: string(NotHeld), wantFound: false, wantNotHeld: true},
-		{name: "NotFound sentinel", input: string(NotFound), wantFound: true, wantNotHeld: false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tt.wantFound, IsNotFound(tt.input), "IsNotFound(%q)", tt.input)
-			assert.Equal(t, tt.wantNotHeld, IsNotHeld(tt.input), "IsNotHeld(%q)", tt.input)
-		})
-	}
-}
-
 func TestFieldPathComponents(t *testing.T) {
 	t.Parallel()
 

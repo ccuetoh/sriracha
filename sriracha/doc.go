@@ -4,15 +4,16 @@
 //
 // Records are normalized, then tokenized with HMAC-SHA256 (deterministic
 // mode) or Bloom filters (probabilistic mode). How the resulting tokens
-// are exchanged, stored, or compared is left to the caller.
+// are stored or compared is left to the caller; package token offers
+// Equal and DicePerField as ready-made primitives.
 //
 // Import path: go.sriracha.dev/sriracha
 //
 // Package layout:
 //
-//   - sriracha           — core types, field constants, errors
+//   - sriracha           — core types and field constants
 //   - sriracha/normalize — Unicode normalization pipeline
-//   - sriracha/token     — deterministic and probabilistic tokenization
+//   - sriracha/token     — deterministic and probabilistic tokenization, comparison helpers
 //   - sriracha/fieldset  — FieldSet validation and the canonical v0.1 schema
 //
 // Bloom filters are implemented on top of github.com/bits-and-blooms/bitset.
