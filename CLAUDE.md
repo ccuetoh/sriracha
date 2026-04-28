@@ -13,7 +13,6 @@ token/           # HMAC-SHA256 deterministic + Bloom filter probabilistic tokeni
 fieldset/        # FieldSet validation, compatibility, semver-based version negotiation, canonical V0.1
 indexer/         # TokenIndexer with pluggable IndexStorage (MemoryStorage or BadgerStorage)
 audit/file/      # Append-only JSONL audit log with SHA-256 hash chaining
-transport/       # gRPC client and server (mTLS, consent policy, replay cache)
 ```
 
 ## Hard rules
