@@ -1,39 +1,15 @@
 package token
 
 import (
-	"crypto/sha256"
-	"encoding/binary"
 	"testing"
 
-	"github.com/bits-and-blooms/bitset"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.sriracha.dev/sriracha"
 )
 
-// filterFromBytes deserialises a Bloom filter payload into a BitSet.
-func filterFromBytes(data []byte) *bitset.BitSet {
-	nwords := len(data) / 8
-	words := make([]uint64, nwords)
-	for i := range nwords {
-		words[i] = binary.LittleEndian.Uint64(data[i*8:])
-	}
-	return bitset.From(words)
-}
-
-// dice computes the Sorensen-Dice coefficient of two BitSets.
-func dice(t *testing.T, a, b *bitset.BitSet) float64 {
-	t.Helper()
-	popInter := int(a.IntersectionCardinality(b)) //nolint:gosec // G115: bitset cardinality never exceeds math.MaxInt
-	total := int(a.Count()) + int(b.Count())      //nolint:gosec // G115: bitset cardinality never exceeds math.MaxInt
-	if total == 0 {
-		return 0
-	}
-	return 2.0 * float64(popInter) / float64(total)
-}
-
-func newTok(t *testing.T, secret string) *Tokenizer {
+func newTok(t *testing.T, secret string) Tokenizer {
 	t.Helper()
 	tok, err := New([]byte(secret))
 	require.NoErrorf(t, err, "New(%q)", secret)
@@ -70,7 +46,7 @@ func TestTokenizeRecord_Idempotent(t *testing.T) {
 	require.NoError(t, err)
 	tr2, err := tok.TokenizeRecord(rec, fs)
 	require.NoError(t, err)
-	assert.Equal(t, tr1.Payload, tr2.Payload, "idempotency: payloads differ for identical input")
+	assert.True(t, Equal(tr1, tr2), "idempotency: tokens differ for identical input")
 }
 
 func TestTokenizeRecord_CrossFieldIsolation(t *testing.T) {
@@ -87,8 +63,10 @@ func TestTokenizeRecord_CrossFieldIsolation(t *testing.T) {
 
 	tr, err := tok.TokenizeRecord(rec, fs)
 	require.NoError(t, err)
-	require.Len(t, tr.Payload, 64, "expected 64 bytes")
-	assert.NotEqual(t, tr.Payload[:32], tr.Payload[32:], "cross-field isolation: same value with different paths produced identical tokens")
+	require.Len(t, tr.Fields, 2, "expected 2 field entries")
+	require.Len(t, tr.Fields[0], 32, "expected 32-byte HMAC for given name")
+	require.Len(t, tr.Fields[1], 32, "expected 32-byte HMAC for family name")
+	assert.NotEqual(t, tr.Fields[0], tr.Fields[1], "cross-field isolation: same value with different paths produced identical tokens")
 }
 
 func TestTokenizeRecord_DifferentSecret(t *testing.T) {
@@ -100,38 +78,7 @@ func TestTokenizeRecord_DifferentSecret(t *testing.T) {
 	require.NoError(t, err)
 	tr2, err := newTok(t, "secret-b").TokenizeRecord(rec, fs)
 	require.NoError(t, err)
-	assert.NotEqual(t, tr1.Payload, tr2.Payload, "different secrets produced identical payloads")
-}
-
-func TestValidateTokenRecord(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name    string
-		tamper  bool
-		wantErr bool
-	}{
-		{"valid token", false, false},
-		{"tampered payload", true, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			tok := newTok(t, "secret")
-			rec := sriracha.RawRecord{sriracha.FieldNameGiven: "John"}
-			fs := deterministicFS(sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
-			tr, err := tok.TokenizeRecord(rec, fs)
-			require.NoError(t, err)
-			if tc.tamper {
-				tr.Payload[0] ^= 0xff
-			}
-			if tc.wantErr {
-				assert.Error(t, ValidateTokenRecord(tr), "expected checksum mismatch error for tampered payload")
-			} else {
-				assert.NoError(t, ValidateTokenRecord(tr), "expected nil error for valid token")
-			}
-		})
-	}
+	assert.False(t, Equal(tr1, tr2), "different secrets produced identical tokens")
 }
 
 func TestTokenizeRecord_MissingRequired(t *testing.T) {
@@ -143,7 +90,7 @@ func TestTokenizeRecord_MissingRequired(t *testing.T) {
 	assert.Error(t, err, "expected error for missing required field")
 }
 
-func TestTokenizeRecord_MissingOptionalSkipped(t *testing.T) {
+func TestTokenizeRecord_MissingOptionalNilEntry(t *testing.T) {
 	t.Parallel()
 	tok := newTok(t, "secret")
 	rec := sriracha.RawRecord{sriracha.FieldNameGiven: "John"}
@@ -154,7 +101,9 @@ func TestTokenizeRecord_MissingOptionalSkipped(t *testing.T) {
 
 	tr, err := tok.TokenizeRecord(rec, fs)
 	require.NoError(t, err)
-	assert.Len(t, tr.Payload, 32, "expected 32 bytes (optional field skipped)")
+	require.Len(t, tr.Fields, 2, "expected positional alignment with FieldSet")
+	assert.Len(t, tr.Fields[0], 32, "present field should have 32-byte HMAC")
+	assert.Nil(t, tr.Fields[1], "absent optional field should be nil")
 }
 
 func TestTokenizeRecord_EmptyAllOptional(t *testing.T) {
@@ -167,9 +116,9 @@ func TestTokenizeRecord_EmptyAllOptional(t *testing.T) {
 
 	tr, err := tok.TokenizeRecord(sriracha.RawRecord{}, fs)
 	require.NoError(t, err)
-	assert.Empty(t, tr.Payload, "expected empty payload")
-	assert.Equal(t, sha256.Sum256(nil), tr.Checksum, "checksum mismatch for empty payload")
-	assert.NoError(t, ValidateTokenRecord(tr), "ValidateTokenRecord failed for empty payload")
+	require.Len(t, tr.Fields, 2)
+	assert.Nil(t, tr.Fields[0], "absent optional field should be nil")
+	assert.Nil(t, tr.Fields[1], "absent optional field should be nil")
 }
 
 func TestTokenizeRecord_NormalizationError(t *testing.T) {
@@ -180,6 +129,15 @@ func TestTokenizeRecord_NormalizationError(t *testing.T) {
 	fs := deterministicFS(sriracha.FieldSpec{Path: sriracha.FieldDateBirth, Required: true, Weight: 1.0})
 	_, err := tok.TokenizeRecord(rec, fs)
 	assert.Error(t, err, "expected normalization error for invalid date")
+}
+
+func TestTokenizeRecord_VersionPropagated(t *testing.T) {
+	t.Parallel()
+	tok := newTok(t, "secret")
+	fs := deterministicFS(sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
+	tr, err := tok.TokenizeRecord(sriracha.RawRecord{sriracha.FieldNameGiven: "John"}, fs)
+	require.NoError(t, err)
+	assert.Equal(t, fs.Version, tr.FieldSetVersion, "FieldSetVersion should be carried on the token")
 }
 
 func TestTokenizeRecordBloom_MissingRequired(t *testing.T) {
@@ -199,9 +157,9 @@ func TestTokenizeRecordBloom_NormalizationError(t *testing.T) {
 	assert.Error(t, err, "expected normalization error for invalid date")
 }
 
-// Note: the spec suggests "John" vs "Jon" but both are short (3-4 chars),
-// yielding very few bigrams/trigrams and unreliable Dice scores.
-// "Christopher" vs "Cristopher" tests the similar-names property with more ngrams.
+// "John" vs "Jon" yields very few bigrams/trigrams and unreliable Dice scores,
+// so this case uses "Christopher" vs "Cristopher" to exercise typo similarity
+// with a meaningful number of ngrams.
 func TestTokenizeRecordBloom_NameSimilarity(t *testing.T) {
 	t.Parallel()
 
@@ -226,10 +184,10 @@ func TestTokenizeRecordBloom_NameSimilarity(t *testing.T) {
 			tr2, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: tc.nameB}, fs)
 			require.NoError(t, err)
 
-			bs1 := filterFromBytes(tr1.Payload)
-			bs2 := filterFromBytes(tr2.Payload)
-
-			d := dice(t, bs1, bs2)
+			scores, err := DicePerField(tr1, tr2)
+			require.NoError(t, err)
+			require.Len(t, scores, 1)
+			d := scores[0]
 			if tc.wantAbove {
 				assert.Greater(t, d, tc.threshold, "Dice(%s, %s) = %.4f, expected > %.2f", tc.nameA, tc.nameB, d, tc.threshold)
 			} else {
@@ -249,8 +207,9 @@ func TestTokenizeRecordBloom_MissingOptionalZeroFilter(t *testing.T) {
 
 	tr, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: "John"}, fs)
 	require.NoError(t, err)
-	require.Len(t, tr.Payload, 2*128, "expected %d bytes", 2*128)
-	for _, b := range tr.Payload[128:] {
+	require.Len(t, tr.Fields, 2)
+	require.Len(t, tr.Fields[1], 128, "absent optional field should have full-length zero filter")
+	for _, b := range tr.Fields[1] {
 		if b != 0 {
 			assert.Fail(t, "missing optional field should produce all-zero filter")
 			break
@@ -258,7 +217,7 @@ func TestTokenizeRecordBloom_MissingOptionalZeroFilter(t *testing.T) {
 	}
 }
 
-func TestTokenizeRecordBloom_PayloadLength(t *testing.T) {
+func TestTokenizeRecordBloom_FieldLayout(t *testing.T) {
 	t.Parallel()
 	tok := newTok(t, "secret")
 	fs := bloomFS(
@@ -272,7 +231,11 @@ func TestTokenizeRecordBloom_PayloadLength(t *testing.T) {
 
 	tr, err := tok.TokenizeRecordBloom(rec, fs)
 	require.NoError(t, err)
-	assert.Len(t, tr.Payload, 256, "expected 256 bytes for 2-field bloom")
+	require.Len(t, tr.Fields, 2, "expected one filter per FieldSet entry")
+	assert.Len(t, tr.Fields[0], 128, "expected 128 bytes per 1024-bit filter")
+	assert.Len(t, tr.Fields[1], 128, "expected 128 bytes per 1024-bit filter")
+	assert.Equal(t, fs.BloomParams, tr.BloomParams, "BloomParams should be carried on the token")
+	assert.Equal(t, fs.Version, tr.FieldSetVersion, "FieldSetVersion should be carried on the token")
 }
 
 func TestNew_ErrorOnEmptySecret(t *testing.T) {
@@ -311,9 +274,9 @@ func TestNgrams(t *testing.T) {
 		},
 		{
 			name:  "Unicode",
-			input: "\u03b1\u03b2\u03b3",
+			input: "αβγ",
 			sizes: []int{2},
-			want:  []string{"\u03b1\u03b2", "\u03b2\u03b3"},
+			want:  []string{"αβ", "βγ"},
 		},
 		{
 			name:  "Empty",
@@ -403,23 +366,12 @@ func BenchmarkNgrams(b *testing.B) {
 	}
 }
 
-func BenchmarkValidateTokenRecord(b *testing.B) {
-	tok, _ := New([]byte("bench-secret"))
-	rec := sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}
-	fs := deterministicFS(sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
-	tr, _ := tok.TokenizeRecord(rec, fs)
-	b.ResetTimer()
-	for range b.N {
-		_ = ValidateTokenRecord(tr)
-	}
-}
-
 // FuzzNgrams verifies that ngrams never panics and that every returned gram
 // has the correct rune length.
 func FuzzNgrams(f *testing.F) {
 	f.Add("hello", 2)
 	f.Add("", 3)
-	f.Add("\u03b1\u03b2\u03b3", 2)
+	f.Add("αβγ", 2)
 	f.Add("a", 1)
 
 	f.Fuzz(func(t *testing.T, s string, size int) {
@@ -447,7 +399,7 @@ func FuzzNgrams(f *testing.F) {
 }
 
 // FuzzTokenizeRecord verifies that TokenizeRecord never panics for arbitrary
-// field values and that ValidateTokenRecord always accepts its own output.
+// field values and that its output is self-consistent under Equal.
 func FuzzTokenizeRecord(f *testing.F) {
 	f.Add("Alice", "Smith")
 	f.Add("", "")
@@ -464,18 +416,23 @@ func FuzzTokenizeRecord(f *testing.F) {
 			sriracha.FieldNameGiven:  given,
 			sriracha.FieldNameFamily: family,
 		}
-		tr, err := tok.TokenizeRecord(rec, fs)
+		tr1, err := tok.TokenizeRecord(rec, fs)
 		if err != nil {
 			return
 		}
-		if err := ValidateTokenRecord(tr); err != nil {
-			t.Fatalf("ValidateTokenRecord rejected its own output: %v", err)
+		tr2, err := tok.TokenizeRecord(rec, fs)
+		if err != nil {
+			t.Fatalf("second TokenizeRecord call failed: %v", err)
+		}
+		if !Equal(tr1, tr2) {
+			t.Fatalf("Equal returned false for identical inputs")
 		}
 	})
 }
 
 // FuzzTokenizeRecordBloom verifies that TokenizeRecordBloom never panics for
-// arbitrary field values and that its checksum is always valid.
+// arbitrary field values, that its layout is positional (one filter per field
+// of the FieldSet), and that DicePerField scores a token against itself at 1.0.
 func FuzzTokenizeRecordBloom(f *testing.F) {
 	f.Add("Alice", "Smith")
 	f.Add("", "")
@@ -486,6 +443,7 @@ func FuzzTokenizeRecordBloom(f *testing.F) {
 		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 1.0},
 	)
 	tok, _ := New([]byte("fuzz-secret"))
+	fieldFilterBytes := int((fs.BloomParams.SizeBits + 63) / 64 * 8)
 
 	f.Fuzz(func(t *testing.T, given, family string) {
 		rec := sriracha.RawRecord{
@@ -496,13 +454,24 @@ func FuzzTokenizeRecordBloom(f *testing.F) {
 		if err != nil {
 			return
 		}
-		if err := ValidateTokenRecord(tr); err != nil {
-			t.Fatalf("ValidateTokenRecord rejected TokenizeRecordBloom output: %v", err)
+		if len(tr.Fields) != len(fs.Fields) {
+			t.Fatalf("Fields length %d, want %d", len(tr.Fields), len(fs.Fields))
 		}
-		// Payload must be exactly 2 × fieldFilterBytes long.
-		expectedBytes := 2 * int((fs.BloomParams.SizeBits+63)/64*8)
-		if len(tr.Payload) != expectedBytes {
-			t.Fatalf("payload length %d, want %d", len(tr.Payload), expectedBytes)
+		for i, f := range tr.Fields {
+			if len(f) != fieldFilterBytes {
+				t.Fatalf("field %d byte length %d, want %d", i, len(f), fieldFilterBytes)
+			}
+		}
+		scores, err := DicePerField(tr, tr)
+		if err != nil {
+			t.Fatalf("DicePerField against self: %v", err)
+		}
+		for i, s := range scores {
+			// A token compared against itself should score either 1 (any bits set)
+			// or 0 (all-zero filter). Anything else indicates a bug.
+			if s != 0 && s != 1 {
+				t.Fatalf("DicePerField self-comparison field %d = %v, want 0 or 1", i, s)
+			}
 		}
 	})
 }

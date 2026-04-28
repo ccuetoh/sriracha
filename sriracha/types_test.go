@@ -14,10 +14,3 @@ func TestDefaultBloomConfig(t *testing.T) {
 	assert.Equal(t, []int{2, 3}, cfg.NgramSizes, "NgramSizes")
 	assert.Equal(t, 2, cfg.HashCount, "HashCount")
 }
-
-func TestMatchModeConstants(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, MatchMode(1), Deterministic, "Deterministic")
-	assert.Equal(t, MatchMode(2), Probabilistic, "Probabilistic")
-}

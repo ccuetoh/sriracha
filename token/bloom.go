@@ -14,43 +14,35 @@ import (
 	"go.sriracha.dev/sriracha"
 )
 
-// TokenizeRecordBloom tokenizes a RawRecord in probabilistic (Bloom filter) mode.
-// Each field gets its own Bloom filter of BloomParams.SizeBits bits.
-// The Payload is the concatenation of all per-field filters in FieldSet order.
-// Missing optional fields contribute an all-zero filter (preserving field layout).
-// Missing required fields return an error.
-func (t *Tokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.TokenRecord, error) {
+func (t *tokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.BloomToken, error) {
 	cfg := fs.BloomParams
 	fieldBytes := int(((cfg.SizeBits + 63) / 64) * 8)
-	payload := make([]byte, 0, len(fs.Fields)*fieldBytes)
+	fields := make([][]byte, len(fs.Fields))
 
 	// Reuse a single HMAC instance across every field/gram in this record.
 	h := hmac.New(sha256.New, t.secret.Bytes())
 
-	for _, spec := range fs.Fields {
+	for i, spec := range fs.Fields {
 		raw, ok := record[spec.Path]
-		if !ok || sriracha.IsNotFound(raw) || sriracha.IsNotHeld(raw) {
+		if !ok {
 			if spec.Required {
-				return sriracha.TokenRecord{}, fmt.Errorf("token: required field %q missing", spec.Path)
+				return sriracha.BloomToken{}, fmt.Errorf("token: required field %q missing", spec.Path)
 			}
-			// Absent optional field: zero-filled filter preserves field layout for weighted scoring
-			payload = append(payload, make([]byte, fieldBytes)...)
+			fields[i] = make([]byte, fieldBytes)
 			continue
 		}
 
 		normalized, err := normalize.Normalize(raw, spec.Path)
 		if err != nil {
-			return sriracha.TokenRecord{}, fmt.Errorf("token: normalization failed for field %q: %w", spec.Path, err)
+			return sriracha.BloomToken{}, fmt.Errorf("token: normalization failed for field %q: %w", spec.Path, err)
 		}
-		payload = append(payload, tokenizeFieldBloom(h, normalized, spec.Path, cfg)...)
+		fields[i] = tokenizeFieldBloom(h, normalized, spec.Path, cfg)
 	}
 
-	return sriracha.TokenRecord{
+	return sriracha.BloomToken{
 		FieldSetVersion: fs.Version,
-		Mode:            sriracha.Probabilistic,
-		Algo:            sriracha.AlgoBloomV1,
-		Payload:         payload,
-		Checksum:        sha256.Sum256(payload),
+		BloomParams:     cfg,
+		Fields:          fields,
 	}, nil
 }
 

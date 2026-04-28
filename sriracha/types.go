@@ -1,26 +1,26 @@
 package sriracha
 
-// MatchMode indicates whether tokens use deterministic or probabilistic encoding.
-type MatchMode int
-
-const (
-	Deterministic    MatchMode = 1
-	Probabilistic    MatchMode = 2
-	AlgoBloomV1                = "bloomv1"
-	AlgoHMACSHA256V1           = "hmacsha256v1"
-)
-
 // RawRecord is the input type institutions populate before tokenization.
-// Keys are FieldPath values; values are raw strings or the NotFound/NotHeld sentinels.
+// Keys are FieldPath values; values are the raw string for that field.
+// Fields the institution does not have should simply be omitted from the map.
 type RawRecord map[FieldPath]string
 
-// TokenRecord is the wire-format output of tokenization.
-type TokenRecord struct {
+// DeterministicToken is the output of HMAC-SHA256 tokenization.
+// Fields[i] is the 32-byte HMAC for FieldSet.Fields[i]. Absent optional fields
+// produce a nil entry, preserving positional alignment with the FieldSet.
+type DeterministicToken struct {
 	FieldSetVersion string
-	Mode            MatchMode
-	Algo            string
-	Payload         []byte
-	Checksum        [32]byte
+	Fields          [][]byte
+}
+
+// BloomToken is the output of probabilistic (Bloom filter) tokenization.
+// Fields[i] is the serialized Bloom filter (little-endian uint64 words) for
+// FieldSet.Fields[i]. Absent optional fields produce an all-zero filter,
+// preserving positional alignment with the FieldSet.
+type BloomToken struct {
+	FieldSetVersion string
+	BloomParams     BloomConfig
+	Fields          [][]byte
 }
 
 // FieldSpec describes one field within a FieldSet.

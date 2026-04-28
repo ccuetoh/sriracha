@@ -82,18 +82,3 @@ var (
 	FieldContactEmail         = MustParsePath("sriracha::contact::email")
 	FieldContactPhone         = MustParsePath("sriracha::contact::phone")
 )
-
-// Sentinel is a typed string for special RawRecord values that indicate
-// a field is absent or withheld. The NUL prefix prevents collision with PII.
-type Sentinel string
-
-const (
-	NotFound Sentinel = "\x00sriracha::not_found"
-	NotHeld  Sentinel = "\x00sriracha::not_held"
-)
-
-// IsNotFound reports whether v equals the NotFound sentinel.
-func IsNotFound(v string) bool { return v == string(NotFound) }
-
-// IsNotHeld reports whether v equals the NotHeld sentinel.
-func IsNotHeld(v string) bool { return v == string(NotHeld) }
