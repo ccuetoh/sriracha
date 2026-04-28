@@ -39,10 +39,11 @@ func (t *tokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.F
 	}
 
 	return sriracha.BloomToken{
-		FieldSetVersion: fs.Version,
-		KeyID:           t.keyID,
-		BloomParams:     cfg,
-		Fields:          fields,
+		FieldSetVersion:     fs.Version,
+		KeyID:               t.keyID,
+		FieldSetFingerprint: fs.Fingerprint(),
+		BloomParams:         cfg,
+		Fields:              fields,
 	}, nil
 }
 

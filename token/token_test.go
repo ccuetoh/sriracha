@@ -1,11 +1,15 @@
 package token
 
 import (
+	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/awnumar/memguard"
 
 	"go.sriracha.dev/sriracha"
 )
@@ -206,6 +210,52 @@ func TestTokenizeRecord(t *testing.T) {
 	}
 }
 
+func TestTokenizeField(t *testing.T) {
+	t.Parallel()
+
+	t.Run("DeterministicAndIdempotent", func(t *testing.T) {
+		t.Parallel()
+		tok := newTok(t, "secret")
+		got1, err := tok.TokenizeField("Alice", sriracha.FieldNameGiven)
+		require.NoError(t, err)
+		require.Len(t, got1, 32)
+		got2, err := tok.TokenizeField("Alice", sriracha.FieldNameGiven)
+		require.NoError(t, err)
+		assert.Equal(t, got1, got2)
+	})
+
+	t.Run("MatchesRecordOutput", func(t *testing.T) {
+		t.Parallel()
+		tok := newTok(t, "secret")
+		fs := deterministicFS(sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
+
+		fromField, err := tok.TokenizeField("Alice", sriracha.FieldNameGiven)
+		require.NoError(t, err)
+		fromRecord, err := tok.TokenizeRecord(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
+		require.NoError(t, err)
+		require.Len(t, fromRecord.Fields, 1)
+		assert.Equal(t, fromField, fromRecord.Fields[0],
+			"TokenizeField must produce the same bytes as TokenizeRecord for that field")
+	})
+
+	t.Run("DifferentPathsDiffer", func(t *testing.T) {
+		t.Parallel()
+		tok := newTok(t, "secret")
+		given, err := tok.TokenizeField("x", sriracha.FieldNameGiven)
+		require.NoError(t, err)
+		family, err := tok.TokenizeField("x", sriracha.FieldNameFamily)
+		require.NoError(t, err)
+		assert.NotEqual(t, given, family, "same value under different paths must differ")
+	})
+
+	t.Run("NormalizationError", func(t *testing.T) {
+		t.Parallel()
+		tok := newTok(t, "secret")
+		_, err := tok.TokenizeField("not-a-date", sriracha.FieldDateBirth)
+		assert.Error(t, err)
+	})
+}
+
 func TestTokenizeRecordBloom(t *testing.T) {
 	t.Parallel()
 	givenSpec := sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0}
@@ -386,6 +436,38 @@ func TestTokenizer_Concurrent(t *testing.T) {
 			tc.run(t)
 		})
 	}
+}
+
+// TestNew_FinalizerWipesOnGC verifies the runtime cleanup registered in New
+// fires when a Tokenizer becomes unreachable without an explicit Destroy
+// call. Skipped under -short because it relies on GC timing.
+func TestNew_FinalizerWipesOnGC(t *testing.T) {
+	t.Parallel()
+	if testing.Short() {
+		t.Skip("skipping GC-timing-sensitive test in -short mode")
+	}
+
+	var buf *memguard.LockedBuffer
+	func() {
+		tok, err := New([]byte("forget-to-destroy"))
+		require.NoError(t, err)
+		// Reach into the implementation to grab the locked buffer; this is
+		// the only way to observe the post-GC cleanup. We deliberately do
+		// NOT call tok.Destroy().
+		impl, ok := tok.(*tokenizer)
+		require.True(t, ok)
+		buf = impl.secret
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		runtime.GC()
+		if !buf.IsAlive() {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("locked buffer still alive after GC + 2s wait — finalizer did not run")
 }
 
 func TestNgrams(t *testing.T) {
