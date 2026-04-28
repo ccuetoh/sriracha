@@ -10,27 +10,28 @@ import (
 // LabeledPair is one row of ground-truth: two BloomTokens believed to be
 // either the same person (Match=true) or different people (Match=false).
 type LabeledPair struct {
-	A, B  sriracha.BloomToken
-	Match bool
+	A     sriracha.BloomToken `json:"a"`
+	B     sriracha.BloomToken `json:"b"`
+	Match bool                `json:"match"`
 }
 
 // ROCPoint is one threshold and the precision/recall/F1 it produces over the
 // supplied labeled pairs.
 type ROCPoint struct {
-	Threshold float64
-	Precision float64
-	Recall    float64
-	F1        float64
+	Threshold float64 `json:"threshold"`
+	Precision float64 `json:"precision"`
+	Recall    float64 `json:"recall"`
+	F1        float64 `json:"f1"`
 }
 
 // Calibration is the output of Calibrate: the threshold that maximizes F1
 // over the labeled pairs, plus the full ROC curve at 0.01 step granularity.
 type Calibration struct {
-	OptimalThreshold float64
-	F1               float64
-	Precision        float64
-	Recall           float64
-	ROC              []ROCPoint
+	OptimalThreshold float64    `json:"optimal_threshold"`
+	F1               float64    `json:"f1"`
+	Precision        float64    `json:"precision"`
+	Recall           float64    `json:"recall"`
+	ROC              []ROCPoint `json:"roc"`
 }
 
 // Calibrate sweeps thresholds in 0.01 steps from 0.00 to 1.00 (101 points)

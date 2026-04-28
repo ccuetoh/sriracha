@@ -1,6 +1,7 @@
 package sriracha
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -82,6 +83,66 @@ func TestParseFieldPath(t *testing.T) {
 			assert.Equal(t, tc.wantLocal, fp.LocalName(), "LocalName()")
 		})
 	}
+}
+
+func TestFieldPath_JSON(t *testing.T) {
+	t.Parallel()
+
+	t.Run("RoundTripAsStructField", func(t *testing.T) {
+		t.Parallel()
+		spec := FieldSpec{Path: FieldNameGiven, Required: true, Weight: 2.5}
+		data, err := json.Marshal(spec)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), `"path":"sriracha::name::given"`,
+			"FieldPath must marshal to its canonical string form, not {}")
+
+		var got FieldSpec
+		require.NoError(t, json.Unmarshal(data, &got))
+		assert.Equal(t, spec, got)
+	})
+
+	t.Run("RoundTripAsMapKey", func(t *testing.T) {
+		t.Parallel()
+		// RawRecord is map[FieldPath]string — without TextMarshaler this would
+		// fail at marshal time. Confirms TextMarshaler covers map-key usage.
+		rec := RawRecord{
+			FieldNameGiven:  "Alice",
+			FieldNameFamily: "Smith",
+		}
+		data, err := json.Marshal(rec)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), `"sriracha::name::given":"Alice"`)
+
+		var got RawRecord
+		require.NoError(t, json.Unmarshal(data, &got))
+		assert.Equal(t, rec, got)
+	})
+
+	t.Run("ZeroValueRoundTrips", func(t *testing.T) {
+		t.Parallel()
+		var fp FieldPath
+		data, err := json.Marshal(fp)
+		require.NoError(t, err)
+		assert.Equal(t, `""`, string(data))
+
+		var got FieldPath
+		require.NoError(t, json.Unmarshal(data, &got))
+		assert.Equal(t, fp, got)
+	})
+
+	t.Run("MalformedRejected", func(t *testing.T) {
+		t.Parallel()
+		var fp FieldPath
+		err := json.Unmarshal([]byte(`"not-a-valid-path"`), &fp)
+		require.Error(t, err)
+	})
+
+	t.Run("NonStringRejected", func(t *testing.T) {
+		t.Parallel()
+		var fp FieldPath
+		err := json.Unmarshal([]byte(`42`), &fp)
+		require.Error(t, err)
+	})
 }
 
 // FuzzParseFieldPath verifies that ParseFieldPath never panics and that any

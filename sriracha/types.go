@@ -66,9 +66,9 @@ func DefaultBloomConfig() BloomConfig {
 
 // FieldSet describes the schema used for tokenization.
 type FieldSet struct {
-	Version     string
-	Fields      []FieldSpec
-	BloomParams BloomConfig
+	Version     string      `json:"version"`
+	Fields      []FieldSpec `json:"fields"`
+	BloomParams BloomConfig `json:"bloom_params"`
 }
 
 // String returns a redacted summary of the token: counts and metadata only,
@@ -100,18 +100,18 @@ func shortFingerprint(fp string) string {
 // AnnotatedField is the per-field summary returned by Annotate. It carries
 // the field path and presence flags but never the raw token bytes.
 type AnnotatedField struct {
-	Path      FieldPath
-	Present   bool
-	ByteCount int
+	Path      FieldPath `json:"path"`
+	Present   bool      `json:"present"`
+	ByteCount int       `json:"byte_count"`
 }
 
 // AnnotatedToken is a safe-to-log view of a token: token-level metadata plus
 // per-field presence and byte counts, with the raw HMAC / Bloom bytes stripped.
 type AnnotatedToken struct {
-	Version             string
-	KeyID               string
-	FieldSetFingerprint string
-	Fields              []AnnotatedField
+	Version             string           `json:"version"`
+	KeyID               string           `json:"key_id,omitempty"`
+	FieldSetFingerprint string           `json:"field_set_fingerprint,omitempty"`
+	Fields              []AnnotatedField `json:"fields"`
 }
 
 // Annotate returns a redacted view of t paired with fs. The result holds the

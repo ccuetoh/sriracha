@@ -54,6 +54,29 @@ func MustParsePath(s string) FieldPath {
 	return fp
 }
 
+// MarshalText emits the canonical string form of f. Implementing
+// TextMarshaler (rather than MarshalJSON) means FieldPath round-trips both as
+// a struct field and as a RawRecord map key under encoding/json.
+func (f FieldPath) MarshalText() ([]byte, error) {
+	return []byte(f.raw), nil
+}
+
+// UnmarshalText parses data with ParseFieldPath. Empty input yields the zero
+// FieldPath (so a struct that marshals a zero FieldPath round-trips), but any
+// other malformed input is rejected.
+func (f *FieldPath) UnmarshalText(data []byte) error {
+	if len(data) == 0 {
+		*f = FieldPath{}
+		return nil
+	}
+	parsed, err := ParseFieldPath(string(data))
+	if err != nil {
+		return err
+	}
+	*f = parsed
+	return nil
+}
+
 // Canonical namespace identifiers.
 const (
 	NamespaceName       = "name"

@@ -16,11 +16,11 @@ import (
 // weighted average (excludes both-absent fields and fields with non-positive
 // weight).
 type MatchResult struct {
-	Score            float64
-	PerField         []float64
-	Paths            []sriracha.FieldPath
-	IsMatch          bool
-	ComparableFields int
+	Score            float64              `json:"score"`
+	PerField         []float64            `json:"per_field"`
+	Paths            []sriracha.FieldPath `json:"paths"`
+	IsMatch          bool                 `json:"is_match"`
+	ComparableFields int                  `json:"comparable_fields"`
 }
 
 // ScoreFor returns the per-field Dice score for path along with true if the
