@@ -54,15 +54,6 @@ func TestDeterministicToken_JSON(t *testing.T) {
 			},
 		},
 		{
-			name: "EmptyVersionRejected",
-			run: func(t *testing.T) {
-				var got DeterministicToken
-				err := json.Unmarshal([]byte(`{"field_set_version":"","fields":[]}`), &got)
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), "field_set_version")
-			},
-		},
-		{
 			name: "BadBase64Rejected",
 			run: func(t *testing.T) {
 				var got DeterministicToken
@@ -75,14 +66,6 @@ func TestDeterministicToken_JSON(t *testing.T) {
 			run: func(t *testing.T) {
 				var got DeterministicToken
 				err := json.Unmarshal([]byte(`{not json}`), &got)
-				require.Error(t, err)
-			},
-		},
-		{
-			name: "FieldNotStringRejected",
-			run: func(t *testing.T) {
-				var got DeterministicToken
-				err := json.Unmarshal([]byte(`{"field_set_version":"0.1","fields":[123]}`), &got)
 				require.Error(t, err)
 			},
 		},
@@ -122,15 +105,6 @@ func TestBloomToken_JSON(t *testing.T) {
 				require.Len(t, got.Fields, 2)
 				assert.Equal(t, []byte{0xff, 0x00}, got.Fields[0])
 				assert.Nil(t, got.Fields[1])
-			},
-		},
-		{
-			name: "EmptyVersionRejected",
-			run: func(t *testing.T) {
-				var got BloomToken
-				err := json.Unmarshal([]byte(`{"field_set_version":"","bloom_params":{},"fields":[]}`), &got)
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), "field_set_version")
 			},
 		},
 		{

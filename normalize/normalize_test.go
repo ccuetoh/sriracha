@@ -204,7 +204,7 @@ func TestNormalize_Country(t *testing.T) {
 	})
 }
 
-// TestNormalize_Email covers the contact-email validator.
+// TestNormalize_Email covers the contact-email normalizer.
 func TestNormalize_Email(t *testing.T) {
 	t.Parallel()
 	runNormalizeCases(t, []normalizeCase{
@@ -213,6 +213,12 @@ func TestNormalize_Email(t *testing.T) {
 			value: "  Hello@Example.COM  ",
 			path:  sriracha.FieldContactEmail,
 			want:  "hello@example.com",
+		},
+		{
+			name:  "TrailingDotsStripped",
+			value: "alice@example.com..",
+			path:  sriracha.FieldContactEmail,
+			want:  "alice@example.com",
 		},
 		{
 			name:        "MultiAtRejected",
@@ -227,6 +233,34 @@ func TestNormalize_Email(t *testing.T) {
 			path:        sriracha.FieldContactEmail,
 			wantErr:     true,
 			errContains: "exactly one '@'",
+		},
+		{
+			name:        "InternalSpaceRejected",
+			value:       "alice @example.com",
+			path:        sriracha.FieldContactEmail,
+			wantErr:     true,
+			errContains: "whitespace",
+		},
+		{
+			name:        "EmptyLocalRejected",
+			value:       "@example.com",
+			path:        sriracha.FieldContactEmail,
+			wantErr:     true,
+			errContains: "non-empty",
+		},
+		{
+			name:        "EmptyDomainRejected",
+			value:       "alice@",
+			path:        sriracha.FieldContactEmail,
+			wantErr:     true,
+			errContains: "non-empty",
+		},
+		{
+			name:        "DomainAllDotsRejected",
+			value:       "alice@...",
+			path:        sriracha.FieldContactEmail,
+			wantErr:     true,
+			errContains: "non-empty",
 		},
 	})
 }

@@ -31,15 +31,12 @@ var defaultV01 = sriracha.FieldSet{
 	BloomParams: sriracha.DefaultBloomConfig(),
 }
 
-var (
-	registryMu sync.RWMutex
-	registry   = map[string]sriracha.FieldSet{}
-)
+var registry sync.Map
 
 func init() {
 	// defaultV01 is hard-coded and known valid; insert it directly so init
 	// has no failure mode and Register remains free for runtime use.
-	registry[defaultV01.Version] = defaultV01Copy()
+	registry.Store(defaultV01.Version, defaultV01Copy())
 }
 
 // Register validates fs and stores a deep copy under fs.Version.
@@ -49,39 +46,31 @@ func Register(fs sriracha.FieldSet) error {
 	if err := Validate(fs); err != nil {
 		return err
 	}
-
-	registryMu.Lock()
-	defer registryMu.Unlock()
-
-	if _, exists := registry[fs.Version]; exists {
+	if _, loaded := registry.LoadOrStore(fs.Version, deepCopy(fs)); loaded {
 		return fmt.Errorf("fieldset: version %q already registered", fs.Version)
 	}
-	registry[fs.Version] = deepCopy(fs)
 	return nil
 }
 
 // Lookup returns a deep copy of the FieldSet registered under version, and
 // reports whether one was found. Safe for concurrent use.
 func Lookup(version string) (sriracha.FieldSet, bool) {
-	registryMu.RLock()
-	defer registryMu.RUnlock()
-
-	fs, ok := registry[version]
+	v, ok := registry.Load(version)
 	if !ok {
 		return sriracha.FieldSet{}, false
 	}
+	fs, _ := v.(sriracha.FieldSet)
 	return deepCopy(fs), true
 }
 
 // Versions returns the sorted list of registered FieldSet versions.
 func Versions() []string {
-	registryMu.RLock()
-	defer registryMu.RUnlock()
-
-	out := make([]string, 0, len(registry))
-	for v := range registry {
-		out = append(out, v)
-	}
+	var out []string
+	registry.Range(func(k, _ any) bool {
+		s, _ := k.(string)
+		out = append(out, s)
+		return true
+	})
 	sort.Strings(out)
 	return out
 }

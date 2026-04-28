@@ -13,9 +13,9 @@ type RawRecord map[FieldPath]string
 // KeyID is the optional identifier of the secret used to produce the token; it
 // surfaces post-rotation mismatches that would otherwise be silent.
 type DeterministicToken struct {
-	FieldSetVersion string
-	KeyID           string
-	Fields          [][]byte
+	FieldSetVersion string   `json:"field_set_version"`
+	KeyID           string   `json:"key_id,omitempty"`
+	Fields          [][]byte `json:"fields"`
 }
 
 // BloomToken is the output of probabilistic (Bloom filter) tokenization.
@@ -25,24 +25,24 @@ type DeterministicToken struct {
 // KeyID is the optional identifier of the secret used to produce the token; it
 // surfaces post-rotation mismatches that would otherwise be silent.
 type BloomToken struct {
-	FieldSetVersion string
-	KeyID           string
-	BloomParams     BloomConfig
-	Fields          [][]byte
+	FieldSetVersion string      `json:"field_set_version"`
+	KeyID           string      `json:"key_id,omitempty"`
+	BloomParams     BloomConfig `json:"bloom_params"`
+	Fields          [][]byte    `json:"fields"`
 }
 
 // FieldSpec describes one field within a FieldSet.
 type FieldSpec struct {
-	Path     FieldPath
-	Required bool
-	Weight   float64
+	Path     FieldPath `json:"path"`
+	Required bool      `json:"required"`
+	Weight   float64   `json:"weight"`
 }
 
 // BloomConfig holds parameters for Bloom filter tokenization.
 type BloomConfig struct {
-	SizeBits   uint32
-	NgramSizes []int
-	HashCount  int
+	SizeBits   uint32 `json:"size_bits"`
+	NgramSizes []int  `json:"ngram_sizes"`
+	HashCount  int    `json:"hash_count"`
 }
 
 // DefaultBloomConfig returns the standard Bloom filter configuration.

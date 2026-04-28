@@ -29,3 +29,9 @@ func ExampleRegister() {
 	fmt.Println(ok, got.Version)
 	// Output: true example-1
 }
+
+func ExampleLookup() {
+	got, ok := fieldset.Lookup("0.1")
+	fmt.Println(ok, got.Version, len(got.Fields))
+	// Output: true 0.1 16
+}

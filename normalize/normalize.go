@@ -119,13 +119,24 @@ func normalizeName(s string) string {
 	return nfkdDecompose(b.String())
 }
 
-// normalizeEmail accepts addresses containing exactly one '@'. The default
-// pipeline has already lowercased and trimmed; this only validates structure.
+// normalizeEmail splits the address on its single '@', strips any trailing
+// dots from the domain (FQDN canonicalisation), and rejects internal
+// whitespace or empty parts. The default pipeline has already lowercased,
+// NFKD-decomposed, and trimmed leading/trailing whitespace.
 func normalizeEmail(s string) (string, error) {
-	if strings.Count(s, "@") != 1 {
+	if strings.ContainsAny(s, " \t\r\n") {
+		return "", fmt.Errorf("email must not contain whitespace, got %q", s)
+	}
+	at := strings.IndexByte(s, '@')
+	if at < 0 || strings.IndexByte(s[at+1:], '@') >= 0 {
 		return "", fmt.Errorf("email must contain exactly one '@', got %q", s)
 	}
-	return s, nil
+	local, domain := s[:at], s[at+1:]
+	domain = strings.TrimRight(domain, ".")
+	if local == "" || domain == "" {
+		return "", fmt.Errorf("email must have non-empty local and domain parts, got %q", s)
+	}
+	return local + "@" + domain, nil
 }
 
 // normalizePhone keeps only digits and a single leading '+'. Errors when the
