@@ -1,5 +1,6 @@
 ignore:
   - "mock"
+  - "test/bench"
 
 comment:
   layout: " diff, flags, files"

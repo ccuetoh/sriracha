@@ -1,4 +1,6 @@
-package benchmark
+//go:build bench
+
+package bench
 
 import (
 	"encoding/json"
@@ -12,23 +14,24 @@ import (
 	"go.sriracha.dev/sriracha"
 )
 
-// newBenchSession returns a fresh session bound to the v0.1 default
-// FieldSet. Each test gets its own — sessions hold a locked secret
-// buffer and Destroy invalidates them, so sharing across t.Parallel
-// subtests is risky.
-func newBenchSession(t *testing.T) session.Session {
+// newRunSession returns a fresh session bound to the v0.1 default
+// FieldSet for unit tests of run / tokenizeAll / matchAll. Each test gets
+// its own — sessions hold a locked secret buffer and Destroy invalidates
+// them, so sharing across t.Parallel subtests is risky.
+func newRunSession(t *testing.T) session.Session {
 	t.Helper()
-	sess, err := session.New([]byte("benchmark-test-secret"), fieldset.DefaultFieldSet())
+	sess, err := session.New([]byte("run-unit-test-secret"), fieldset.DefaultFieldSet())
 	require.NoError(t, err)
 	t.Cleanup(sess.Destroy)
 	return sess
 }
 
 // twinPersonCorpus is a tiny synthetic corpus where canonical_id collapses
-// to two persons: alice (with one typo variant) and bob. It exercises the
-// happy path end-to-end without touching the real OpenSanctions file.
-func twinPersonCorpus() []Record {
-	return []Record{
+// to two persons (alice with two typo variants, bob with a name variant)
+// plus a singleton carol. Exercises run end-to-end without touching the
+// 26k-record OpenSanctions file.
+func twinPersonCorpus() []record {
+	return []record{
 		{CanonicalID: "alice", EntityID: "a1", Dataset: "ds1", Fields: sriracha.RawRecord{
 			sriracha.FieldNameGiven:  "Alice",
 			sriracha.FieldNameFamily: "Smith",
@@ -67,11 +70,11 @@ func TestRun(t *testing.T) {
 
 	t.Run("ProducesUsableMetrics", func(t *testing.T) {
 		t.Parallel()
-		sess := newBenchSession(t)
+		sess := newRunSession(t)
 		records := twinPersonCorpus()
 
-		res, err := Run(sess, records, Options{
-			Pairs:     PairOptions{Positives: 4, Negatives: 6, Seed: 1},
+		res, err := run(sess, records, options{
+			Pairs:     pairOptions{Positives: 4, Negatives: 6, Seed: 1},
 			Threshold: 0.5,
 		})
 		require.NoError(t, err)
@@ -101,12 +104,12 @@ func TestRun(t *testing.T) {
 		t.Parallel()
 		records := twinPersonCorpus()
 
-		sess1 := newBenchSession(t)
-		res1, err := Run(sess1, records, Options{Pairs: PairOptions{Positives: 4, Negatives: 4, Seed: 99}})
+		sess1 := newRunSession(t)
+		res1, err := run(sess1, records, options{Pairs: pairOptions{Positives: 4, Negatives: 4, Seed: 99}})
 		require.NoError(t, err)
 
-		sess2 := newBenchSession(t)
-		res2, err := Run(sess2, records, Options{Pairs: PairOptions{Positives: 4, Negatives: 4, Seed: 99}})
+		sess2 := newRunSession(t)
+		res2, err := run(sess2, records, options{Pairs: pairOptions{Positives: 4, Negatives: 4, Seed: 99}})
 		require.NoError(t, err)
 
 		assert.InDelta(t, res1.AUROC, res2.AUROC, 1e-9)
@@ -119,10 +122,10 @@ func TestRun(t *testing.T) {
 
 	t.Run("MarshalsToJSON", func(t *testing.T) {
 		t.Parallel()
-		sess := newBenchSession(t)
+		sess := newRunSession(t)
 		records := twinPersonCorpus()
 
-		res, err := Run(sess, records, Options{Pairs: PairOptions{Positives: 2, Negatives: 2, Seed: 1}})
+		res, err := run(sess, records, options{Pairs: pairOptions{Positives: 2, Negatives: 2, Seed: 1}})
 		require.NoError(t, err)
 
 		data, err := json.Marshal(res)
@@ -135,12 +138,11 @@ func TestRun(t *testing.T) {
 
 	t.Run("DroppedFieldsReportedNotFatal", func(t *testing.T) {
 		t.Parallel()
-		sess := newBenchSession(t)
+		sess := newRunSession(t)
 		records := twinPersonCorpus()
-		// Inject a 3-letter country code (will be dropped) on one record.
 		records[0].Fields[sriracha.FieldAddressCountry] = "USA"
 
-		res, err := Run(sess, records, Options{Pairs: PairOptions{Positives: 2, Negatives: 2, Seed: 1}})
+		res, err := run(sess, records, options{Pairs: pairOptions{Positives: 2, Negatives: 2, Seed: 1}})
 		require.NoError(t, err)
 		require.NotNil(t, res.Counts.DroppedFields)
 		assert.Equal(t, 1, res.Counts.DroppedFields[sriracha.FieldAddressCountry.String()])
@@ -148,22 +150,22 @@ func TestRun(t *testing.T) {
 
 	t.Run("RejectsNilSession", func(t *testing.T) {
 		t.Parallel()
-		_, err := Run(nil, twinPersonCorpus(), Options{Pairs: PairOptions{Positives: 1, Negatives: 1, Seed: 1}})
+		_, err := run(nil, twinPersonCorpus(), options{Pairs: pairOptions{Positives: 1, Negatives: 1, Seed: 1}})
 		require.Error(t, err)
 	})
 
 	t.Run("RejectsTinyCorpus", func(t *testing.T) {
 		t.Parallel()
-		sess := newBenchSession(t)
-		_, err := Run(sess, []Record{{CanonicalID: "a"}}, Options{Pairs: PairOptions{Positives: 1, Seed: 1}})
+		sess := newRunSession(t)
+		_, err := run(sess, []record{{CanonicalID: "a"}}, options{Pairs: pairOptions{Positives: 1, Seed: 1}})
 		require.Error(t, err)
 	})
 
 	t.Run("RejectsOutOfRangeThreshold", func(t *testing.T) {
 		t.Parallel()
-		sess := newBenchSession(t)
-		_, err := Run(sess, twinPersonCorpus(), Options{
-			Pairs:     PairOptions{Positives: 1, Negatives: 1, Seed: 1},
+		sess := newRunSession(t)
+		_, err := run(sess, twinPersonCorpus(), options{
+			Pairs:     pairOptions{Positives: 1, Negatives: 1, Seed: 1},
 			Threshold: 1.5,
 		})
 		require.Error(t, err)
@@ -171,28 +173,56 @@ func TestRun(t *testing.T) {
 
 	t.Run("PropagatesPairSamplingError", func(t *testing.T) {
 		t.Parallel()
-		sess := newBenchSession(t)
-		_, err := Run(sess, twinPersonCorpus(), Options{Pairs: PairOptions{Seed: 1}})
+		sess := newRunSession(t)
+		_, err := run(sess, twinPersonCorpus(), options{Pairs: pairOptions{Seed: 1}})
+		require.Error(t, err)
+	})
+}
+
+func TestCalibrate(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ProducesOptimalThreshold", func(t *testing.T) {
+		t.Parallel()
+		sess := newRunSession(t)
+		cal, err := calibrate(sess, twinPersonCorpus(),
+			pairOptions{Positives: 2, Negatives: 2, Seed: 1})
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, cal.OptimalThreshold, 0.0)
+		assert.LessOrEqual(t, cal.OptimalThreshold, 1.0)
+		assert.Len(t, cal.ROC, 101)
+	})
+
+	t.Run("RejectsNilSession", func(t *testing.T) {
+		t.Parallel()
+		_, err := calibrate(nil, twinPersonCorpus(),
+			pairOptions{Positives: 1, Negatives: 1, Seed: 1})
+		require.Error(t, err)
+	})
+
+	t.Run("PropagatesPairSamplingError", func(t *testing.T) {
+		t.Parallel()
+		sess := newRunSession(t)
+		_, err := calibrate(sess, twinPersonCorpus(), pairOptions{Seed: 1})
 		require.Error(t, err)
 	})
 }
 
 func TestMatchAllRejectsOutOfRangePair(t *testing.T) {
 	t.Parallel()
-	sess := newBenchSession(t)
+	sess := newRunSession(t)
 	records := twinPersonCorpus()
 
 	tokens, _, _, err := tokenizeAll(sess, records)
 	require.NoError(t, err)
 
-	_, _, _, err = matchAll(sess, []Pair{{A: 0, B: 99}}, tokens)
+	_, _, _, err = matchAll(sess, []pair{{A: 0, B: 99}}, tokens)
 	require.Error(t, err)
 }
 
 func TestTokenizeAllSurfacesRequiredFieldError(t *testing.T) {
 	t.Parallel()
 	fs := fieldset.DefaultFieldSet()
-	// Mark family name required so a record missing that field fails fast.
 	for i := range fs.Fields {
 		if fs.Fields[i].Path == sriracha.FieldNameFamily {
 			fs.Fields[i].Required = true
@@ -202,7 +232,7 @@ func TestTokenizeAllSurfacesRequiredFieldError(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sess.Destroy)
 
-	records := []Record{
+	records := []record{
 		{CanonicalID: "x", EntityID: "x1", Fields: sriracha.RawRecord{
 			sriracha.FieldNameGiven: "OnlyGiven",
 		}},
@@ -213,12 +243,12 @@ func TestTokenizeAllSurfacesRequiredFieldError(t *testing.T) {
 
 func TestMatchAllSurfacesIncompatibleTokens(t *testing.T) {
 	t.Parallel()
-	sess := newBenchSession(t)
+	sess := newRunSession(t)
 	records := twinPersonCorpus()
 	tokens, _, _, err := tokenizeAll(sess, records)
 	require.NoError(t, err)
 
 	tokens[1].FieldSetVersion = "different-version"
-	_, _, _, err = matchAll(sess, []Pair{{A: 0, B: 1}}, tokens)
+	_, _, _, err = matchAll(sess, []pair{{A: 0, B: 1}}, tokens)
 	require.Error(t, err)
 }

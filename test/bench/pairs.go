@@ -1,4 +1,6 @@
-package benchmark
+//go:build bench
+
+package bench
 
 import (
 	"errors"
@@ -7,19 +9,19 @@ import (
 	"sort"
 )
 
-// Pair is a labeled comparison between two corpus records, identified by
-// their indices in the slice returned by LoadJSONL. Match is the ground
+// pair is a labeled comparison between two corpus records, identified by
+// their indices in the slice returned by loadJSONL. Match is the ground
 // truth (records share a CanonicalID).
-type Pair struct {
+type pair struct {
 	A     int  `json:"a"`
 	B     int  `json:"b"`
 	Match bool `json:"match"`
 }
 
-// PairOptions configures SamplePairs. Zero values produce an error rather
+// pairOptions configures samplePairs. Zero values produce an error rather
 // than a silent default — pair counts shape every downstream metric so the
 // caller must state intent explicitly.
-type PairOptions struct {
+type pairOptions struct {
 	// Positives is the maximum number of positive (same-CanonicalID) pairs
 	// to draw. If the corpus contains fewer eligible positives, every
 	// available positive is returned.
@@ -29,11 +31,11 @@ type PairOptions struct {
 	// exhausted.
 	Negatives int
 	// Seed seeds the deterministic PRNG. The same Seed against the same
-	// corpus produces the same Pair list, byte for byte.
+	// corpus produces the same pair list, byte for byte.
 	Seed uint64
 }
 
-// SamplePairs draws labeled pairs from records under opts. Positives are
+// samplePairs draws labeled pairs from records under opts. Positives are
 // drawn uniformly at random from the within-canonical-group pair space
 // (without replacement); negatives are drawn by picking two distinct
 // canonical groups and one record from each, also without replacement.
@@ -41,19 +43,19 @@ type PairOptions struct {
 // The output is shuffled so positives and negatives interleave — downstream
 // streaming consumers see a representative mix rather than all positives
 // first.
-func SamplePairs(records []Record, opts PairOptions) ([]Pair, error) {
+func samplePairs(records []record, opts pairOptions) ([]pair, error) {
 	if len(records) < 2 {
-		return nil, errors.New("benchmark: need at least 2 records to sample pairs")
+		return nil, errors.New("bench: need at least 2 records to sample pairs")
 	}
 	if opts.Positives < 0 || opts.Negatives < 0 {
-		return nil, fmt.Errorf("benchmark: pair counts must be non-negative, got positives=%d negatives=%d",
+		return nil, fmt.Errorf("bench: pair counts must be non-negative, got positives=%d negatives=%d",
 			opts.Positives, opts.Negatives)
 	}
 	if opts.Positives == 0 && opts.Negatives == 0 {
-		return nil, errors.New("benchmark: at least one of Positives or Negatives must be > 0")
+		return nil, errors.New("bench: at least one of Positives or Negatives must be > 0")
 	}
 
-	groups := GroupByCanonical(records)
+	groups := groupByCanonical(records)
 	keys := sortedKeys(groups)
 
 	rng := rand.New(rand.NewPCG(opts.Seed, opts.Seed^0x9E3779B97F4A7C15)) //nolint:gosec // G404: PRNG is intentional — sampling must be reproducible from Seed
@@ -67,14 +69,14 @@ func SamplePairs(records []Record, opts PairOptions) ([]Pair, error) {
 		return nil, err
 	}
 
-	pairs := make([]Pair, 0, len(positives)+len(negatives))
+	pairs := make([]pair, 0, len(positives)+len(negatives))
 	pairs = append(pairs, positives...)
 	pairs = append(pairs, negatives...)
 	rng.Shuffle(len(pairs), func(i, j int) { pairs[i], pairs[j] = pairs[j], pairs[i] })
 	return pairs, nil
 }
 
-// sortedKeys returns groups' keys in sorted order so SamplePairs is
+// sortedKeys returns groups' keys in sorted order so samplePairs is
 // deterministic across map iteration: Go randomises map order per process,
 // so any sampling driven by `for k := range groups` would shift the PRNG
 // stream and break reproducibility.
@@ -91,11 +93,11 @@ func sortedKeys(groups map[string][]int) []string {
 // (size choose 2) candidate pairs. If the candidate pool is smaller than
 // want, all are returned; otherwise it draws want pairs uniformly without
 // replacement via Fisher–Yates partial shuffle.
-func samplePositives(groups map[string][]int, keys []string, want int, rng *rand.Rand) ([]Pair, error) {
+func samplePositives(groups map[string][]int, keys []string, want int, rng *rand.Rand) ([]pair, error) {
 	if want == 0 {
 		return nil, nil
 	}
-	var pool []Pair
+	var pool []pair
 	for _, k := range keys {
 		idxs := groups[k]
 		if len(idxs) < 2 {
@@ -103,12 +105,12 @@ func samplePositives(groups map[string][]int, keys []string, want int, rng *rand
 		}
 		for i := 0; i < len(idxs); i++ {
 			for j := i + 1; j < len(idxs); j++ {
-				pool = append(pool, Pair{A: idxs[i], B: idxs[j], Match: true})
+				pool = append(pool, pair{A: idxs[i], B: idxs[j], Match: true})
 			}
 		}
 	}
 	if len(pool) == 0 {
-		return nil, errors.New("benchmark: corpus has no canonical group with >=2 records — cannot sample positive pairs")
+		return nil, errors.New("bench: corpus has no canonical group with >=2 records — cannot sample positive pairs")
 	}
 	if want >= len(pool) {
 		return pool, nil
@@ -126,16 +128,16 @@ func samplePositives(groups map[string][]int, keys []string, want int, rng *rand
 // canonicalised ordering. The candidate space is huge (≈ N²) so rejection
 // sampling terminates fast in practice; we cap retries to fail loudly
 // rather than spin forever on a degenerate corpus.
-func sampleNegatives(groups map[string][]int, keys []string, want int, rng *rand.Rand) ([]Pair, error) {
+func sampleNegatives(groups map[string][]int, keys []string, want int, rng *rand.Rand) ([]pair, error) {
 	if want == 0 {
 		return nil, nil
 	}
 	if len(keys) < 2 {
-		return nil, errors.New("benchmark: corpus has fewer than 2 canonical groups — cannot sample negative pairs")
+		return nil, errors.New("bench: corpus has fewer than 2 canonical groups — cannot sample negative pairs")
 	}
 
 	seen := make(map[[2]int]struct{}, want)
-	out := make([]Pair, 0, want)
+	out := make([]pair, 0, want)
 
 	maxAttempts := want*100 + 1000
 	for attempt := 0; len(out) < want && attempt < maxAttempts; attempt++ {
@@ -155,10 +157,10 @@ func sampleNegatives(groups map[string][]int, keys []string, want int, rng *rand
 			continue
 		}
 		seen[key] = struct{}{}
-		out = append(out, Pair{A: key[0], B: key[1], Match: false})
+		out = append(out, pair{A: key[0], B: key[1], Match: false})
 	}
 	if len(out) < want {
-		return nil, fmt.Errorf("benchmark: could not draw %d unique negative pairs after %d attempts (got %d)",
+		return nil, fmt.Errorf("bench: could not draw %d unique negative pairs after %d attempts (got %d)",
 			want, maxAttempts, len(out))
 	}
 	return out, nil

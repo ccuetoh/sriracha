@@ -1,4 +1,6 @@
-package benchmark
+//go:build bench
+
+package bench
 
 import (
 	"bufio"
@@ -12,12 +14,12 @@ import (
 	"go.sriracha.dev/sriracha"
 )
 
-// Record is one row of a Sriracha benchmark corpus. CanonicalID is the
+// record is one row of a Sriracha benchmark corpus. CanonicalID is the
 // ground-truth person identity: two records with the same CanonicalID are a
 // positive pair, two with different CanonicalIDs are a negative pair.
 // EntityID and Dataset are kept for diagnostic output (which row failed,
 // where did it come from) and play no role in scoring.
-type Record struct {
+type record struct {
 	CanonicalID string             `json:"canonical_id"`
 	EntityID    string             `json:"entity_id"`
 	Dataset     string             `json:"dataset"`
@@ -25,25 +27,25 @@ type Record struct {
 	Aliases     []string           `json:"aliases,omitempty"`
 }
 
-// LoadJSONL parses a newline-delimited JSON corpus from path. Each line must
-// decode into a Record. Empty lines are skipped. The first malformed line
+// loadJSONL parses a newline-delimited JSON corpus from path. Each line must
+// decode into a record. Empty lines are skipped. The first malformed line
 // short-circuits with an error annotated by its 1-based line number so a
 // human can find the offending row.
-func LoadJSONL(path string) ([]Record, error) {
+func loadJSONL(path string) ([]record, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("benchmark: open corpus %q: %w", path, err)
+		return nil, fmt.Errorf("bench: open corpus %q: %w", path, err)
 	}
 	defer func() { _ = f.Close() }()
 	return readJSONL(f, path)
 }
 
-// readJSONL is the io.Reader-friendly half of LoadJSONL, factored out so
+// readJSONL is the io.Reader-friendly half of loadJSONL, factored out so
 // tests can feed a bytes.Reader without touching the filesystem.
-func readJSONL(r io.Reader, source string) ([]Record, error) {
+func readJSONL(r io.Reader, source string) ([]record, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	var records []Record
+	var records []record
 	line := 0
 	for scanner.Scan() {
 		line++
@@ -51,25 +53,25 @@ func readJSONL(r io.Reader, source string) ([]Record, error) {
 		if len(raw) == 0 {
 			continue
 		}
-		var rec Record
+		var rec record
 		if err := json.Unmarshal(raw, &rec); err != nil {
-			return nil, fmt.Errorf("benchmark: %s line %d: %w", source, line, err)
+			return nil, fmt.Errorf("bench: %s line %d: %w", source, line, err)
 		}
 		if rec.CanonicalID == "" {
-			return nil, fmt.Errorf("benchmark: %s line %d: missing canonical_id", source, line)
+			return nil, fmt.Errorf("bench: %s line %d: missing canonical_id", source, line)
 		}
 		records = append(records, rec)
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("benchmark: read corpus %s: %w", source, err)
+		return nil, fmt.Errorf("bench: read corpus %s: %w", source, err)
 	}
 	if len(records) == 0 {
-		return nil, errors.New("benchmark: corpus is empty")
+		return nil, errors.New("bench: corpus is empty")
 	}
 	return records, nil
 }
 
-// Sanitize returns a copy of in with every field that fails Sriracha's
+// sanitize returns a copy of in with every field that fails Sriracha's
 // normalization pipeline dropped. Real-world corpora carry plenty of values
 // the normalizer rejects on principle (3-letter country codes, non-ISO-8601
 // dates, malformed phones); without this pre-pass a single bad field would
@@ -77,7 +79,7 @@ func readJSONL(r io.Reader, source string) ([]Record, error) {
 //
 // dropped maps the dropped field path to the first normalization error for
 // that path on this record — handy for reporting rather than swallowing.
-func Sanitize(in sriracha.RawRecord) (clean sriracha.RawRecord, dropped map[sriracha.FieldPath]error) {
+func sanitize(in sriracha.RawRecord) (clean sriracha.RawRecord, dropped map[sriracha.FieldPath]error) {
 	clean = make(sriracha.RawRecord, len(in))
 	for path, val := range in {
 		if _, err := normalize.Normalize(val, path); err != nil {
@@ -92,10 +94,10 @@ func Sanitize(in sriracha.RawRecord) (clean sriracha.RawRecord, dropped map[srir
 	return clean, dropped
 }
 
-// GroupByCanonical buckets records by CanonicalID, preserving order within
-// each bucket. The values are indices into records (not copies of Record),
+// groupByCanonical buckets records by CanonicalID, preserving order within
+// each bucket. The values are indices into records (not copies of record),
 // so callers can drive sampling without duplicating data.
-func GroupByCanonical(records []Record) map[string][]int {
+func groupByCanonical(records []record) map[string][]int {
 	groups := make(map[string][]int)
 	for i, r := range records {
 		groups[r.CanonicalID] = append(groups[r.CanonicalID], i)

@@ -30,15 +30,29 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: go test -bench=. -benchmem ./... | tee results.txt
 
+      - name: Run quality benchmark (main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          SRIRACHA_BENCH_OUT: quality.json
+        run: go test -tags=bench -count=1 -timeout 10m ./test/bench/...
+
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           name: bench-results-main
-          path: results.txt
+          path: |
+            results.txt
+            quality.json
 
       - name: Run benchmarks (PR)
         if: github.event_name == 'pull_request'
         run: go test -bench=. -benchmem ./... | tee results.txt
+
+      - name: Run quality benchmark (PR)
+        if: github.event_name == 'pull_request'
+        env:
+          SRIRACHA_BENCH_OUT: quality.json
+        run: go test -tags=bench -count=1 -timeout 10m ./test/bench/...
 
       - name: Save PR metadata
         if: github.event_name == 'pull_request'
@@ -54,6 +68,7 @@ jobs:
           name: bench-results
           path: |
             results.txt
+            quality.json
             pr-number.txt
             head-ref.txt
             base-ref.txt

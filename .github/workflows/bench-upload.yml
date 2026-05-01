@@ -47,6 +47,25 @@ jobs:
             --ci-number "$(cat pr-number.txt)" \
             < results.txt
 
+      - name: Upload quality metrics to Bencher
+        env:
+          BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bencher run \
+            --project sriracha \
+            --branch "$(cat head-ref.txt)" \
+            --start-point "$(cat base-ref.txt)" \
+            --start-point-hash "$(cat base-sha.txt)" \
+            --start-point-clone-thresholds \
+            --start-point-reset \
+            --testbed ubuntu-latest \
+            --adapter json \
+            --err \
+            --github-actions "${GITHUB_TOKEN}" \
+            --ci-number "$(cat pr-number.txt)" \
+            --file quality.json
+
   upload-main:
     name: Upload Main Benchmark Results
     runs-on: ubuntu-latest
@@ -72,3 +91,15 @@ jobs:
             --adapter go_bench \
             --err \
             < results.txt
+
+      - name: Upload quality metrics to Bencher
+        env:
+          BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+        run: |
+          bencher run \
+            --project sriracha \
+            --branch main \
+            --testbed ubuntu-latest \
+            --adapter json \
+            --err \
+            --file quality.json

@@ -11,6 +11,8 @@ sriracha/        # go.sriracha.dev/sriracha — root types, fields, interfaces
 normalize/       # Unicode normalization pipeline
 token/           # HMAC-SHA256 deterministic + Bloom filter probabilistic tokenizers (uses bits-and-blooms/bitset)
 fieldset/        # FieldSet validation and canonical V0.1 schema
+session/         # high-level Session that bundles a Tokenizer with a FieldSet
+test/bench/      # OpenSanctions quality + perf harness, gated by //go:build bench, ships BMF metrics to Bencher via bench.yml
 ```
 
 ## Hard rules
@@ -33,7 +35,11 @@ fieldset/        # FieldSet validation and canonical V0.1 schema
 
 ## Running tests
 ```bash
-go test ./...                         # all packages
+go test ./...                         # all packages (skips test/bench)
 go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.out
 go vet ./...
+
+# Quality benchmark (gated):
+go test -tags=bench -count=1 -timeout 10m ./test/bench/...
+SRIRACHA_BENCH_OUT=quality.json go test -tags=bench -count=1 ./test/bench/...
 ```

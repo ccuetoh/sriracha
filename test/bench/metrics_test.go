@@ -1,4 +1,6 @@
-package benchmark
+//go:build bench
+
+package bench
 
 import (
 	"testing"
@@ -13,13 +15,13 @@ func TestSummariseLatencies(t *testing.T) {
 
 	t.Run("EmptyYieldsZero", func(t *testing.T) {
 		t.Parallel()
-		stats := SummariseLatencies(nil)
-		assert.Equal(t, LatencyStats{}, stats)
+		stats := summariseLatencies(nil)
+		assert.Equal(t, latencyStats{}, stats)
 	})
 
 	t.Run("SingleSample", func(t *testing.T) {
 		t.Parallel()
-		stats := SummariseLatencies([]time.Duration{100 * time.Microsecond})
+		stats := summariseLatencies([]time.Duration{100 * time.Microsecond})
 		assert.Equal(t, 1, stats.Count)
 		assert.Equal(t, 100*time.Microsecond, stats.Mean)
 		assert.Equal(t, 100*time.Microsecond, stats.P50)
@@ -33,7 +35,7 @@ func TestSummariseLatencies(t *testing.T) {
 		for i := range durs {
 			durs[i] = time.Duration(i+1) * time.Millisecond
 		}
-		stats := SummariseLatencies(durs)
+		stats := summariseLatencies(durs)
 		assert.Equal(t, 100, stats.Count)
 		assert.Equal(t, 50*time.Millisecond, stats.P50)
 		assert.Equal(t, 95*time.Millisecond, stats.P95)
@@ -49,11 +51,11 @@ func TestSweep(t *testing.T) {
 		t.Parallel()
 		scores := []float64{0.9, 0.8, 0.1, 0.2}
 		labels := []bool{true, true, false, false}
-		points, err := Sweep(scores, labels)
+		points, err := sweep(scores, labels)
 		require.NoError(t, err)
 		require.Len(t, points, 101)
 
-		best, err := PickBest(points, func(p OperatingPoint) float64 { return p.F1 })
+		best, err := pickBest(points, func(p operatingPoint) float64 { return p.F1 })
 		require.NoError(t, err)
 		assert.InDelta(t, 1.0, best.F1, 1e-9)
 		assert.InDelta(t, 1.0, best.Precision, 1e-9)
@@ -65,20 +67,20 @@ func TestSweep(t *testing.T) {
 		t.Parallel()
 		scores := []float64{0.9, 0.6, 0.4, 0.1}
 		labels := []bool{true, false, true, false}
-		points, err := Sweep(scores, labels)
+		points, err := sweep(scores, labels)
 		require.NoError(t, err)
 		assert.NotZero(t, points[50].Accuracy)
 	})
 
 	t.Run("LengthMismatchErrors", func(t *testing.T) {
 		t.Parallel()
-		_, err := Sweep([]float64{0.5}, []bool{true, false})
+		_, err := sweep([]float64{0.5}, []bool{true, false})
 		require.Error(t, err)
 	})
 
 	t.Run("EmptyErrors", func(t *testing.T) {
 		t.Parallel()
-		_, err := Sweep(nil, nil)
+		_, err := sweep(nil, nil)
 		require.Error(t, err)
 	})
 }
@@ -88,35 +90,35 @@ func TestAUROC(t *testing.T) {
 
 	t.Run("PerfectSeparation", func(t *testing.T) {
 		t.Parallel()
-		auc := AUROC([]float64{0.9, 0.8, 0.2, 0.1}, []bool{true, true, false, false})
-		assert.InDelta(t, 1.0, auc, 1e-9)
+		v := auroc([]float64{0.9, 0.8, 0.2, 0.1}, []bool{true, true, false, false})
+		assert.InDelta(t, 1.0, v, 1e-9)
 	})
 
 	t.Run("RandomScoresApproachHalf", func(t *testing.T) {
 		t.Parallel()
-		auc := AUROC([]float64{0.5, 0.5, 0.5, 0.5}, []bool{true, false, true, false})
-		assert.InDelta(t, 0.5, auc, 1e-9)
+		v := auroc([]float64{0.5, 0.5, 0.5, 0.5}, []bool{true, false, true, false})
+		assert.InDelta(t, 0.5, v, 1e-9)
 	})
 
 	t.Run("ReversedScoresGiveZero", func(t *testing.T) {
 		t.Parallel()
-		auc := AUROC([]float64{0.1, 0.2, 0.8, 0.9}, []bool{true, true, false, false})
-		assert.InDelta(t, 0.0, auc, 1e-9)
+		v := auroc([]float64{0.1, 0.2, 0.8, 0.9}, []bool{true, true, false, false})
+		assert.InDelta(t, 0.0, v, 1e-9)
 	})
 
 	t.Run("AllPositivesYieldsZero", func(t *testing.T) {
 		t.Parallel()
-		assert.InDelta(t, 0.0, AUROC([]float64{0.5, 0.6}, []bool{true, true}), 1e-9)
+		assert.InDelta(t, 0.0, auroc([]float64{0.5, 0.6}, []bool{true, true}), 1e-9)
 	})
 
 	t.Run("EmptyYieldsZero", func(t *testing.T) {
 		t.Parallel()
-		assert.InDelta(t, 0.0, AUROC(nil, nil), 1e-9)
+		assert.InDelta(t, 0.0, auroc(nil, nil), 1e-9)
 	})
 
 	t.Run("LengthMismatchYieldsZero", func(t *testing.T) {
 		t.Parallel()
-		assert.InDelta(t, 0.0, AUROC([]float64{0.5}, []bool{true, false}), 1e-9)
+		assert.InDelta(t, 0.0, auroc([]float64{0.5}, []bool{true, false}), 1e-9)
 	})
 }
 
@@ -125,36 +127,36 @@ func TestAUPRC(t *testing.T) {
 
 	t.Run("PerfectSeparation", func(t *testing.T) {
 		t.Parallel()
-		auc := AUPRC([]float64{0.9, 0.8, 0.2, 0.1}, []bool{true, true, false, false})
-		assert.InDelta(t, 1.0, auc, 1e-9)
+		v := auprc([]float64{0.9, 0.8, 0.2, 0.1}, []bool{true, true, false, false})
+		assert.InDelta(t, 1.0, v, 1e-9)
 	})
 
 	t.Run("AllPositivesYieldsAvgPrecision1", func(t *testing.T) {
 		t.Parallel()
-		auc := AUPRC([]float64{0.5, 0.6}, []bool{true, true})
-		assert.InDelta(t, 1.0, auc, 1e-9)
+		v := auprc([]float64{0.5, 0.6}, []bool{true, true})
+		assert.InDelta(t, 1.0, v, 1e-9)
 	})
 
 	t.Run("AllNegativesYieldsZero", func(t *testing.T) {
 		t.Parallel()
-		assert.InDelta(t, 0.0, AUPRC([]float64{0.5, 0.6}, []bool{false, false}), 1e-9)
+		assert.InDelta(t, 0.0, auprc([]float64{0.5, 0.6}, []bool{false, false}), 1e-9)
 	})
 
 	t.Run("EmptyYieldsZero", func(t *testing.T) {
 		t.Parallel()
-		assert.InDelta(t, 0.0, AUPRC(nil, nil), 1e-9)
+		assert.InDelta(t, 0.0, auprc(nil, nil), 1e-9)
 	})
 
 	t.Run("LengthMismatchYieldsZero", func(t *testing.T) {
 		t.Parallel()
-		assert.InDelta(t, 0.0, AUPRC([]float64{0.5}, []bool{true, false}), 1e-9)
+		assert.InDelta(t, 0.0, auprc([]float64{0.5}, []bool{true, false}), 1e-9)
 	})
 }
 
 func TestPickers(t *testing.T) {
 	t.Parallel()
 
-	points := []OperatingPoint{
+	points := []operatingPoint{
 		{Threshold: 0.1, Precision: 0.5, Recall: 1.0, F1: 0.667, Accuracy: 0.5},
 		{Threshold: 0.5, Precision: 0.9, Recall: 0.95, F1: 0.92, Accuracy: 0.9},
 		{Threshold: 0.9, Precision: 1.0, Recall: 0.5, F1: 0.667, Accuracy: 0.7},
@@ -162,20 +164,20 @@ func TestPickers(t *testing.T) {
 
 	t.Run("PickBestF1", func(t *testing.T) {
 		t.Parallel()
-		best, err := PickBest(points, func(p OperatingPoint) float64 { return p.F1 })
+		best, err := pickBest(points, func(p operatingPoint) float64 { return p.F1 })
 		require.NoError(t, err)
 		assert.InDelta(t, 0.5, best.Threshold, 1e-9)
 	})
 
 	t.Run("PickBestEmptyErrors", func(t *testing.T) {
 		t.Parallel()
-		_, err := PickBest(nil, func(p OperatingPoint) float64 { return p.F1 })
+		_, err := pickBest(nil, func(p operatingPoint) float64 { return p.F1 })
 		require.Error(t, err)
 	})
 
 	t.Run("PickAtMinRecallFinds", func(t *testing.T) {
 		t.Parallel()
-		pt, ok := PickAtMinRecall(points, 0.95)
+		pt, ok := pickAtMinRecall(points, 0.95)
 		require.True(t, ok)
 		assert.InDelta(t, 0.95, pt.Recall, 1e-9)
 		assert.InDelta(t, 0.9, pt.Precision, 1e-9)
@@ -183,20 +185,20 @@ func TestPickers(t *testing.T) {
 
 	t.Run("PickAtMinRecallNotFound", func(t *testing.T) {
 		t.Parallel()
-		_, ok := PickAtMinRecall(points, 1.5)
+		_, ok := pickAtMinRecall(points, 1.5)
 		assert.False(t, ok)
 	})
 
 	t.Run("PickAtMinPrecisionFinds", func(t *testing.T) {
 		t.Parallel()
-		pt, ok := PickAtMinPrecision(points, 0.99)
+		pt, ok := pickAtMinPrecision(points, 0.99)
 		require.True(t, ok)
 		assert.InDelta(t, 1.0, pt.Precision, 1e-9)
 	})
 
 	t.Run("PickAtMinPrecisionNotFound", func(t *testing.T) {
 		t.Parallel()
-		_, ok := PickAtMinPrecision(points, 1.5)
+		_, ok := pickAtMinPrecision(points, 1.5)
 		assert.False(t, ok)
 	})
 }

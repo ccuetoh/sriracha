@@ -1,4 +1,6 @@
-package benchmark
+//go:build bench
+
+package bench
 
 import (
 	"bytes"
@@ -56,14 +58,14 @@ func TestLoadJSONL(t *testing.T) {
 		path := filepath.Join(dir, "corpus.jsonl")
 		err := os.WriteFile(path, []byte(`{"canonical_id":"c1","record":{}}`+"\n"), 0o600)
 		require.NoError(t, err)
-		records, err := LoadJSONL(path)
+		records, err := loadJSONL(path)
 		require.NoError(t, err)
 		assert.Len(t, records, 1)
 	})
 
 	t.Run("SurfacesOpenError", func(t *testing.T) {
 		t.Parallel()
-		_, err := LoadJSONL(filepath.Join(t.TempDir(), "does-not-exist.jsonl"))
+		_, err := loadJSONL(filepath.Join(t.TempDir(), "does-not-exist.jsonl"))
 		require.Error(t, err)
 	})
 }
@@ -79,7 +81,7 @@ func TestSanitize(t *testing.T) {
 			sriracha.FieldAddressCountry: "USA",       // 3-letter, normaliser rejects
 			sriracha.FieldDateBirth:      "yesterday", // not ISO 8601
 		}
-		clean, dropped := Sanitize(in)
+		clean, dropped := sanitize(in)
 		assert.Contains(t, clean, sriracha.FieldNameGiven)
 		assert.Contains(t, clean, sriracha.FieldNameFamily)
 		assert.NotContains(t, clean, sriracha.FieldAddressCountry)
@@ -94,14 +96,14 @@ func TestSanitize(t *testing.T) {
 		in := sriracha.RawRecord{
 			sriracha.FieldNameGiven: "Alice",
 		}
-		clean, dropped := Sanitize(in)
+		clean, dropped := sanitize(in)
 		assert.Len(t, clean, 1)
 		assert.Nil(t, dropped)
 	})
 
 	t.Run("EmptyInputYieldsEmptyOutput", func(t *testing.T) {
 		t.Parallel()
-		clean, dropped := Sanitize(sriracha.RawRecord{})
+		clean, dropped := sanitize(sriracha.RawRecord{})
 		assert.Empty(t, clean)
 		assert.Nil(t, dropped)
 	})
@@ -110,13 +112,13 @@ func TestSanitize(t *testing.T) {
 func TestGroupByCanonical(t *testing.T) {
 	t.Parallel()
 
-	records := []Record{
+	records := []record{
 		{CanonicalID: "a", EntityID: "1"},
 		{CanonicalID: "b", EntityID: "2"},
 		{CanonicalID: "a", EntityID: "3"},
 		{CanonicalID: "a", EntityID: "4"},
 	}
-	groups := GroupByCanonical(records)
+	groups := groupByCanonical(records)
 	require.Len(t, groups, 2)
 	assert.Equal(t, []int{0, 2, 3}, groups["a"])
 	assert.Equal(t, []int{1}, groups["b"])
