@@ -48,6 +48,7 @@ type corpus struct {
 var corpora = []corpus{
 	{name: "open_sanctions", rel: "opensanctions/open_sanctions.jsonl"},
 	{name: "febrl4", rel: "febrl4/febrl4.jsonl"},
+	{name: "ncvr", rel: "ncvr/ncvr.jsonl"},
 }
 
 var (
