@@ -10,8 +10,8 @@
 > **Experimental.** API is unstable. Not production-ready.
 
 
-Sriracha is a Go library for privacy-preserving record linkage. It enables institutions need to find shared
-person records across organizational boundaries without transmitting raw PII.
+Sriracha is a Go library for privacy-preserving record linkage. It enables institutions
+to share person records across organizational boundaries without transmitting raw PII.
 Sriracha provides the building blocks for building privacy-first transports.
 Records are normalized and tokenized with a shared secret, producing tokens
 that can be compared without exposing the underlying identifiers.
@@ -47,7 +47,7 @@ func main() {
 	secret := []byte("super-secret-key")
 
 	s, _ := session.New(secret, fieldset.DefaultFieldSet())
-	defer sess.Destroy()
+	defer s.Destroy()
 
 	// Deterministic tokenization
 	tokA, _ := s.Tokenize(sriracha.RawRecord{
