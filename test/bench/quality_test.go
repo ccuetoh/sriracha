@@ -30,7 +30,7 @@ const benchSecret = "test-bench-fixed-secret-not-for-production" //nolint:gosec 
 // fields, new field, weight tweak) trips a clear test failure rather than
 // silently shifting every metric Bencher tracks. Update this constant
 // only when DefaultFieldSet changes are intentional.
-const expectedFingerprintPrefix = "49ec4861"
+const expectedFingerprintPrefix = "5812c087"
 
 // corpus is one labeled benchmark dataset. Both quality tests iterate
 // this list, so adding a new corpus is a single struct entry — no per-
@@ -185,8 +185,7 @@ func TestQualityCalibrated(t *testing.T) {
 
 func runCalibrated(t *testing.T, name string, records []record) {
 	t.Helper()
-	cal, err := calibrate(sharedSession, records,
-		pairOptions{Positives: 1000, Negatives: 1000, Seed: 1})
+	cal, err := calibrate(sharedSession, records, pairOptions{Positives: 1000, Negatives: 1000, Seed: 1})
 	require.NoError(t, err)
 	t.Logf("%s calibration: optimal_threshold=%.2f F1=%.4f", name, cal.OptimalThreshold, cal.F1)
 

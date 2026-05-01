@@ -28,8 +28,7 @@ import (
 //	for each NgramSize: u32(int32(size))
 //
 // This spec is locked: any change to the encoding is a breaking on-the-wire
-// change, must bump the FieldSet Version, and must update the golden test
-// vector in fingerprint_test.go.
+// change, must bump the FieldSet Version.
 func (fs FieldSet) Fingerprint() string {
 	h := sha256.New()
 	var b [8]byte

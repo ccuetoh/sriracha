@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    - cron: '0 8 * * 1'
+    - cron: '0 3 * * *'
 
 permissions:
   contents: read
@@ -129,7 +129,7 @@ jobs:
 
       - name: Fuzz
         env:
-          FUZZTIME: 60s
+          FUZZTIME: ${{ github.event_name == 'schedule' && '10m' || '60s' }}
         run: |
           set -euo pipefail
           tmpdir=$(mktemp -d)
