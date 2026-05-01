@@ -30,8 +30,9 @@ test/bench/      # OpenSanctions quality + perf harness, gated by //go:build ben
 - `t.Parallel()` as the **first statement** of every top-level test and every `t.Run` subtest.
 - Use `require` for fatal checks (errors that stop the test), `assert` for non-fatal value checks.
 - Table-driven tests with named subtests wherever multiple cases test the same function.
-- Loop variable capture (`tc := tc`) before subtest closures.
+- Never use loop variable capture (`tc := tc`) before subtest closures. (Go 1.22+)
 - Target 100% coverage.
+- No ad-hoc mocks. Use the mocks in ./mock
 
 ## Running tests
 ```bash

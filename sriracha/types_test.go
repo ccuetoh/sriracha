@@ -22,7 +22,6 @@ func TestBloomConfigs(t *testing.T) {
 		{"HighPrecision", HighPrecisionBloomConfig(), 4096, 5},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, tc.sizeBits, tc.cfg.SizeBits, "SizeBits")
