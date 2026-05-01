@@ -83,8 +83,8 @@ func main() {
 
 Live history on [Bencher](https://bencher.dev/perf/sriracha).
 
-| Corpus                                          | Records | Pairs                      | AUROC | Accuracy | Recall |   Tokenize |         Match |
-|-------------------------------------------------|--------:|:---------------------------|------:|---------:|-------:|-----------:|--------------:|
-| [OpenSanctions](testdata/corpus/opensanctions/) |  26 841 | natural cross-source       |  0.93 |     0.91 |   0.87 | 20 k rec/s | 147 k pairs/s |
-| [FEBRL4](testdata/corpus/febrl4/)               |  10 000 | synthetic (FEBRL4 noise)   |  1.00 |     1.00 |   1.00 | 13 k rec/s | 139 k pairs/s |
-| [NCVR](testdata/corpus/ncvr/)                   |   8 848 | synthetic (1–2 char edits) |  1.00 |     1.00 |   1.00 | 14 k rec/s | 159 k pairs/s |
+| Corpus                                          | Records | Pairs                      | AUROC | Accuracy | Recall |
+|-------------------------------------------------|--------:|:---------------------------|------:|---------:|-------:|
+| [OpenSanctions](testdata/corpus/opensanctions/) |  26 841 | natural cross-source       |  0.93 |     0.91 |   0.87 | 20 k rec/s |
+| [FEBRL4](testdata/corpus/febrl4/)               |  10 000 | synthetic (FEBRL4 noise)   |  1.00 |     1.00 |   1.00 |
+| [NCVR](testdata/corpus/ncvr/)                   |   8 848 | synthetic (1–2 char edits) |  1.00 |     1.00 |   1.00 |
