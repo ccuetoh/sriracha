@@ -32,17 +32,36 @@ const benchSecret = "test-bench-fixed-secret-not-for-production" //nolint:gosec 
 // only when DefaultFieldSet changes are intentional.
 const expectedFingerprintPrefix = "49ec4861"
 
+// corpus is one labeled benchmark dataset. Both quality tests iterate
+// this list, so adding a new corpus is a single struct entry — no per-
+// dataset test functions, no per-dataset BMF wiring. The name becomes the
+// prefix of the BMF benchmark slug (e.g. "open_sanctions_untuned").
+type corpus struct {
+	name string // BMF prefix; must be a valid Bencher benchmark slug
+	rel  string // relative path under testdata/corpus/, slash-delimited
+}
+
+// corpora are evaluated in declaration order. Bencher accepts whatever
+// names appear here as new benchmark slugs on first push; renaming a
+// corpus later orphans its history, so treat these strings as
+// load-bearing.
+var corpora = []corpus{
+	{name: "open_sanctions", rel: "opensanctions/open_sanctions.jsonl"},
+	{name: "febrl4", rel: "febrl4/febrl4.jsonl"},
+}
+
 var (
 	sharedSession session.Session
-	sharedRecords []record
+	sharedCorpora map[string][]record
 
 	bmfMu      sync.Mutex
 	bmfReports = bmfReport{}
 )
 
-// TestMain owns the corpus + session lifetimes so that
-// TestQualityBaseline and TestQualityCalibrated share both — loading the
-// 26k-record JSONL twice would burn 6+ seconds of CI time for no signal.
+// TestMain owns the corpora and session lifetimes so each subtest avoids
+// reloading the JSONLs and re-allocating the locked secret. Loading every
+// corpus up front also fails fast if any file is missing — you find out
+// before the first test runs, not three subtests deep.
 //
 // On exit, if SRIRACHA_BENCH_OUT is set, the accumulated BMF blocks are
 // flushed to the named file. CI reads this file via `bencher run --adapter
@@ -50,12 +69,15 @@ var (
 func TestMain(m *testing.M) {
 	defer memguard.Purge()
 
-	records, err := loadJSONL(corpusPath())
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "bench: load corpus:", err)
-		os.Exit(1)
+	sharedCorpora = make(map[string][]record, len(corpora))
+	for _, c := range corpora {
+		records, err := loadJSONL(corpusPath(c.rel))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "bench: load corpus %q: %v\n", c.name, err)
+			os.Exit(1)
+		}
+		sharedCorpora[c.name] = records
 	}
-	sharedRecords = records
 
 	sess, err := session.New([]byte(benchSecret), fieldset.DefaultFieldSet())
 	if err != nil {
@@ -80,19 +102,19 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// corpusPath resolves to the OpenSanctions JSONL at module-relative
-// testdata/corpus/opensanctions/. runtime.Caller anchors the lookup to
-// this file's location so the path holds whether tests are launched from
-// the repo root, the package directory, or an IDE.
-func corpusPath() string {
+// corpusPath resolves rel against the module's testdata/corpus/.
+// runtime.Caller anchors the lookup to this file's location so the path
+// holds whether tests are launched from the repo root, the package
+// directory, or an IDE.
+func corpusPath(rel string) string {
 	_, file, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(file), "..", "..", "testdata", "corpus", "opensanctions", "open_sanctions.jsonl")
+	return filepath.Join(filepath.Dir(file), "..", "..", "testdata", "corpus", filepath.FromSlash(rel))
 }
 
 // recordReport stashes one benchmark's metrics under name for later BMF
-// emission. The mutex guards the shared map even though the two
-// quality tests run serially today; cheap insurance against a future
-// edit that adds a third test or t.Parallel.
+// emission. The mutex guards the shared map across subtests; even though
+// the harness runs them serially today, a future t.Parallel sweep would
+// otherwise race.
 func recordReport(name string, r result) {
 	bmfMu.Lock()
 	defer bmfMu.Unlock()
@@ -113,23 +135,33 @@ func flushBMF(path string) error {
 // TestQualityBaseline runs the harness with DefaultFieldSet at a fixed
 // 0.5 threshold — no calibration. This is the "as-shipped" quality a
 // user sees with zero tuning effort, and Bencher tracks it over time
-// independent of the calibrated run.
+// independent of the calibrated run. One subtest per corpus emits a BMF
+// block named "<corpus>_untuned".
 //
 // Deliberately not t.Parallel — both quality tests share sharedSession
 // (locked memory) and the test process owns one session per CI job; the
 // CLAUDE.md t.Parallel-first convention applies to ordinary unit tests
 // and is documented as waived here.
 func TestQualityBaseline(t *testing.T) {
-	res, err := run(sharedSession, sharedRecords, options{
+	for _, c := range corpora {
+		t.Run(c.name, func(t *testing.T) {
+			runBaseline(t, c.name, sharedCorpora[c.name])
+		})
+	}
+}
+
+func runBaseline(t *testing.T, name string, records []record) {
+	t.Helper()
+	res, err := run(sharedSession, records, options{
 		Pairs:     pairOptions{Positives: 5000, Negatives: 5000, Seed: 1},
 		Threshold: 0.5,
 	})
 	require.NoError(t, err)
 	requireSchemaPinned(t, res)
 	requireFiniteMetrics(t, res)
-	recordReport("untuned", res)
-	t.Logf("untuned: auroc=%.4f auprc=%.4f best_f1=%.4f@%.2f tokenize_p99=%s match_p99=%s",
-		res.AUROC, res.AUPRC, res.BestF1.F1, res.BestF1.Threshold,
+	recordReport(name+"_untuned", res)
+	t.Logf("%s_untuned: auroc=%.4f auprc=%.4f best_f1=%.4f@%.2f tokenize_p99=%s match_p99=%s",
+		name, res.AUROC, res.AUPRC, res.BestF1.F1, res.BestF1.Threshold,
 		res.Tokenize.Latency.P99, res.Match.Latency.P99)
 }
 
@@ -137,25 +169,36 @@ func TestQualityBaseline(t *testing.T) {
 // calibration sample (seed=1) via token.Calibrate, then evaluates an
 // independent 5k+5k sample (seed=2) at that threshold. The two samples
 // are drawn from the same record pool but with different PRNG streams,
-// so contamination is minimal at this scale.
+// so contamination is bounded — and bounded further by the fact that
+// calibration only fits a single scalar (the threshold), not a model.
+// One subtest per corpus emits a BMF block named "<corpus>_calibrated".
 //
 // Deliberately not t.Parallel — see TestQualityBaseline.
 func TestQualityCalibrated(t *testing.T) {
-	cal, err := calibrate(sharedSession, sharedRecords,
+	for _, c := range corpora {
+		t.Run(c.name, func(t *testing.T) {
+			runCalibrated(t, c.name, sharedCorpora[c.name])
+		})
+	}
+}
+
+func runCalibrated(t *testing.T, name string, records []record) {
+	t.Helper()
+	cal, err := calibrate(sharedSession, records,
 		pairOptions{Positives: 1000, Negatives: 1000, Seed: 1})
 	require.NoError(t, err)
-	t.Logf("calibration: optimal_threshold=%.2f F1=%.4f", cal.OptimalThreshold, cal.F1)
+	t.Logf("%s calibration: optimal_threshold=%.2f F1=%.4f", name, cal.OptimalThreshold, cal.F1)
 
-	res, err := run(sharedSession, sharedRecords, options{
+	res, err := run(sharedSession, records, options{
 		Pairs:     pairOptions{Positives: 5000, Negatives: 5000, Seed: 2},
 		Threshold: cal.OptimalThreshold,
 	})
 	require.NoError(t, err)
 	requireSchemaPinned(t, res)
 	requireFiniteMetrics(t, res)
-	recordReport("calibrated", res)
-	t.Logf("calibrated: auroc=%.4f auprc=%.4f best_f1=%.4f@%.2f tokenize_p99=%s match_p99=%s",
-		res.AUROC, res.AUPRC, res.BestF1.F1, res.BestF1.Threshold,
+	recordReport(name+"_calibrated", res)
+	t.Logf("%s_calibrated: auroc=%.4f auprc=%.4f best_f1=%.4f@%.2f tokenize_p99=%s match_p99=%s",
+		name, res.AUROC, res.AUPRC, res.BestF1.F1, res.BestF1.Threshold,
 		res.Tokenize.Latency.P99, res.Match.Latency.P99)
 }
 
