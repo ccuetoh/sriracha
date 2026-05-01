@@ -149,7 +149,7 @@ func TestDefaultFieldSetContents(t *testing.T) {
 			assert.Equalf(t, want, got, "field %s weight", path)
 		}
 	}
-	assert.Equal(t, sriracha.DefaultBloomConfig().SizeBits, fs.BloomParams.SizeBits)
+	assert.Equal(t, uint32(2048), fs.BloomParams.SizeBits)
 }
 
 func TestDefaultFieldSet_IsCopy(t *testing.T) {

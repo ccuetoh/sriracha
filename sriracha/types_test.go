@@ -8,13 +8,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDefaultBloomConfig(t *testing.T) {
+func TestBloomConfigs(t *testing.T) {
 	t.Parallel()
 
-	cfg := DefaultBloomConfig()
-	assert.Equal(t, uint32(1024), cfg.SizeBits, "SizeBits")
-	assert.Equal(t, []int{2, 3}, cfg.NgramSizes, "NgramSizes")
-	assert.Equal(t, 2, cfg.HashCount, "HashCount")
+	cases := []struct {
+		name      string
+		cfg       BloomConfig
+		sizeBits  uint32
+		hashCount int
+	}{
+		{"Fast", FastBloomConfig(), 1024, 2},
+		{"Default", DefaultBloomConfig(), 2048, 3},
+		{"HighPrecision", HighPrecisionBloomConfig(), 4096, 5},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.sizeBits, tc.cfg.SizeBits, "SizeBits")
+			assert.Equal(t, []int{2, 3}, tc.cfg.NgramSizes, "NgramSizes")
+			assert.Equal(t, tc.hashCount, tc.cfg.HashCount, "HashCount")
+		})
+	}
 }
 
 func TestDeterministicToken_JSON(t *testing.T) {

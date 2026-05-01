@@ -55,12 +55,34 @@ type BloomConfig struct {
 	HashCount  int    `json:"hash_count"`
 }
 
-// DefaultBloomConfig returns the standard Bloom filter configuration.
-func DefaultBloomConfig() BloomConfig {
+// FastBloomConfig returns a lightweight Bloom filter configuration optimised
+// for throughput over precision. Suitable for large-scale screening passes
+// where a secondary verification step follows.
+func FastBloomConfig() BloomConfig {
 	return BloomConfig{
 		SizeBits:   1024,
 		NgramSizes: []int{2, 3},
 		HashCount:  2,
+	}
+}
+
+// DefaultBloomConfig returns the standard Bloom filter configuration.
+// It balances precision and token size for most production workloads.
+func DefaultBloomConfig() BloomConfig {
+	return BloomConfig{
+		SizeBits:   2048,
+		NgramSizes: []int{2, 3},
+		HashCount:  3,
+	}
+}
+
+// HighPrecisionBloomConfig returns a Bloom filter configuration tuned for
+// maximum matching accuracy at the cost of larger tokens.
+func HighPrecisionBloomConfig() BloomConfig {
+	return BloomConfig{
+		SizeBits:   4096,
+		NgramSizes: []int{2, 3},
+		HashCount:  5,
 	}
 }
 
