@@ -25,7 +25,7 @@ that can be compared without exposing the underlying identifiers.
 
 ## Installation
 
-Requires Go 1.25+
+Requires Go 1.22+
 
 ```bash
 go get go.sriracha.dev

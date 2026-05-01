@@ -84,10 +84,8 @@ type tokenizer struct {
 // The secret is copied into a locked, non-swappable memory region and the
 // source slice is wiped. Returns an error if secret is empty.
 //
-// A runtime cleanup wipes the locked buffer if the returned Tokenizer
-// becomes unreachable without an explicit Destroy call. The cleanup arg
-// captures only the *memguard.LockedBuffer, never the Tokenizer itself —
-// otherwise the cleanup would root the Tokenizer and never fire.
+// A runtime finalizer wipes the locked buffer if the returned Tokenizer
+// becomes unreachable without an explicit Destroy call.
 func New(secret []byte, opts ...Option) (Tokenizer, error) {
 	if len(secret) == 0 {
 		return nil, errors.New("token: secret must not be empty")
@@ -101,7 +99,7 @@ func New(secret []byte, opts ...Option) (Tokenizer, error) {
 	locked := memguard.NewBufferFromBytes(secret)
 	t := &tokenizer{secret: locked, keyID: o.keyID}
 	t.pool.New = func() any { return hmac.New(sha256.New, locked.Bytes()) }
-	runtime.AddCleanup(t, func(b *memguard.LockedBuffer) { b.Destroy() }, locked)
+	runtime.SetFinalizer(t, func(t *tokenizer) { t.secret.Destroy() })
 	return t, nil
 }
 
