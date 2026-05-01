@@ -20,6 +20,7 @@ that can be compared without exposing the underlying identifiers.
 
 - Deterministic tokenization using HMAC-SHA256
 - Probabilistic tokenization with Bloom filters and Dice coefficient
+- Optional BLIP and balanced filter defenses against frequency analysis
 - Unicode normalization pipeline
 - Canonical field set with support for extended schemas
 

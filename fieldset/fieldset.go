@@ -85,5 +85,11 @@ func validateBloomParams(cfg sriracha.BloomConfig) error {
 			return fmt.Errorf("fieldset: BloomParams.NgramSizes[%d] must be > 0, got %d", i, sz)
 		}
 	}
+	if cfg.FlipProbability < 0 || cfg.FlipProbability >= 1 {
+		return fmt.Errorf("fieldset: BloomParams.FlipProbability must be in [0, 1), got %v", cfg.FlipProbability)
+	}
+	if cfg.TargetPopcount >= cfg.SizeBits {
+		return fmt.Errorf("fieldset: BloomParams.TargetPopcount must be < SizeBits, got %d (size %d)", cfg.TargetPopcount, cfg.SizeBits)
+	}
 	return nil
 }

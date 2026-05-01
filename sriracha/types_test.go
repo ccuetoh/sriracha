@@ -27,8 +27,20 @@ func TestBloomConfigs(t *testing.T) {
 			assert.Equal(t, tc.sizeBits, tc.cfg.SizeBits, "SizeBits")
 			assert.Equal(t, []int{2, 3}, tc.cfg.NgramSizes, "NgramSizes")
 			assert.Equal(t, tc.hashCount, tc.cfg.HashCount, "HashCount")
+			assert.Zero(t, tc.cfg.FlipProbability, "preset must not enable BLIP")
+			assert.Zero(t, tc.cfg.TargetPopcount, "preset must not enable balancing")
 		})
 	}
+}
+
+func TestHardenedBloomConfig(t *testing.T) {
+	t.Parallel()
+	cfg := HardenedBloomConfig()
+	assert.Equal(t, uint32(2048), cfg.SizeBits, "SizeBits matches Default")
+	assert.Equal(t, []int{2, 3}, cfg.NgramSizes, "NgramSizes matches Default")
+	assert.Equal(t, 3, cfg.HashCount, "HashCount matches Default")
+	assert.InDelta(t, 0.02, cfg.FlipProbability, 1e-12, "FlipProbability=0.02")
+	assert.Equal(t, uint32(400), cfg.TargetPopcount, "TargetPopcount=400")
 }
 
 func TestDeterministicToken_JSON(t *testing.T) {
