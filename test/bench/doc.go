@@ -4,7 +4,9 @@
 // quality and performance harness for Sriracha. Today it ships two
 // corpora — OpenSanctions (real multi-jurisdiction sanctions data) and
 // FEBRL4 (synthetic with controlled noise) — and any JSONL file matching
-// the same Record shape can be added to the corpora list.
+// the same Record shape can be added to the corpora list. Future FEBRL
+// releases live under testdata/corpus/febrl<N>/ and become additional
+// entries in that list.
 //
 // This package is gated behind the bench build tag. It is excluded from
 // `go test ./...`, golangci-lint, and coverage.out so it cannot dilute the

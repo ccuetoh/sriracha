@@ -1,8 +1,9 @@
-"""Generate testdata/corpus/febrl/febrl.jsonl from recordlinkage's FEBRL4 dataset.
+"""Generate testdata/corpus/febrl4/febrl4.jsonl from recordlinkage's FEBRL4 dataset.
 
 This is a one-off provenance script — checked into the repo at scripts/ for
 reproducibility, but not part of the build. The output JSONL is what tests
-consume.
+consume. Future FEBRL versions (FEBRL2 / FEBRL3) get their own sibling
+scripts under testdata/corpus/febrl<N>/scripts/.
 """
 
 from __future__ import annotations
@@ -103,5 +104,5 @@ def main(path: Path) -> None:
 
 
 if __name__ == "__main__":
-    out = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("febrl.jsonl")
+    out = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("febrl4.jsonl")
     main(out)

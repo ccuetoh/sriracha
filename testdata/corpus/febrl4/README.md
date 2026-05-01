@@ -1,13 +1,18 @@
-# testdata/corpus/febrl
+# testdata/corpus/febrl4
 
 Benchmark corpus for Sriracha's Bloom-filter tokenizer, derived from FEBRL4.
 Measures precision, recall, and latency on synthetic person records with
 controlled typo / phonetic / OCR-style noise, using paired ground truth from
-the original FEBRL4 ground-truth links.
+the FEBRL4 ground-truth links.
+
+This corpus lives under `testdata/corpus/febrl4/` so future FEBRL releases
+(FEBRL2 / FEBRL3, which differ in cluster shape and corruption rate) can
+sit alongside it under their own `febrl<N>/` directories without colliding
+on metric names.
 
 ## Provenance
 
-**Dataset:** FEBRL4 (load_febrl4 from the recordlinkage Python package)
+**Dataset:** FEBRL4 (`load_febrl4` from the recordlinkage Python package)
 **URL:** <https://recordlinkage.readthedocs.io/en/latest/ref-datasets.html#recordlinkage.datasets.load_febrl4>
 **Upstream project:** FEBRL — Freely Extensible Biomedical Record Linkage
 **Upstream URL:** <https://sourceforge.net/projects/febrl/>
@@ -34,7 +39,7 @@ and contributors at the Australian National University.
 
 FEBRL4 columns are mapped to Sriracha `FieldPath` strings:
 
-| FEBRL column        | Sriracha path                          |
+| FEBRL4 column       | Sriracha path                          |
 | ------------------- | -------------------------------------- |
 | `given_name`        | `sriracha::name::given`                |
 | `surname`           | `sriracha::name::family`               |
@@ -50,22 +55,34 @@ record because FEBRL4 is wholly Australian. Street fields (`street_number`,
 `address_1`, `address_2`) are dropped because they have no canonical mapping in
 the v0.1 default `FieldSet` and would be ignored at tokenization time anyway.
 
-`date_of_birth` is reformatted from FEBRL's `YYYYMMDD` to ISO 8601 `YYYY-MM-DD`.
+`date_of_birth` is reformatted from FEBRL4's `YYYYMMDD` to ISO 8601 `YYYY-MM-DD`.
 Synthetically corrupted dates that fail the reformat (e.g. month `00`) are
 emitted as-is and dropped by the harness's `Sanitize` step.
 
-Ground truth: FEBRL record IDs follow `rec-N-org` / `rec-N-dup-0`; the numeric
+Ground truth: FEBRL4 record IDs follow `rec-N-org` / `rec-N-dup-0`; the numeric
 component `N` is used as `canonical_id`. Records sharing a `canonical_id` are
 positive pairs (one original + one duplicate); different `canonical_id` values
 are negative pairs.
 
 ## Sampling
 
-`febrl.jsonl` is the **full FEBRL4 corpus**: 10 000 records spanning 5 000
+`febrl4.jsonl` is the **full FEBRL4 corpus**: 10 000 records spanning 5 000
 canonical groups. No sub-sampling is applied because the upstream dataset is
 already small and was designed as a complete benchmark. The two FEBRL4 source
 DataFrames are concatenated into a single JSONL stream tagged by `dataset` =
 `febrl4_org` (originals) or `febrl4_dup` (synthetic duplicates).
+
+## Why FEBRL4 scores near-perfectly today
+
+`soc_sec_id` survives FEBRL4's noise model in the vast majority of rows
+(the corruption pipeline targets text fields), and it maps to
+`sriracha::identifier::national_id` — the highest-weighted field in
+`DefaultFieldSet`. The result is near-perfect separation: AUROC ≈ 1.0,
+recall ≈ 1.0, accuracy ≈ 0.9997. This corpus is therefore a strong
+*regression* signal (any drop is a real failure of that path) but it does
+not exercise the fuzzy-name / Bloom-Dice machinery — that signal still
+comes from OpenSanctions. Adding FEBRL2 or FEBRL3 in the future will give
+us the harder cluster-shape and overlap signals.
 
 ## Regenerating
 
@@ -73,7 +90,7 @@ The corpus can be reproduced byte-for-byte from the upstream FEBRL4 release:
 
 ```sh
 pip install recordlinkage
-python3 testdata/corpus/febrl/scripts/gen_febrl.py testdata/corpus/febrl/febrl.jsonl
+python3 testdata/corpus/febrl4/scripts/gen_febrl4.py testdata/corpus/febrl4/febrl4.jsonl
 ```
 
 The script applies the field mapping documented above and writes one JSON
