@@ -1,7 +1,7 @@
 package normalize
 
 import (
-	"fmt"
+	"errors"
 	"strings"
 	"time"
 	"unicode"
@@ -83,11 +83,11 @@ func trimWhitespace(s string) string {
 // Any other format returns an error to preserve determinism.
 func normalizeDate(s string) (string, error) {
 	if s == "" {
-		return "", fmt.Errorf("date value is empty")
+		return "", errors.New("date value is empty")
 	}
 	_, err := time.Parse("2006-01-02", s)
 	if err != nil {
-		return "", fmt.Errorf("date must be ISO 8601 YYYY-MM-DD, got %q", s)
+		return "", errors.New("date must be ISO 8601 YYYY-MM-DD")
 	}
 	return s, nil
 }
@@ -129,16 +129,16 @@ func normalizeName(s string) string {
 // NFKD-decomposed, and trimmed leading/trailing whitespace.
 func normalizeEmail(s string) (string, error) {
 	if strings.ContainsAny(s, " \t\r\n") {
-		return "", fmt.Errorf("email must not contain whitespace, got %q", s)
+		return "", errors.New("email must not contain whitespace")
 	}
 	at := strings.IndexByte(s, '@')
 	if at < 0 || strings.IndexByte(s[at+1:], '@') >= 0 {
-		return "", fmt.Errorf("email must contain exactly one '@', got %q", s)
+		return "", errors.New("email must contain exactly one '@'")
 	}
 	local, domain := s[:at], s[at+1:]
 	domain = strings.TrimRight(domain, ".")
 	if local == "" || domain == "" {
-		return "", fmt.Errorf("email must have non-empty local and domain parts, got %q", s)
+		return "", errors.New("email must have non-empty local and domain parts")
 	}
 	return local + "@" + domain, nil
 }
@@ -160,7 +160,7 @@ func normalizePhone(s string) (string, error) {
 		}
 	}
 	if digits < 7 {
-		return "", fmt.Errorf("phone must contain at least 7 digits, got %q", s)
+		return "", errors.New("phone must contain at least 7 digits")
 	}
 	return b.String(), nil
 }
@@ -169,12 +169,12 @@ func normalizePhone(s string) (string, error) {
 func normalizeCountry(s string) (string, error) {
 	upper := strings.ToUpper(s)
 	if utf8.RuneCountInString(upper) != 2 {
-		return "", fmt.Errorf("country code must be 2 characters, got %q", s)
+		return "", errors.New("country code must be 2 characters")
 	}
 
 	for _, r := range upper {
 		if r > 127 || !unicode.IsLetter(r) {
-			return "", fmt.Errorf("country code must be 2 ASCII letters, got %q", s)
+			return "", errors.New("country code must be 2 ASCII letters")
 		}
 	}
 
