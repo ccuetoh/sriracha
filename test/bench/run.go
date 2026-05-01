@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"time"
 
-	"go.sriracha.dev/session"
-	"go.sriracha.dev/sriracha"
-	"go.sriracha.dev/token"
+	"github.com/ccuetoh/sriracha"
+	"github.com/ccuetoh/sriracha/session"
+	"github.com/ccuetoh/sriracha/token"
 )
 
 // options drives run end-to-end. Pairs is forwarded verbatim to

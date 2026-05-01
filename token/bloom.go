@@ -6,10 +6,10 @@ import (
 	"hash"
 
 	"github.com/bits-and-blooms/bitset"
-	bloom "github.com/bits-and-blooms/bloom/v3"
+	"github.com/bits-and-blooms/bloom/v3"
 
-	"go.sriracha.dev/normalize"
-	"go.sriracha.dev/sriracha"
+	"github.com/ccuetoh/sriracha"
+	"github.com/ccuetoh/sriracha/normalize"
 )
 
 func (t *tokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.BloomToken, error) {

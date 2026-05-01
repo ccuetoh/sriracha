@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"go.sriracha.dev/normalize"
-	"go.sriracha.dev/sriracha"
+	"github.com/ccuetoh/sriracha"
+	"github.com/ccuetoh/sriracha/normalize"
 )
 
 // Validate checks that fs is a well-formed FieldSet.

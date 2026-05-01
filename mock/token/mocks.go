@@ -5,8 +5,8 @@
 package mocktoken
 
 import (
+	"github.com/ccuetoh/sriracha"
 	mock "github.com/stretchr/testify/mock"
-	"go.sriracha.dev/sriracha"
 )
 
 // NewMockTokenizer creates a new instance of MockTokenizer. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

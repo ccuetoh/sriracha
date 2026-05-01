@@ -5,9 +5,9 @@
 package mocksession
 
 import (
+	"github.com/ccuetoh/sriracha"
+	"github.com/ccuetoh/sriracha/token"
 	mock "github.com/stretchr/testify/mock"
-	"go.sriracha.dev/sriracha"
-	"go.sriracha.dev/token"
 )
 
 // NewMockSession creates a new instance of MockSession. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

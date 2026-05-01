@@ -3,8 +3,8 @@
 
 [![CI](https://github.com/ccuetoh/sriracha/actions/workflows/ci.yml/badge.svg)](https://github.com/ccuetoh/sriracha/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/ccuetoh/sriracha/graph/badge.svg?token=1JRW9RH43K)](https://codecov.io/gh/ccuetoh/sriracha)
-[![Go Report Card](https://goreportcard.com/badge/go.sriracha.dev)](https://goreportcard.com/report/go.sriracha.dev)
-[![pkg.go.dev](https://pkg.go.dev/badge/go.sriracha.dev/sriracha.svg)](https://pkg.go.dev/go.sriracha.dev/sriracha)
+[![Go Report Card](https://goreportcard.com/badge/github.com/ccuetoh/sriracha)](https://goreportcard.com/report/github.com/ccuetoh/sriracha)
+[![pkg.go.dev](https://pkg.go.dev/badge/github.com/ccuetoh/sriracha.svg)](https://pkg.go.dev/github.com/ccuetoh/sriracha)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 > **Experimental.** API is unstable. Not production-ready.
@@ -29,7 +29,7 @@ that can be compared without exposing the underlying identifiers.
 Requires Go 1.22+
 
 ```bash
-go get go.sriracha.dev
+go get github.com/ccuetoh/sriracha
 ```
 
 ## Quickstart
@@ -39,9 +39,9 @@ package main
 import (
 	"fmt"
 
-	"go.sriracha.dev/fieldset"
-	"go.sriracha.dev/session"
-	"go.sriracha.dev/sriracha"
+	"github.com/ccuetoh/sriracha"
+	"github.com/ccuetoh/sriracha/fieldset"
+	"github.com/ccuetoh/sriracha/session"
 )
 
 func main() {

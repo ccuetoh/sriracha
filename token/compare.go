@@ -7,7 +7,7 @@ import (
 	"math/bits"
 	"slices"
 
-	"go.sriracha.dev/sriracha"
+	"github.com/ccuetoh/sriracha"
 )
 
 // MatchResult holds the output of Match: per-field Dice scores, the weighted

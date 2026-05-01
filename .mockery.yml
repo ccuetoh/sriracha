@@ -9,7 +9,7 @@ template: testify
 template-schema: '{{.Template}}.schema.json'
 
 packages:
-  go.sriracha.dev:
+  github.com/ccuetoh/sriracha:
     config:
       all: true
       recursive: true

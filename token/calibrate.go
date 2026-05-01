@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"go.sriracha.dev/sriracha"
+	"github.com/ccuetoh/sriracha"
 )
 
 // LabeledPair is one row of ground-truth: two BloomTokens believed to be

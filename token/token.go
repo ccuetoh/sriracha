@@ -20,8 +20,8 @@ import (
 
 	"github.com/awnumar/memguard"
 
-	"go.sriracha.dev/normalize"
-	"go.sriracha.dev/sriracha"
+	"github.com/ccuetoh/sriracha"
+	"github.com/ccuetoh/sriracha/normalize"
 )
 
 // Tokenizer produces tokens from RawRecords using a shared secret.

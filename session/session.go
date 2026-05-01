@@ -8,9 +8,9 @@
 package session
 
 import (
-	"go.sriracha.dev/fieldset"
-	"go.sriracha.dev/sriracha"
-	"go.sriracha.dev/token"
+	"github.com/ccuetoh/sriracha"
+	"github.com/ccuetoh/sriracha/fieldset"
+	"github.com/ccuetoh/sriracha/token"
 )
 
 // Session pairs a Tokenizer with a validated FieldSet. Construct with New.

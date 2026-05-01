@@ -1,4 +1,4 @@
-module go.sriracha.dev
+module github.com/ccuetoh/sriracha
 
 go 1.22
 

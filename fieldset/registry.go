@@ -1,6 +1,6 @@
 package fieldset
 
-import "go.sriracha.dev/sriracha"
+import "github.com/ccuetoh/sriracha"
 
 var defaultV01 = sriracha.FieldSet{
 	Version: "0.1",
@@ -25,7 +25,7 @@ var defaultV01 = sriracha.FieldSet{
 	BloomParams: sriracha.DefaultBloomConfig(),
 }
 
-// DefaultFieldSet returns a deep copy of the canonical Sriracha v0.1 FieldSet
+// DefaultFieldSet returns a deep copy of the canonical Sriracha FieldSet
 // with all 16 standard fields.
 //
 // Weights are unitless relative magnitudes used as the denominator in the

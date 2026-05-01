@@ -11,7 +11,7 @@ import (
 
 	"github.com/awnumar/memguard"
 
-	"go.sriracha.dev/sriracha"
+	"github.com/ccuetoh/sriracha"
 )
 
 func newTok(t *testing.T, secret string, opts ...Option) Tokenizer {

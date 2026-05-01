@@ -9,12 +9,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.sriracha.dev/fieldset"
-	"go.sriracha.dev/session"
-	"go.sriracha.dev/sriracha"
+	"github.com/ccuetoh/sriracha"
+	"github.com/ccuetoh/sriracha/fieldset"
+	"github.com/ccuetoh/sriracha/session"
 )
 
-// newRunSession returns a fresh session bound to the v0.1 default
+// newRunSession returns a fresh session bound to the default
 // FieldSet for unit tests of run / tokenizeAll / matchAll. Each test gets
 // its own — sessions hold a locked secret buffer and Destroy invalidates
 // them, so sharing across t.Parallel subtests is risky.

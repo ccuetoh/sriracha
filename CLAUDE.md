@@ -2,15 +2,15 @@
 
 ## Module
 
-`go.sriracha.dev`, Go 1.25+. External runtime deps should be carefully considered. Tests use
+`github.com/ccuetoh/sriracha`, Go 1.22+. External runtime deps should be carefully considered. Tests use
 `github.com/stretchr/testify`.
 
 ## Package layout
 ```
-sriracha/        # go.sriracha.dev/sriracha — root types, fields, interfaces
+(root)           # core types, fields, interfaces (github.com/ccuetoh/sriracha)
 normalize/       # Unicode normalization pipeline
 token/           # HMAC-SHA256 deterministic + Bloom filter probabilistic tokenizers (uses bits-and-blooms/bitset)
-fieldset/        # FieldSet validation and canonical V0.1 schema
+fieldset/        # FieldSet validation and canonical schema
 session/         # high-level Session that bundles a Tokenizer with a FieldSet
 test/bench/      # OpenSanctions quality + perf harness, gated by //go:build bench, ships BMF metrics to Bencher via bench.yml
 ```

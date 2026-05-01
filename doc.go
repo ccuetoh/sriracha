@@ -6,7 +6,7 @@
 // mode) or Bloom filters (probabilistic mode). How the resulting tokens
 // are stored or compared is left to the caller.
 //
-// Import path: go.sriracha.dev/sriracha
+// Import path: github.com/ccuetoh/sriracha
 //
 // # Recommended entry point
 //
@@ -21,11 +21,11 @@
 //
 // # Package layout
 //
-//   - sriracha            — core types (FieldPath, RawRecord, tokens, FieldSet) and canonical field constants
-//   - sriracha/normalize  — Unicode normalization pipeline
-//   - sriracha/fieldset   — FieldSet validation, record validation, and the canonical v0.1 schema
-//   - sriracha/token      — deterministic and probabilistic tokenization, Equal, DicePerField, Score, Match, Calibrate
-//   - sriracha/session    — recommended high-level facade bundling a Tokenizer with a FieldSet
+//   - (module root)       — core types (FieldPath, RawRecord, tokens, FieldSet) and canonical field constants
+//   - normalize           — Unicode normalization pipeline
+//   - fieldset            — FieldSet validation, record validation, and the canonical schema
+//   - token               — deterministic and probabilistic tokenization, Equal, DicePerField, Score, Match, Calibrate
+//   - session             — recommended high-level facade bundling a Tokenizer with a FieldSet
 //
 // Bloom filters are implemented on top of github.com/bits-and-blooms/bitset.
 //

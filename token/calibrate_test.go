@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.sriracha.dev/sriracha"
+	"github.com/ccuetoh/sriracha"
 )
 
 func TestCalibrate(t *testing.T) {

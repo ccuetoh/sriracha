@@ -15,8 +15,8 @@ import (
 	"github.com/awnumar/memguard"
 	"github.com/stretchr/testify/require"
 
-	"go.sriracha.dev/fieldset"
-	"go.sriracha.dev/session"
+	"github.com/ccuetoh/sriracha/fieldset"
+	"github.com/ccuetoh/sriracha/session"
 )
 
 // benchSecret is fixed so harness runs are deterministic across CI

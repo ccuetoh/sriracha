@@ -10,8 +10,8 @@ import (
 	"io"
 	"os"
 
-	"go.sriracha.dev/normalize"
-	"go.sriracha.dev/sriracha"
+	"github.com/ccuetoh/sriracha"
+	"github.com/ccuetoh/sriracha/normalize"
 )
 
 // record is one row of a Sriracha benchmark corpus. CanonicalID is the

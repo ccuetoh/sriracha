@@ -7,7 +7,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"go.sriracha.dev/sriracha"
+	"github.com/ccuetoh/sriracha"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 	"golang.org/x/text/unicode/norm"
