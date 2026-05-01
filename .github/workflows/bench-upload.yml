@@ -48,6 +48,13 @@ jobs:
             < results.txt
 
       - name: Upload quality metrics to Bencher
+        # Always attempt the quality upload, even if the go_bench upload
+        # above failed. With --err, a regression alert exits non-zero,
+        # which by default skips every subsequent step (implicit
+        # if: success()) — so a single regression in micro-benchmarks
+        # would silently drop quality metrics. Each step still uses --err,
+        # so a regression in either uploader still fails the job.
+        if: always()
         env:
           BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -93,6 +100,8 @@ jobs:
             < results.txt
 
       - name: Upload quality metrics to Bencher
+        # See upload-pr's quality step for the rationale; same reason here.
+        if: always()
         env:
           BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
         run: |
