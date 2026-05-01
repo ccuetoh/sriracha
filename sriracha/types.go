@@ -49,10 +49,19 @@ type FieldSpec struct {
 }
 
 // BloomConfig holds parameters for Bloom filter tokenization.
+//
+// FlipProbability and TargetPopcount enable opt-in privacy hardening against
+// frequency analysis. Both default to zero (disabled). When enabled, the
+// PRNGs that drive bit flipping (BLIP) and popcount padding (balanced
+// filters) are seeded by HMAC-SHA256(secret, label || path || normalized
+// value), so the same input always produces the same hardened filter — both
+// institutions can match locally without coordinating randomness.
 type BloomConfig struct {
-	SizeBits   uint32 `json:"size_bits"`
-	NgramSizes []int  `json:"ngram_sizes"`
-	HashCount  int    `json:"hash_count"`
+	SizeBits        uint32  `json:"size_bits"`
+	NgramSizes      []int   `json:"ngram_sizes"`
+	HashCount       int     `json:"hash_count"`
+	FlipProbability float64 `json:"flip_probability,omitempty"`
+	TargetPopcount  uint32  `json:"target_popcount,omitempty"`
 }
 
 // FastBloomConfig returns a lightweight Bloom filter configuration optimised
@@ -84,6 +93,17 @@ func HighPrecisionBloomConfig() BloomConfig {
 		NgramSizes: []int{2, 3},
 		HashCount:  5,
 	}
+}
+
+// HardenedBloomConfig returns a Bloom filter configuration with privacy
+// defenses enabled: each bit is flipped with probability 0.02 (BLIP) and the
+// final filter is padded to a popcount of 400 (balanced filter). These
+// defenses blunt frequency-analysis attacks at a small cost to recall.
+func HardenedBloomConfig() BloomConfig {
+	cfg := DefaultBloomConfig()
+	cfg.FlipProbability = 0.02
+	cfg.TargetPopcount = 400
+	return cfg
 }
 
 // FieldSet describes the schema used for tokenization.

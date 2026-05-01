@@ -110,6 +110,84 @@ func TestValidate(t *testing.T) {
 			wantErr:     true,
 			errContains: "NgramSizes[0]",
 		},
+		{
+			name: "BloomFlipProbabilityNegative",
+			fs: sriracha.FieldSet{
+				Version: "0.1",
+				BloomParams: sriracha.BloomConfig{
+					SizeBits:        1024,
+					HashCount:       2,
+					NgramSizes:      []int{2, 3},
+					FlipProbability: -0.01,
+				},
+			},
+			wantErr:     true,
+			errContains: "FlipProbability",
+		},
+		{
+			name: "BloomFlipProbabilityOne",
+			fs: sriracha.FieldSet{
+				Version: "0.1",
+				BloomParams: sriracha.BloomConfig{
+					SizeBits:        1024,
+					HashCount:       2,
+					NgramSizes:      []int{2, 3},
+					FlipProbability: 1.0,
+				},
+			},
+			wantErr:     true,
+			errContains: "FlipProbability",
+		},
+		{
+			name: "BloomFlipProbabilityAboveOne",
+			fs: sriracha.FieldSet{
+				Version: "0.1",
+				BloomParams: sriracha.BloomConfig{
+					SizeBits:        1024,
+					HashCount:       2,
+					NgramSizes:      []int{2, 3},
+					FlipProbability: 1.5,
+				},
+			},
+			wantErr:     true,
+			errContains: "FlipProbability",
+		},
+		{
+			name: "BloomTargetPopcountEqualsSize",
+			fs: sriracha.FieldSet{
+				Version: "0.1",
+				BloomParams: sriracha.BloomConfig{
+					SizeBits:       1024,
+					HashCount:      2,
+					NgramSizes:     []int{2, 3},
+					TargetPopcount: 1024,
+				},
+			},
+			wantErr:     true,
+			errContains: "TargetPopcount",
+		},
+		{
+			name: "BloomTargetPopcountAboveSize",
+			fs: sriracha.FieldSet{
+				Version: "0.1",
+				BloomParams: sriracha.BloomConfig{
+					SizeBits:       1024,
+					HashCount:      2,
+					NgramSizes:     []int{2, 3},
+					TargetPopcount: 4096,
+				},
+			},
+			wantErr:     true,
+			errContains: "TargetPopcount",
+		},
+		{
+			name: "BloomHardenedConfigValid",
+			fs: sriracha.FieldSet{
+				Version:     "0.1",
+				BloomParams: sriracha.HardenedBloomConfig(),
+			},
+			wantErr: false,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
