@@ -28,7 +28,7 @@ that can be compared without exposing the underlying identifiers.
 Requires Go 1.25+
 
 ```bash
-go install go.sriracha.dev
+go get go.sriracha.dev
 ```
 
 ## Quickstart
