@@ -9,51 +9,82 @@
 
 > **Experimental.** API is unstable. Not production-ready.
 
-## What is Sriracha?
 
-Sriracha is a Go library for privacy-preserving record linkage. Institutions in health, government, and research
-routinely need to find shared person records across organizational boundaries — without transmitting raw PII.
-Sriracha provides the building blocks: records are normalized and tokenized with a shared secret, producing tokens
-that can be compared without exposing the underlying identifiers. Storage is left to the consumer; matching is
-available via `token.Equal` (deterministic) and `token.Match` (probabilistic).
-
-The recommended entry point is `session.Session` — it bundles a `Tokenizer` with a `FieldSet` so you
-don't have to thread the schema through every call.
+Sriracha is a Go library for privacy-preserving record linkage. It enables institutions need to find shared
+person records across organizational boundaries without transmitting raw PII.
+Sriracha provides the building blocks for building privacy-first transports.
+Records are normalized and tokenized with a shared secret, producing tokens
+that can be compared without exposing the underlying identifiers.
 
 ## Features
 
-- HMAC-SHA256 deterministic tokenization (exact match) with length-prefixed domain separation
-- Bloom filter probabilistic tokenization (fuzzy match, typo-tolerant)
-- Unicode normalization pipeline (names with diacritic folding, ISO 8601 dates, addresses, identifiers, email; best-effort phone digit-stripping)
-- Canonical v0.1 field set with structured `FieldPath` identifiers and `FieldSet.Fingerprint()` for schema-drift detection
-- Weighted aggregate `Score` and threshold `Match` over per-field Dice scores; `token.Calibrate` for picking the threshold from labeled data
-- Optional `KeyID` on tokens to surface secret-rotation mismatches
-- `Tokenizer` is safe for concurrent use; HMAC instances are pooled; a runtime cleanup wipes the locked secret buffer if you forget `Destroy()`
-- Tokens marshal to JSON via `encoding/json` for inspection and transport; `Annotate(fs)` returns a redacted, log-safe view
+- Deterministic tokenization using HMAC-SHA256
+- Probabilistic tokenization with Bloom filters and Dice coefficient
+- Unicode normalization pipeline
+- Canonical field set with support for extended schemas
 
-## Picking a threshold
+## Installation
 
-`token.Match` takes a threshold in `[0, 1]`. Pick it from labeled data, not intuition:
+Requires Go 1.25+
 
-```go
-cal, err := token.Calibrate(pairs, fs)   // pairs = []token.LabeledPair
-if err != nil { /* … */ }
-res, err := token.Match(a, b, fs, cal.OptimalThreshold)
+```bash
+go install go.sriracha.dev
 ```
 
-`Calibration.ROC` carries precision/recall/F1 at every 0.01 step so you can plot or pick a different operating
-point (e.g. precision-at-recall ≥ 0.95) than the F1-optimal default.
+## Quickstart
+```go
+package main
 
-## Rotating the secret
+import (
+	"fmt"
 
-Sriracha's comparison helpers reject `KeyID` mismatches outright, so you cannot directly compare a token signed
-with `k1` against one signed with `k2`. To rotate without dropping inflight matches:
+	"go.sriracha.dev/fieldset"
+	"go.sriracha.dev/session"
+	"go.sriracha.dev/sriracha"
+)
 
-1. Stand up a second `session.Session` (or `token.Tokenizer`) with the new secret and a new `KeyID`.
-2. During the overlap window, **dual-tokenize**: every record produces both an old-key and a new-key token. Store
-   both shards.
-3. Compare on whichever shard the counterpart still uses.
-4. When all counterparts have moved over, retire the old key and drop the old shards.
+func main() {
+	secret := []byte("super-secret-key")
 
-There is no library helper that "tries both keys" automatically — by design, since silently masking a key
-mismatch is what `KeyID` exists to prevent.
+	s, _ := session.New(secret, fieldset.DefaultFieldSet())
+	defer sess.Destroy()
+
+	// Deterministic tokenization
+	tokA, _ := s.Tokenize(sriracha.RawRecord{
+		sriracha.FieldNameGiven:  "Alice",
+		sriracha.FieldNameFamily: "Smith",
+	})
+
+	tokB, _ := s.Tokenize(sriracha.RawRecord{
+		sriracha.FieldNameGiven:  "Alice",
+		sriracha.FieldNameFamily: "Smith",
+	})
+
+	eq := s.Equal(tokA, tokB)
+	fmt.Printf("match: %v\n", eq)
+
+	// Probabilistic tokenization
+	bloomA, _ := s.TokenizeBloom(sriracha.RawRecord{
+		sriracha.FieldNameGiven:  "Alice",
+		sriracha.FieldNameFamily: "Smith",
+	})
+
+	bloomB, _ := s.TokenizeBloom(sriracha.RawRecord{
+		sriracha.FieldNameGiven:  "Alice",
+		sriracha.FieldNameFamily: "Smyth", // typo
+	})
+
+	result, _ := s.Match(bloomA, bloomB, 0.85)
+	fmt.Printf("match: %v (score: %.2f)\n", result.IsMatch, result.Score)
+}
+```
+
+## Benchmarks
+
+Live history on [Bencher](https://bencher.dev/perf/sriracha).
+
+| Corpus                                          | Records | Pairs                      | AUROC | Accuracy | Recall |   Tokenize |         Match |
+|-------------------------------------------------|--------:|:---------------------------|------:|---------:|-------:|-----------:|--------------:|
+| [OpenSanctions](testdata/corpus/opensanctions/) |  26 841 | natural cross-source       |  0.93 |     0.91 |   0.87 | 20 k rec/s | 147 k pairs/s |
+| [FEBRL4](testdata/corpus/febrl4/)               |  10 000 | synthetic (FEBRL4 noise)   |  1.00 |     1.00 |   1.00 | 13 k rec/s | 139 k pairs/s |
+| [NCVR](testdata/corpus/ncvr/)                   |   8 848 | synthetic (1–2 char edits) |  1.00 |     1.00 |   1.00 | 14 k rec/s | 159 k pairs/s |
