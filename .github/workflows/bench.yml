@@ -36,7 +36,7 @@ jobs:
           SRIRACHA_BENCH_OUT: ${{ github.workspace }}/quality.json
         run: go test -tags=bench -count=1 -timeout 10m ./test/bench/...
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           name: bench-results-main
@@ -56,13 +56,18 @@ jobs:
 
       - name: Save PR metadata
         if: github.event_name == 'pull_request'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          echo "${{ github.event.pull_request.number }}" > pr-number.txt
-          echo "${{ github.head_ref }}" > head-ref.txt
-          echo "${{ github.base_ref }}" > base-ref.txt
-          echo "${{ github.event.pull_request.base.sha }}" > base-sha.txt
+          printf '%s\n' "$PR_NUMBER" > pr-number.txt
+          printf '%s\n' "$HEAD_REF" > head-ref.txt
+          printf '%s\n' "$BASE_REF" > base-ref.txt
+          printf '%s\n' "$BASE_SHA" > base-sha.txt
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: github.event_name == 'pull_request'
         with:
           name: bench-results
