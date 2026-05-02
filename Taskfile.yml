@@ -1,0 +1,67 @@
+version: "3"
+
+tasks:
+  test:
+    desc: Run all unit tests
+    cmds:
+      - go test -timeout 5m ./...
+
+  test:race:
+    desc: Run all unit tests with race detector (requires CGO)
+    cmds:
+      - go test -race -timeout 5m ./...
+
+  cover:
+    desc: Run tests with coverage report
+    cmds:
+      - go test -timeout 5m -coverprofile=coverage.out ./...
+      - go tool cover -func=coverage.out
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - golangci-lint run
+
+  generate:
+    desc: Regenerate mocks
+    cmds:
+      - mockery
+
+  generate:check:
+    desc: Regenerate mocks and verify no uncommitted changes
+    cmds:
+      - mockery
+      - git diff --exit-code
+
+  fuzz:
+    desc: "Run a fuzz target (e.g. task fuzz -- -fuzz=FuzzNormalize ./normalize/)"
+    cmds:
+      - go test -fuzztime={{.FUZZTIME | default "60s"}} {{.CLI_ARGS}}
+
+  bench:
+    desc: Run micro-benchmarks
+    cmds:
+      - go test -bench=. -benchmem ./...
+
+  bench:quality:
+    desc: Run quality benchmarks (OpenSanctions, FEBRL4, NCVR)
+    cmds:
+      - go test -tags=bench -count=1 -timeout 10m ./test/bench/...
+
+  vulncheck:
+    desc: Run govulncheck
+    cmds:
+      - govulncheck ./...
+
+  ci:
+    desc: Run the full local CI suite (test, vet, lint, vulncheck)
+    cmds:
+      - task: test
+      - task: vet
+      - task: lint
+      - task: vulncheck
