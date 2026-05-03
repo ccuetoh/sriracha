@@ -1,17 +1,17 @@
 module github.com/ccuetoh/sriracha
 
-go 1.24.0
+go 1.25.0
 
 require (
-	github.com/awnumar/memguard v0.22.5
+	github.com/awnumar/memguard v0.23.0
 	github.com/bits-and-blooms/bitset v1.24.4
 	github.com/bits-and-blooms/bloom/v3 v3.7.1
 	github.com/stretchr/testify v1.11.1
-	golang.org/x/text v0.31.0
+	golang.org/x/text v0.36.0
 )
 
 require (
-	github.com/awnumar/memcall v0.2.0 // indirect
+	github.com/awnumar/memcall v0.4.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
