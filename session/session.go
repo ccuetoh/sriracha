@@ -1,7 +1,7 @@
 // Package session is the high-level entry point for Sriracha. A Session
 // bundles a token.Tokenizer with a FieldSet so callers don't have to thread
-// the schema through every Tokenize / Match / Equal call, and so the schema
-// is validated up front.
+// the schema through every tokenize / match call, and so the schema is
+// validated up front.
 //
 // Most callers should reach for session.New rather than constructing the
 // underlying Tokenizer directly.
@@ -22,12 +22,12 @@ type Session interface {
 	// FieldSet returns a deep copy of the Session's FieldSet so callers can
 	// inspect it without risking mutation of the stored schema.
 	FieldSet() sriracha.FieldSet
-	// Tokenize produces a deterministic token for record using the Session's
-	// FieldSet.
-	Tokenize(record sriracha.RawRecord) (sriracha.DeterministicToken, error)
-	// TokenizeBloom produces a probabilistic token for record using the
-	// Session's FieldSet.
-	TokenizeBloom(record sriracha.RawRecord) (sriracha.BloomToken, error)
+	// TokenizeDeterministic produces a deterministic token for record using
+	// the Session's FieldSet.
+	TokenizeDeterministic(record sriracha.RawRecord) (sriracha.DeterministicToken, error)
+	// TokenizeProbabilistic produces a probabilistic token for record using
+	// the Session's FieldSet.
+	TokenizeProbabilistic(record sriracha.RawRecord) (sriracha.ProbabilisticToken, error)
 	// TokenizeField returns the deterministic 32-byte HMAC for a single
 	// (value, path) pair. Useful for stable indexing of one field outside
 	// the FieldSet flow; see token.Tokenizer.TokenizeField.
@@ -37,7 +37,7 @@ type Session interface {
 	// Match runs the canonical probabilistic comparison against the Session's
 	// FieldSet. See token.Match for semantics around absent fields and
 	// thresholds.
-	Match(a, b sriracha.BloomToken, threshold float64) (token.MatchResult, error)
+	Match(a, b sriracha.ProbabilisticToken, threshold float64) (token.MatchResult, error)
 	// ValidateRecord pre-checks record against the Session's FieldSet. See
 	// fieldset.ValidateRecord.
 	ValidateRecord(record sriracha.RawRecord) []error
@@ -72,20 +72,20 @@ func New(secret []byte, fs sriracha.FieldSet, opts ...token.Option) (Session, er
 
 func (s *session) FieldSet() sriracha.FieldSet {
 	out := sriracha.FieldSet{
-		Version:     s.fs.Version,
-		Fields:      append([]sriracha.FieldSpec(nil), s.fs.Fields...),
-		BloomParams: s.fs.BloomParams,
+		Version:             s.fs.Version,
+		Fields:              append([]sriracha.FieldSpec(nil), s.fs.Fields...),
+		ProbabilisticParams: s.fs.ProbabilisticParams,
 	}
-	out.BloomParams.NgramSizes = append([]int(nil), s.fs.BloomParams.NgramSizes...)
+	out.ProbabilisticParams.NgramSizes = append([]int(nil), s.fs.ProbabilisticParams.NgramSizes...)
 	return out
 }
 
-func (s *session) Tokenize(record sriracha.RawRecord) (sriracha.DeterministicToken, error) {
-	return s.tok.TokenizeRecord(record, s.fs)
+func (s *session) TokenizeDeterministic(record sriracha.RawRecord) (sriracha.DeterministicToken, error) {
+	return s.tok.TokenizeDeterministic(record, s.fs)
 }
 
-func (s *session) TokenizeBloom(record sriracha.RawRecord) (sriracha.BloomToken, error) {
-	return s.tok.TokenizeRecordBloom(record, s.fs)
+func (s *session) TokenizeProbabilistic(record sriracha.RawRecord) (sriracha.ProbabilisticToken, error) {
+	return s.tok.TokenizeProbabilistic(record, s.fs)
 }
 
 func (s *session) TokenizeField(value string, path sriracha.FieldPath) ([]byte, error) {
@@ -96,7 +96,7 @@ func (s *session) Equal(a, b sriracha.DeterministicToken) bool {
 	return token.Equal(a, b)
 }
 
-func (s *session) Match(a, b sriracha.BloomToken, threshold float64) (token.MatchResult, error) {
+func (s *session) Match(a, b sriracha.ProbabilisticToken, threshold float64) (token.MatchResult, error) {
 	return token.Match(a, b, s.fs, threshold)
 }
 

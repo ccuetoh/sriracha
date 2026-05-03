@@ -13,8 +13,8 @@ func detTok(version string, fields ...[]byte) sriracha.DeterministicToken {
 	return sriracha.DeterministicToken{FieldSetVersion: version, Fields: fields}
 }
 
-func bloomTokWith(params sriracha.BloomConfig, fields ...[]byte) sriracha.BloomToken {
-	return sriracha.BloomToken{FieldSetVersion: "v1", BloomParams: params, Fields: fields}
+func bloomTokWith(params sriracha.ProbabilisticConfig, fields ...[]byte) sriracha.ProbabilisticToken {
+	return sriracha.ProbabilisticToken{FieldSetVersion: "v1", ProbabilisticParams: params, Fields: fields}
 }
 
 func TestEqual_IdenticalTokens(t *testing.T) {
@@ -29,9 +29,9 @@ func TestEqual_IdenticalTokens(t *testing.T) {
 		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: true, Weight: 1.0},
 	)
 
-	a, err := tok.TokenizeRecord(rec, fs)
+	a, err := tok.TokenizeDeterministic(rec, fs)
 	require.NoError(t, err)
-	b, err := tok.TokenizeRecord(rec, fs)
+	b, err := tok.TokenizeDeterministic(rec, fs)
 	require.NoError(t, err)
 
 	assert.True(t, Equal(a, b), "identical inputs should produce equal tokens")
@@ -42,9 +42,9 @@ func TestEqual_DifferentInputs(t *testing.T) {
 	tok := newTok(t, "secret")
 	fs := deterministicFS(sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
 
-	a, err := tok.TokenizeRecord(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
+	a, err := tok.TokenizeDeterministic(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
 	require.NoError(t, err)
-	b, err := tok.TokenizeRecord(sriracha.RawRecord{sriracha.FieldNameGiven: "Bob"}, fs)
+	b, err := tok.TokenizeDeterministic(sriracha.RawRecord{sriracha.FieldNameGiven: "Bob"}, fs)
 	require.NoError(t, err)
 
 	assert.False(t, Equal(a, b), "different inputs should produce unequal tokens")
@@ -126,9 +126,9 @@ func TestDicePerField_IdenticalRecords(t *testing.T) {
 		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: true, Weight: 1.0},
 	)
 
-	a, err := tok.TokenizeRecordBloom(rec, fs)
+	a, err := tok.TokenizeProbabilistic(rec, fs)
 	require.NoError(t, err)
-	b, err := tok.TokenizeRecordBloom(rec, fs)
+	b, err := tok.TokenizeProbabilistic(rec, fs)
 	require.NoError(t, err)
 
 	scores, err := DicePerField(a, b)
@@ -147,12 +147,12 @@ func TestDicePerField_PerturbedField(t *testing.T) {
 		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: true, Weight: 1.0},
 	)
 
-	a, err := tok.TokenizeRecordBloom(sriracha.RawRecord{
+	a, err := tok.TokenizeProbabilistic(sriracha.RawRecord{
 		sriracha.FieldNameGiven:  "Christopher",
 		sriracha.FieldNameFamily: "Smith",
 	}, fs)
 	require.NoError(t, err)
-	b, err := tok.TokenizeRecordBloom(sriracha.RawRecord{
+	b, err := tok.TokenizeProbabilistic(sriracha.RawRecord{
 		sriracha.FieldNameGiven:  "Cristopher", // typo: missing 'h'
 		sriracha.FieldNameFamily: "Smith",
 	}, fs)
@@ -174,9 +174,9 @@ func TestDicePerField_MissingFieldZero(t *testing.T) {
 		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 0.5},
 	)
 
-	a, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
+	a, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
 	require.NoError(t, err)
-	b, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
+	b, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
 	require.NoError(t, err)
 
 	scores, err := DicePerField(a, b)
@@ -188,20 +188,20 @@ func TestDicePerField_MissingFieldZero(t *testing.T) {
 
 func TestDicePerField_Errors(t *testing.T) {
 	t.Parallel()
-	cfg := sriracha.BloomConfig{SizeBits: 8, NgramSizes: []int{2}, HashCount: 1}
+	cfg := sriracha.ProbabilisticConfig{SizeBits: 8, NgramSizes: []int{2}, HashCount: 1}
 	cases := []struct {
 		name string
-		a, b sriracha.BloomToken
+		a, b sriracha.ProbabilisticToken
 	}{
 		{
 			name: "VersionMismatch",
-			a:    sriracha.BloomToken{FieldSetVersion: "v1"},
-			b:    sriracha.BloomToken{FieldSetVersion: "v2"},
+			a:    sriracha.ProbabilisticToken{FieldSetVersion: "v1"},
+			b:    sriracha.ProbabilisticToken{FieldSetVersion: "v2"},
 		},
 		{
-			name: "BloomParamsMismatch",
-			a:    bloomTokWith(sriracha.BloomConfig{SizeBits: 1024, NgramSizes: []int{2}, HashCount: 2}),
-			b:    bloomTokWith(sriracha.BloomConfig{SizeBits: 2048, NgramSizes: []int{2}, HashCount: 2}),
+			name: "ProbabilisticParamsMismatch",
+			a:    bloomTokWith(sriracha.ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2}, HashCount: 2}),
+			b:    bloomTokWith(sriracha.ProbabilisticConfig{SizeBits: 2048, NgramSizes: []int{2}, HashCount: 2}),
 		},
 		{
 			name: "FieldCountMismatch",
@@ -215,13 +215,13 @@ func TestDicePerField_Errors(t *testing.T) {
 		},
 		{
 			name: "KeyIDMismatch",
-			a:    sriracha.BloomToken{FieldSetVersion: "v1", KeyID: "k1", BloomParams: cfg, Fields: [][]byte{{0x00}}},
-			b:    sriracha.BloomToken{FieldSetVersion: "v1", KeyID: "k2", BloomParams: cfg, Fields: [][]byte{{0x00}}},
+			a:    sriracha.ProbabilisticToken{FieldSetVersion: "v1", KeyID: "k1", ProbabilisticParams: cfg, Fields: [][]byte{{0x00}}},
+			b:    sriracha.ProbabilisticToken{FieldSetVersion: "v1", KeyID: "k2", ProbabilisticParams: cfg, Fields: [][]byte{{0x00}}},
 		},
 		{
 			name: "FingerprintMismatchBothSet",
-			a:    sriracha.BloomToken{FieldSetVersion: "v1", FieldSetFingerprint: "aa", BloomParams: cfg, Fields: [][]byte{{0x00}}},
-			b:    sriracha.BloomToken{FieldSetVersion: "v1", FieldSetFingerprint: "bb", BloomParams: cfg, Fields: [][]byte{{0x00}}},
+			a:    sriracha.ProbabilisticToken{FieldSetVersion: "v1", FieldSetFingerprint: "aa", ProbabilisticParams: cfg, Fields: [][]byte{{0x00}}},
+			b:    sriracha.ProbabilisticToken{FieldSetVersion: "v1", FieldSetFingerprint: "bb", ProbabilisticParams: cfg, Fields: [][]byte{{0x00}}},
 		},
 	}
 	for _, tc := range cases {
@@ -238,7 +238,7 @@ func TestDicePerField_FingerprintOneSideSkipsCheck(t *testing.T) {
 	tok := newTok(t, "secret")
 	fs := bloomFS(sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
 
-	a, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
+	a, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
 	require.NoError(t, err)
 	b := a
 	b.FieldSetFingerprint = ""
@@ -305,9 +305,9 @@ func TestMatch(t *testing.T) {
 		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 1.0},
 	)
 
-	tokenize := func(t *testing.T, rec sriracha.RawRecord) sriracha.BloomToken {
+	tokenize := func(t *testing.T, rec sriracha.RawRecord) sriracha.ProbabilisticToken {
 		t.Helper()
-		tr, err := tok.TokenizeRecordBloom(rec, fs)
+		tr, err := tok.TokenizeProbabilistic(rec, fs)
 		require.NoError(t, err)
 		return tr
 	}
@@ -421,9 +421,9 @@ func TestMatch(t *testing.T) {
 	t.Run("FieldCountMismatchWithFieldSet", func(t *testing.T) {
 		t.Parallel()
 		shorter := sriracha.FieldSet{
-			Version:     fs.Version,
-			BloomParams: fs.BloomParams,
-			Fields:      fs.Fields[:1],
+			Version:             fs.Version,
+			ProbabilisticParams: fs.ProbabilisticParams,
+			Fields:              fs.Fields[:1],
 		}
 		_, err := Match(identical, identical, shorter, 0.5)
 		require.Error(t, err)

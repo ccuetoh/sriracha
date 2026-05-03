@@ -172,7 +172,7 @@ func (_c *MockSession_FieldSet_Call) RunAndReturn(run func() sriracha.FieldSet) 
 }
 
 // Match provides a mock function for the type MockSession
-func (_mock *MockSession) Match(a sriracha.BloomToken, b sriracha.BloomToken, threshold float64) (token.MatchResult, error) {
+func (_mock *MockSession) Match(a sriracha.ProbabilisticToken, b sriracha.ProbabilisticToken, threshold float64) (token.MatchResult, error) {
 	ret := _mock.Called(a, b, threshold)
 
 	if len(ret) == 0 {
@@ -181,15 +181,15 @@ func (_mock *MockSession) Match(a sriracha.BloomToken, b sriracha.BloomToken, th
 
 	var r0 token.MatchResult
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(sriracha.BloomToken, sriracha.BloomToken, float64) (token.MatchResult, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(sriracha.ProbabilisticToken, sriracha.ProbabilisticToken, float64) (token.MatchResult, error)); ok {
 		return returnFunc(a, b, threshold)
 	}
-	if returnFunc, ok := ret.Get(0).(func(sriracha.BloomToken, sriracha.BloomToken, float64) token.MatchResult); ok {
+	if returnFunc, ok := ret.Get(0).(func(sriracha.ProbabilisticToken, sriracha.ProbabilisticToken, float64) token.MatchResult); ok {
 		r0 = returnFunc(a, b, threshold)
 	} else {
 		r0 = ret.Get(0).(token.MatchResult)
 	}
-	if returnFunc, ok := ret.Get(1).(func(sriracha.BloomToken, sriracha.BloomToken, float64) error); ok {
+	if returnFunc, ok := ret.Get(1).(func(sriracha.ProbabilisticToken, sriracha.ProbabilisticToken, float64) error); ok {
 		r1 = returnFunc(a, b, threshold)
 	} else {
 		r1 = ret.Error(1)
@@ -203,22 +203,22 @@ type MockSession_Match_Call struct {
 }
 
 // Match is a helper method to define mock.On call
-//   - a sriracha.BloomToken
-//   - b sriracha.BloomToken
+//   - a sriracha.ProbabilisticToken
+//   - b sriracha.ProbabilisticToken
 //   - threshold float64
 func (_e *MockSession_Expecter) Match(a interface{}, b interface{}, threshold interface{}) *MockSession_Match_Call {
 	return &MockSession_Match_Call{Call: _e.mock.On("Match", a, b, threshold)}
 }
 
-func (_c *MockSession_Match_Call) Run(run func(a sriracha.BloomToken, b sriracha.BloomToken, threshold float64)) *MockSession_Match_Call {
+func (_c *MockSession_Match_Call) Run(run func(a sriracha.ProbabilisticToken, b sriracha.ProbabilisticToken, threshold float64)) *MockSession_Match_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 sriracha.BloomToken
+		var arg0 sriracha.ProbabilisticToken
 		if args[0] != nil {
-			arg0 = args[0].(sriracha.BloomToken)
+			arg0 = args[0].(sriracha.ProbabilisticToken)
 		}
-		var arg1 sriracha.BloomToken
+		var arg1 sriracha.ProbabilisticToken
 		if args[1] != nil {
-			arg1 = args[1].(sriracha.BloomToken)
+			arg1 = args[1].(sriracha.ProbabilisticToken)
 		}
 		var arg2 float64
 		if args[2] != nil {
@@ -238,17 +238,17 @@ func (_c *MockSession_Match_Call) Return(matchResult token.MatchResult, err erro
 	return _c
 }
 
-func (_c *MockSession_Match_Call) RunAndReturn(run func(a sriracha.BloomToken, b sriracha.BloomToken, threshold float64) (token.MatchResult, error)) *MockSession_Match_Call {
+func (_c *MockSession_Match_Call) RunAndReturn(run func(a sriracha.ProbabilisticToken, b sriracha.ProbabilisticToken, threshold float64) (token.MatchResult, error)) *MockSession_Match_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// Tokenize provides a mock function for the type MockSession
-func (_mock *MockSession) Tokenize(record sriracha.RawRecord) (sriracha.DeterministicToken, error) {
+// TokenizeDeterministic provides a mock function for the type MockSession
+func (_mock *MockSession) TokenizeDeterministic(record sriracha.RawRecord) (sriracha.DeterministicToken, error) {
 	ret := _mock.Called(record)
 
 	if len(ret) == 0 {
-		panic("no return value specified for Tokenize")
+		panic("no return value specified for TokenizeDeterministic")
 	}
 
 	var r0 sriracha.DeterministicToken
@@ -269,18 +269,18 @@ func (_mock *MockSession) Tokenize(record sriracha.RawRecord) (sriracha.Determin
 	return r0, r1
 }
 
-// MockSession_Tokenize_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Tokenize'
-type MockSession_Tokenize_Call struct {
+// MockSession_TokenizeDeterministic_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TokenizeDeterministic'
+type MockSession_TokenizeDeterministic_Call struct {
 	*mock.Call
 }
 
-// Tokenize is a helper method to define mock.On call
+// TokenizeDeterministic is a helper method to define mock.On call
 //   - record sriracha.RawRecord
-func (_e *MockSession_Expecter) Tokenize(record interface{}) *MockSession_Tokenize_Call {
-	return &MockSession_Tokenize_Call{Call: _e.mock.On("Tokenize", record)}
+func (_e *MockSession_Expecter) TokenizeDeterministic(record interface{}) *MockSession_TokenizeDeterministic_Call {
+	return &MockSession_TokenizeDeterministic_Call{Call: _e.mock.On("TokenizeDeterministic", record)}
 }
 
-func (_c *MockSession_Tokenize_Call) Run(run func(record sriracha.RawRecord)) *MockSession_Tokenize_Call {
+func (_c *MockSession_TokenizeDeterministic_Call) Run(run func(record sriracha.RawRecord)) *MockSession_TokenizeDeterministic_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 sriracha.RawRecord
 		if args[0] != nil {
@@ -293,72 +293,12 @@ func (_c *MockSession_Tokenize_Call) Run(run func(record sriracha.RawRecord)) *M
 	return _c
 }
 
-func (_c *MockSession_Tokenize_Call) Return(deterministicToken sriracha.DeterministicToken, err error) *MockSession_Tokenize_Call {
+func (_c *MockSession_TokenizeDeterministic_Call) Return(deterministicToken sriracha.DeterministicToken, err error) *MockSession_TokenizeDeterministic_Call {
 	_c.Call.Return(deterministicToken, err)
 	return _c
 }
 
-func (_c *MockSession_Tokenize_Call) RunAndReturn(run func(record sriracha.RawRecord) (sriracha.DeterministicToken, error)) *MockSession_Tokenize_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// TokenizeBloom provides a mock function for the type MockSession
-func (_mock *MockSession) TokenizeBloom(record sriracha.RawRecord) (sriracha.BloomToken, error) {
-	ret := _mock.Called(record)
-
-	if len(ret) == 0 {
-		panic("no return value specified for TokenizeBloom")
-	}
-
-	var r0 sriracha.BloomToken
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(sriracha.RawRecord) (sriracha.BloomToken, error)); ok {
-		return returnFunc(record)
-	}
-	if returnFunc, ok := ret.Get(0).(func(sriracha.RawRecord) sriracha.BloomToken); ok {
-		r0 = returnFunc(record)
-	} else {
-		r0 = ret.Get(0).(sriracha.BloomToken)
-	}
-	if returnFunc, ok := ret.Get(1).(func(sriracha.RawRecord) error); ok {
-		r1 = returnFunc(record)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockSession_TokenizeBloom_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TokenizeBloom'
-type MockSession_TokenizeBloom_Call struct {
-	*mock.Call
-}
-
-// TokenizeBloom is a helper method to define mock.On call
-//   - record sriracha.RawRecord
-func (_e *MockSession_Expecter) TokenizeBloom(record interface{}) *MockSession_TokenizeBloom_Call {
-	return &MockSession_TokenizeBloom_Call{Call: _e.mock.On("TokenizeBloom", record)}
-}
-
-func (_c *MockSession_TokenizeBloom_Call) Run(run func(record sriracha.RawRecord)) *MockSession_TokenizeBloom_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 sriracha.RawRecord
-		if args[0] != nil {
-			arg0 = args[0].(sriracha.RawRecord)
-		}
-		run(
-			arg0,
-		)
-	})
-	return _c
-}
-
-func (_c *MockSession_TokenizeBloom_Call) Return(bloomToken sriracha.BloomToken, err error) *MockSession_TokenizeBloom_Call {
-	_c.Call.Return(bloomToken, err)
-	return _c
-}
-
-func (_c *MockSession_TokenizeBloom_Call) RunAndReturn(run func(record sriracha.RawRecord) (sriracha.BloomToken, error)) *MockSession_TokenizeBloom_Call {
+func (_c *MockSession_TokenizeDeterministic_Call) RunAndReturn(run func(record sriracha.RawRecord) (sriracha.DeterministicToken, error)) *MockSession_TokenizeDeterministic_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -427,6 +367,66 @@ func (_c *MockSession_TokenizeField_Call) Return(bytes []byte, err error) *MockS
 }
 
 func (_c *MockSession_TokenizeField_Call) RunAndReturn(run func(value string, path sriracha.FieldPath) ([]byte, error)) *MockSession_TokenizeField_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// TokenizeProbabilistic provides a mock function for the type MockSession
+func (_mock *MockSession) TokenizeProbabilistic(record sriracha.RawRecord) (sriracha.ProbabilisticToken, error) {
+	ret := _mock.Called(record)
+
+	if len(ret) == 0 {
+		panic("no return value specified for TokenizeProbabilistic")
+	}
+
+	var r0 sriracha.ProbabilisticToken
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(sriracha.RawRecord) (sriracha.ProbabilisticToken, error)); ok {
+		return returnFunc(record)
+	}
+	if returnFunc, ok := ret.Get(0).(func(sriracha.RawRecord) sriracha.ProbabilisticToken); ok {
+		r0 = returnFunc(record)
+	} else {
+		r0 = ret.Get(0).(sriracha.ProbabilisticToken)
+	}
+	if returnFunc, ok := ret.Get(1).(func(sriracha.RawRecord) error); ok {
+		r1 = returnFunc(record)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockSession_TokenizeProbabilistic_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TokenizeProbabilistic'
+type MockSession_TokenizeProbabilistic_Call struct {
+	*mock.Call
+}
+
+// TokenizeProbabilistic is a helper method to define mock.On call
+//   - record sriracha.RawRecord
+func (_e *MockSession_Expecter) TokenizeProbabilistic(record interface{}) *MockSession_TokenizeProbabilistic_Call {
+	return &MockSession_TokenizeProbabilistic_Call{Call: _e.mock.On("TokenizeProbabilistic", record)}
+}
+
+func (_c *MockSession_TokenizeProbabilistic_Call) Run(run func(record sriracha.RawRecord)) *MockSession_TokenizeProbabilistic_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 sriracha.RawRecord
+		if args[0] != nil {
+			arg0 = args[0].(sriracha.RawRecord)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockSession_TokenizeProbabilistic_Call) Return(probabilisticToken sriracha.ProbabilisticToken, err error) *MockSession_TokenizeProbabilistic_Call {
+	_c.Call.Return(probabilisticToken, err)
+	return _c
+}
+
+func (_c *MockSession_TokenizeProbabilistic_Call) RunAndReturn(run func(record sriracha.RawRecord) (sriracha.ProbabilisticToken, error)) *MockSession_TokenizeProbabilistic_Call {
 	_c.Call.Return(run)
 	return _c
 }

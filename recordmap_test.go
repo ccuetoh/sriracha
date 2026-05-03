@@ -16,7 +16,7 @@ func TestRecordFromMap(t *testing.T) {
 			{Path: FieldNameGiven, Required: true, Weight: 1.0},
 			{Path: FieldNameFamily, Required: false, Weight: 1.0},
 		},
-		BloomParams: DefaultBloomConfig(),
+		ProbabilisticParams: DefaultProbabilisticConfig(),
 	}
 
 	t.Run("AllResolve", func(t *testing.T) {

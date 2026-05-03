@@ -18,7 +18,7 @@ func newSess(t *testing.T) Session {
 			{Path: sriracha.FieldNameGiven, Required: true, Weight: 2.0},
 			{Path: sriracha.FieldNameFamily, Required: false, Weight: 1.0},
 		},
-		BloomParams: sriracha.DefaultBloomConfig(),
+		ProbabilisticParams: sriracha.DefaultProbabilisticConfig(),
 	}
 	s, err := New([]byte("secret"), fs, token.WithKeyID("k1"))
 	require.NoError(t, err)
@@ -37,9 +37,9 @@ func TestNew(t *testing.T) {
 	t.Run("EmptySecretRejected", func(t *testing.T) {
 		t.Parallel()
 		fs := sriracha.FieldSet{
-			Version:     "v1",
-			Fields:      []sriracha.FieldSpec{{Path: sriracha.FieldNameGiven, Weight: 1.0}},
-			BloomParams: sriracha.DefaultBloomConfig(),
+			Version:             "v1",
+			Fields:              []sriracha.FieldSpec{{Path: sriracha.FieldNameGiven, Weight: 1.0}},
+			ProbabilisticParams: sriracha.DefaultProbabilisticConfig(),
 		}
 		_, err := New(nil, fs)
 		require.Error(t, err)
@@ -50,12 +50,12 @@ func TestSession_TokenizeAndMatch(t *testing.T) {
 	t.Parallel()
 	s := newSess(t)
 
-	a, err := s.TokenizeBloom(sriracha.RawRecord{
+	a, err := s.TokenizeProbabilistic(sriracha.RawRecord{
 		sriracha.FieldNameGiven:  "Christopher",
 		sriracha.FieldNameFamily: "Smith",
 	})
 	require.NoError(t, err)
-	b, err := s.TokenizeBloom(sriracha.RawRecord{
+	b, err := s.TokenizeProbabilistic(sriracha.RawRecord{
 		sriracha.FieldNameGiven:  "Cristopher",
 		sriracha.FieldNameFamily: "Smith",
 	})
@@ -73,9 +73,9 @@ func TestSession_DeterministicEqual(t *testing.T) {
 	rec := sriracha.RawRecord{
 		sriracha.FieldNameGiven: "Alice",
 	}
-	a, err := s.Tokenize(rec)
+	a, err := s.TokenizeDeterministic(rec)
 	require.NoError(t, err)
-	b, err := s.Tokenize(rec)
+	b, err := s.TokenizeDeterministic(rec)
 	require.NoError(t, err)
 	assert.True(t, s.Equal(a, b))
 }
@@ -109,7 +109,7 @@ func TestSession_FieldSetIsCopy(t *testing.T) {
 	fs1.Fields[0].Weight = 999
 	fs2 := s.FieldSet()
 	assert.NotEqual(t, 999.0, fs2.Fields[0].Weight, "FieldSet() must return an independent copy")
-	fs1.BloomParams.NgramSizes[0] = 99
+	fs1.ProbabilisticParams.NgramSizes[0] = 99
 	fs2 = s.FieldSet()
-	assert.NotEqual(t, 99, fs2.BloomParams.NgramSizes[0], "FieldSet() NgramSizes must be deep-copied")
+	assert.NotEqual(t, 99, fs2.ProbabilisticParams.NgramSizes[0], "FieldSet() NgramSizes must be deep-copied")
 }

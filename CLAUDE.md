@@ -24,7 +24,7 @@ test/bench/      # OpenSanctions quality + perf harness, gated by //go:build ben
 - `FieldPath` is a struct with precomputed `org`, `namespace`, `localName` fields — never split the string at call time.
 - `ParseFieldPath(s)` is the validated constructor (returns error); `MustParsePath(s)` panics and is only for package-level `var` declarations.
 - `DefaultFieldSet()` returns a deep copy — the internal `defaultV01` is unexported.
-- `TokenizeRecord` is deterministic-only; `TokenizeRecordBloom` is probabilistic-only — no internal mode dispatch.
+- `TokenizeDeterministic` is deterministic-only; `TokenizeProbabilistic` is probabilistic-only — no internal mode dispatch.
 
 ## Testing conventions
 - `t.Parallel()` as the **first statement** of every top-level test and every `t.Run` subtest.

@@ -19,7 +19,7 @@ that can be compared without exposing the underlying identifiers.
 ## Features
 
 - Deterministic tokenization using HMAC-SHA256
-- Probabilistic tokenization with Bloom filters and Dice coefficient
+- Probabilistic tokenization with Sørensen–Dice matching
 - Optional BLIP and balanced filter defenses against frequency analysis
 - Unicode normalization pipeline
 - Canonical field set with support for extended schemas
@@ -51,12 +51,12 @@ func main() {
 	defer s.Destroy()
 
 	// Deterministic tokenization
-	tokA, _ := s.Tokenize(sriracha.RawRecord{
+	tokA, _ := s.TokenizeDeterministic(sriracha.RawRecord{
 		sriracha.FieldNameGiven:  "Alice",
 		sriracha.FieldNameFamily: "Smith",
 	})
 
-	tokB, _ := s.Tokenize(sriracha.RawRecord{
+	tokB, _ := s.TokenizeDeterministic(sriracha.RawRecord{
 		sriracha.FieldNameGiven:  "Alice",
 		sriracha.FieldNameFamily: "Smith",
 	})
@@ -65,12 +65,12 @@ func main() {
 	fmt.Printf("match: %v\n", eq)
 
 	// Probabilistic tokenization
-	bloomA, _ := s.TokenizeBloom(sriracha.RawRecord{
+	bloomA, _ := s.TokenizeProbabilistic(sriracha.RawRecord{
 		sriracha.FieldNameGiven:  "Alice",
 		sriracha.FieldNameFamily: "Smith",
 	})
 
-	bloomB, _ := s.TokenizeBloom(sriracha.RawRecord{
+	bloomB, _ := s.TokenizeProbabilistic(sriracha.RawRecord{
 		sriracha.FieldNameGiven:  "Alice",
 		sriracha.FieldNameFamily: "Smyth", // typo
 	})

@@ -12,8 +12,8 @@ import (
 	"github.com/ccuetoh/sriracha/normalize"
 )
 
-func (t *tokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.BloomToken, error) {
-	cfg := fs.BloomParams
+func (t *tokenizer) TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.ProbabilisticToken, error) {
+	cfg := fs.ProbabilisticParams
 	fieldBytes := int(((cfg.SizeBits + 63) / 64) * 8)
 	fields := make([][]byte, len(fs.Fields))
 
@@ -25,7 +25,7 @@ func (t *tokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.F
 		raw, ok := record[spec.Path]
 		if !ok {
 			if spec.Required {
-				return sriracha.BloomToken{}, fmt.Errorf("token: required field %q missing", spec.Path)
+				return sriracha.ProbabilisticToken{}, fmt.Errorf("token: required field %q missing", spec.Path)
 			}
 			fields[i] = make([]byte, fieldBytes)
 			continue
@@ -33,16 +33,16 @@ func (t *tokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.F
 
 		normalized, err := normalize.Normalize(raw, spec.Path)
 		if err != nil {
-			return sriracha.BloomToken{}, fmt.Errorf("token: normalization failed for field %q: %w", spec.Path, err)
+			return sriracha.ProbabilisticToken{}, fmt.Errorf("token: normalization failed for field %q: %w", spec.Path, err)
 		}
 		fields[i] = tokenizeFieldBloom(h, normalized, spec.Path, cfg)
 	}
 
-	return sriracha.BloomToken{
+	return sriracha.ProbabilisticToken{
 		FieldSetVersion:     fs.Version,
 		KeyID:               t.keyID,
 		FieldSetFingerprint: fs.Fingerprint(),
-		BloomParams:         cfg,
+		ProbabilisticParams: cfg,
 		Fields:              fields,
 	}, nil
 }
@@ -62,7 +62,7 @@ func (t *tokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.F
 // (chosen via a separate "balance:" stream) until the popcount reaches the
 // target. Both transforms are deterministic — identical inputs produce
 // identical filters.
-func tokenizeFieldBloom(h hash.Hash, normalizedValue string, path sriracha.FieldPath, cfg sriracha.BloomConfig) []byte {
+func tokenizeFieldBloom(h hash.Hash, normalizedValue string, path sriracha.FieldPath, cfg sriracha.ProbabilisticConfig) []byte {
 	f := bloom.New(uint(cfg.SizeBits), uint(cfg.HashCount))
 	bs := f.BitSet()
 	grams := ngrams(normalizedValue, cfg.NgramSizes)

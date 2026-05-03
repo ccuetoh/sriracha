@@ -11,7 +11,7 @@ import (
 // Fingerprint returns the lowercase hex-encoded SHA-256 of a canonical encoding
 // of fs. Two FieldSets with identical schemas produce identical fingerprints;
 // any change to Version, field path, ordering, Required, Weight, or any
-// BloomParams component changes it.
+// ProbabilisticParams component changes it.
 //
 // The canonical encoding (big-endian throughout, matching the length-prefix
 // convention used by the token package) is:
@@ -22,9 +22,9 @@ import (
 //	    u32(len(Path.String())) || Path.String()
 //	    u8(Required: 0 or 1)
 //	    u64(math.Float64bits(Weight))
-//	u32(BloomParams.SizeBits)
-//	u32(uint32(BloomParams.HashCount))
-//	u32(len(BloomParams.NgramSizes))
+//	u32(ProbabilisticParams.SizeBits)
+//	u32(uint32(ProbabilisticParams.HashCount))
+//	u32(len(ProbabilisticParams.NgramSizes))
 //	for each NgramSize: u32(int32(size))
 //
 // This spec is locked: any change to the encoding is a breaking on-the-wire
@@ -50,12 +50,12 @@ func (fs FieldSet) Fingerprint() string {
 		h.Write(b[:8])
 	}
 
-	binary.BigEndian.PutUint32(b[:4], fs.BloomParams.SizeBits)
+	binary.BigEndian.PutUint32(b[:4], fs.ProbabilisticParams.SizeBits)
 	h.Write(b[:4])
-	binary.BigEndian.PutUint32(b[:4], uint32(fs.BloomParams.HashCount)) //nolint:gosec // G115: HashCount bounded at validation time
+	binary.BigEndian.PutUint32(b[:4], uint32(fs.ProbabilisticParams.HashCount)) //nolint:gosec // G115: HashCount bounded at validation time
 	h.Write(b[:4])
-	writeU32Len(h, b[:4], len(fs.BloomParams.NgramSizes))
-	for _, sz := range fs.BloomParams.NgramSizes {
+	writeU32Len(h, b[:4], len(fs.ProbabilisticParams.NgramSizes))
+	for _, sz := range fs.ProbabilisticParams.NgramSizes {
 		binary.BigEndian.PutUint32(b[:4], uint32(sz)) //nolint:gosec // G115: NgramSizes bounded at validation time
 		h.Write(b[:4])
 	}
