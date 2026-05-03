@@ -11,10 +11,9 @@ By participating, you agree to uphold it.
 
 ## Before you start
 
-- **Open an issue or [GitHub Discussion](https://github.com/ccuetoh/sriracha/discussions)
-  first** for anything non-trivial: bug reports, feature ideas, or changes to
-  the normalization or tokenization pipelines. This avoids wasted work if the
-  direction needs adjusting.
+- **Open an issue first** for anything non-trivial: bug reports, feature
+  ideas, or changes to the normalization or tokenization pipelines. This
+  avoids wasted work if the direction needs adjusting.
 - Trivial fixes (typos, doc tweaks, obvious one-line bug fixes) can go
   straight to a PR.
 - **Security issues:** do **not** file a public issue or PR. Follow
