@@ -1,3 +1,15 @@
+// Package fieldset validates Sriracha FieldSet schemas and the records
+// produced against them, and exposes the canonical default schema.
+//
+// Validate rejects malformed FieldSets: empty version, duplicate paths,
+// negative weights, or a probabilistic configuration that would crash or
+// produce degenerate (all-zero) filters at tokenization time.
+// ValidateRecord runs the same per-field normalization as the tokenizer
+// and reports every required-but-missing field, unknown path, and
+// normalization failure in a single pass — useful for batch-ingest
+// pre-flight checks. DefaultFieldSet returns a deep copy of the canonical
+// 16-field schema with conservative weight defaults; tune via
+// token.Calibrate against a labeled pair set.
 package fieldset
 
 import (
@@ -13,7 +25,7 @@ import (
 //   - Version is empty
 //   - Any Path appears more than once
 //   - Any Weight is negative
-//   - BloomParams is invalid (zero size, zero hash count, or empty/non-positive ngram sizes)
+//   - ProbabilisticParams is invalid (zero size, zero hash count, or empty/non-positive ngram sizes)
 func Validate(fs sriracha.FieldSet) error {
 	if fs.Version == "" {
 		return errors.New("fieldset: version must not be empty")
@@ -31,7 +43,7 @@ func Validate(fs sriracha.FieldSet) error {
 		}
 	}
 
-	return validateBloomParams(fs.BloomParams)
+	return validateProbabilisticParams(fs.ProbabilisticParams)
 }
 
 // ValidateRecord reports every problem with record relative to fs in one
@@ -68,28 +80,28 @@ func ValidateRecord(record sriracha.RawRecord, fs sriracha.FieldSet) []error {
 	return errs
 }
 
-// validateBloomParams rejects BloomConfig values that would crash or produce
+// validateProbabilisticParams rejects ProbabilisticConfig values that would crash or produce
 // degenerate (all-zero) filters at tokenization time.
-func validateBloomParams(cfg sriracha.BloomConfig) error {
+func validateProbabilisticParams(cfg sriracha.ProbabilisticConfig) error {
 	if cfg.SizeBits == 0 {
-		return errors.New("fieldset: BloomParams.SizeBits must be > 0")
+		return errors.New("fieldset: ProbabilisticParams.SizeBits must be > 0")
 	}
 	if cfg.HashCount == 0 {
-		return errors.New("fieldset: BloomParams.HashCount must be > 0")
+		return errors.New("fieldset: ProbabilisticParams.HashCount must be > 0")
 	}
 	if len(cfg.NgramSizes) == 0 {
-		return errors.New("fieldset: BloomParams.NgramSizes must not be empty")
+		return errors.New("fieldset: ProbabilisticParams.NgramSizes must not be empty")
 	}
 	for i, sz := range cfg.NgramSizes {
 		if sz <= 0 {
-			return fmt.Errorf("fieldset: BloomParams.NgramSizes[%d] must be > 0, got %d", i, sz)
+			return fmt.Errorf("fieldset: ProbabilisticParams.NgramSizes[%d] must be > 0, got %d", i, sz)
 		}
 	}
 	if cfg.FlipProbability < 0 || cfg.FlipProbability >= 1 {
-		return fmt.Errorf("fieldset: BloomParams.FlipProbability must be in [0, 1), got %v", cfg.FlipProbability)
+		return fmt.Errorf("fieldset: ProbabilisticParams.FlipProbability must be in [0, 1), got %v", cfg.FlipProbability)
 	}
 	if cfg.TargetPopcount >= cfg.SizeBits {
-		return fmt.Errorf("fieldset: BloomParams.TargetPopcount must be < SizeBits, got %d (size %d)", cfg.TargetPopcount, cfg.SizeBits)
+		return fmt.Errorf("fieldset: ProbabilisticParams.TargetPopcount must be < SizeBits, got %d (size %d)", cfg.TargetPopcount, cfg.SizeBits)
 	}
 	return nil
 }

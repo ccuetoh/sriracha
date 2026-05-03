@@ -23,7 +23,7 @@ type DeterministicToken struct {
 	Fields              [][]byte `json:"fields"`
 }
 
-// BloomToken is the output of probabilistic (Bloom filter) tokenization.
+// ProbabilisticToken is the output of probabilistic (Bloom filter) tokenization.
 // Fields[i] is the serialized Bloom filter (little-endian uint64 words) for
 // FieldSet.Fields[i]. Absent optional fields produce an all-zero filter,
 // preserving positional alignment with the FieldSet.
@@ -33,12 +33,12 @@ type DeterministicToken struct {
 // (see FieldSet.Fingerprint); when both sides of a comparison have it set, it
 // surfaces silent schema drift (e.g. reordered fields) that the user-set
 // FieldSetVersion alone would miss.
-type BloomToken struct {
-	FieldSetVersion     string      `json:"field_set_version"`
-	KeyID               string      `json:"key_id,omitempty"`
-	FieldSetFingerprint string      `json:"field_set_fingerprint,omitempty"`
-	BloomParams         BloomConfig `json:"bloom_params"`
-	Fields              [][]byte    `json:"fields"`
+type ProbabilisticToken struct {
+	FieldSetVersion     string              `json:"field_set_version"`
+	KeyID               string              `json:"key_id,omitempty"`
+	FieldSetFingerprint string              `json:"field_set_fingerprint,omitempty"`
+	ProbabilisticParams ProbabilisticConfig `json:"probabilistic_params"`
+	Fields              [][]byte            `json:"fields"`
 }
 
 // FieldSpec describes one field within a FieldSet.
@@ -48,7 +48,7 @@ type FieldSpec struct {
 	Weight   float64   `json:"weight"`
 }
 
-// BloomConfig holds parameters for Bloom filter tokenization.
+// ProbabilisticConfig holds parameters for Bloom filter tokenization.
 //
 // FlipProbability and TargetPopcount enable opt-in privacy hardening against
 // frequency analysis. Both default to zero (disabled). When enabled, the
@@ -56,7 +56,7 @@ type FieldSpec struct {
 // filters) are seeded by HMAC-SHA256(secret, label || path || normalized
 // value), so the same input always produces the same hardened filter — both
 // institutions can match locally without coordinating randomness.
-type BloomConfig struct {
+type ProbabilisticConfig struct {
 	SizeBits        uint32  `json:"size_bits"`
 	NgramSizes      []int   `json:"ngram_sizes"`
 	HashCount       int     `json:"hash_count"`
@@ -64,43 +64,43 @@ type BloomConfig struct {
 	TargetPopcount  uint32  `json:"target_popcount,omitempty"`
 }
 
-// FastBloomConfig returns a lightweight Bloom filter configuration optimised
+// FastProbabilisticConfig returns a lightweight Bloom filter configuration optimised
 // for throughput over precision. Suitable for large-scale screening passes
 // where a secondary verification step follows.
-func FastBloomConfig() BloomConfig {
-	return BloomConfig{
+func FastProbabilisticConfig() ProbabilisticConfig {
+	return ProbabilisticConfig{
 		SizeBits:   1024,
 		NgramSizes: []int{2, 3},
 		HashCount:  2,
 	}
 }
 
-// DefaultBloomConfig returns the standard Bloom filter configuration.
+// DefaultProbabilisticConfig returns the standard Bloom filter configuration.
 // It balances precision and token size for most production workloads.
-func DefaultBloomConfig() BloomConfig {
-	return BloomConfig{
+func DefaultProbabilisticConfig() ProbabilisticConfig {
+	return ProbabilisticConfig{
 		SizeBits:   2048,
 		NgramSizes: []int{2, 3},
 		HashCount:  3,
 	}
 }
 
-// HighPrecisionBloomConfig returns a Bloom filter configuration tuned for
+// HighPrecisionProbabilisticConfig returns a Bloom filter configuration tuned for
 // maximum matching accuracy at the cost of larger tokens.
-func HighPrecisionBloomConfig() BloomConfig {
-	return BloomConfig{
+func HighPrecisionProbabilisticConfig() ProbabilisticConfig {
+	return ProbabilisticConfig{
 		SizeBits:   4096,
 		NgramSizes: []int{2, 3},
 		HashCount:  5,
 	}
 }
 
-// HardenedBloomConfig returns a Bloom filter configuration with privacy
+// HardenedProbabilisticConfig returns a Bloom filter configuration with privacy
 // defenses enabled: each bit is flipped with probability 0.02 (BLIP) and the
 // final filter is padded to a popcount of 400 (balanced filter). These
 // defenses blunt frequency-analysis attacks at a small cost to recall.
-func HardenedBloomConfig() BloomConfig {
-	cfg := DefaultBloomConfig()
+func HardenedProbabilisticConfig() ProbabilisticConfig {
+	cfg := DefaultProbabilisticConfig()
 	cfg.FlipProbability = 0.02
 	cfg.TargetPopcount = 400
 	return cfg
@@ -108,9 +108,9 @@ func HardenedBloomConfig() BloomConfig {
 
 // FieldSet describes the schema used for tokenization.
 type FieldSet struct {
-	Version     string      `json:"version"`
-	Fields      []FieldSpec `json:"fields"`
-	BloomParams BloomConfig `json:"bloom_params"`
+	Version             string              `json:"version"`
+	Fields              []FieldSpec         `json:"fields"`
+	ProbabilisticParams ProbabilisticConfig `json:"probabilistic_params"`
 }
 
 // String returns a redacted summary of the token: counts and metadata only,
@@ -123,10 +123,10 @@ func (t DeterministicToken) String() string {
 
 // String returns a redacted summary of the token: counts and metadata only,
 // never any byte from Fields. Safe for logging.
-func (t BloomToken) String() string {
+func (t ProbabilisticToken) String() string {
 	present, total, bytes := summariseFields(t.Fields)
-	return fmt.Sprintf("BloomToken{v=%s key=%s fp=%s size=%db fields=%d/%d bytes=%d}",
-		t.FieldSetVersion, t.KeyID, shortFingerprint(t.FieldSetFingerprint), t.BloomParams.SizeBits, present, total, bytes)
+	return fmt.Sprintf("ProbabilisticToken{v=%s key=%s fp=%s size=%db fields=%d/%d bytes=%d}",
+		t.FieldSetVersion, t.KeyID, shortFingerprint(t.FieldSetFingerprint), t.ProbabilisticParams.SizeBits, present, total, bytes)
 }
 
 // shortFingerprint returns the first 8 hex chars of fp, or "" if fp is empty.
@@ -171,7 +171,7 @@ func (t DeterministicToken) Annotate(fs FieldSet) AnnotatedToken {
 // path and presence flag for every field in fs but never the raw filter
 // bytes. Presence is defined as "any bit set" — an all-zero filter is treated
 // as absent, matching the convention used by Match.
-func (t BloomToken) Annotate(fs FieldSet) AnnotatedToken {
+func (t ProbabilisticToken) Annotate(fs FieldSet) AnnotatedToken {
 	return annotateFields(t.FieldSetVersion, t.KeyID, t.FieldSetFingerprint, t.Fields, fs, presentByAnyBit)
 }
 

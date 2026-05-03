@@ -11,13 +11,13 @@
 // # Recommended entry point
 //
 // Most callers want session.Session — it bundles a token.Tokenizer with a
-// FieldSet so you don't have to thread the schema through every Tokenize /
-// Match / Equal call:
+// FieldSet so you don't have to thread the schema through every tokenize /
+// match call:
 //
 //	s, err := session.New(secret, fieldset.DefaultFieldSet(), token.WithKeyID("k1"))
 //	if err != nil { ... }
 //	defer s.Destroy()
-//	tok, err := s.TokenizeBloom(record)
+//	tok, err := s.TokenizeProbabilistic(record)
 //
 // # Package layout
 //

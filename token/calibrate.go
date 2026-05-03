@@ -7,12 +7,12 @@ import (
 	"github.com/ccuetoh/sriracha"
 )
 
-// LabeledPair is one row of ground-truth: two BloomTokens believed to be
+// LabeledPair is one row of ground-truth: two ProbabilisticTokens believed to be
 // either the same person (Match=true) or different people (Match=false).
 type LabeledPair struct {
-	A     sriracha.BloomToken `json:"a"`
-	B     sriracha.BloomToken `json:"b"`
-	Match bool                `json:"match"`
+	A     sriracha.ProbabilisticToken `json:"a"`
+	B     sriracha.ProbabilisticToken `json:"b"`
+	Match bool                        `json:"match"`
 }
 
 // ROCPoint is one threshold and the precision/recall/F1 it produces over the

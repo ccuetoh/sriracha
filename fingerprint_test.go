@@ -16,7 +16,7 @@ func TestFingerprint_Determinism(t *testing.T) {
 			{Path: FieldNameGiven, Required: true, Weight: 2.0},
 			{Path: FieldNameFamily, Required: false, Weight: 2.5},
 		},
-		BloomParams: BloomConfig{SizeBits: 1024, NgramSizes: []int{2, 3}, HashCount: 2},
+		ProbabilisticParams: ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2, 3}, HashCount: 2},
 	}
 	assert.Equal(t, fs.Fingerprint(), fs.Fingerprint(),
 		"Fingerprint must be stable across calls on the same value")
@@ -30,7 +30,7 @@ func TestFingerprint_GoldenVector(t *testing.T) {
 		Fields: []FieldSpec{
 			{Path: FieldNameGiven, Required: true, Weight: 1.0},
 		},
-		BloomParams: BloomConfig{SizeBits: 1024, NgramSizes: []int{2}, HashCount: 2},
+		ProbabilisticParams: ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2}, HashCount: 2},
 	}
 	const want = "d99c25e70d90b328d83991580082cccb64c22a07ec7df5f829d0b75bc7a06262"
 	got := fs.Fingerprint()
@@ -49,16 +49,16 @@ func TestFingerprint_SensitivityMatrix(t *testing.T) {
 			{Path: FieldNameGiven, Required: true, Weight: 1.0},
 			{Path: FieldNameFamily, Required: false, Weight: 2.0},
 		},
-		BloomParams: BloomConfig{SizeBits: 1024, NgramSizes: []int{2, 3}, HashCount: 2},
+		ProbabilisticParams: ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2, 3}, HashCount: 2},
 	}
 
 	mutate := func(fn func(*FieldSet)) FieldSet {
 		fs := FieldSet{
-			Version:     base.Version,
-			Fields:      append([]FieldSpec(nil), base.Fields...),
-			BloomParams: base.BloomParams,
+			Version:             base.Version,
+			Fields:              append([]FieldSpec(nil), base.Fields...),
+			ProbabilisticParams: base.ProbabilisticParams,
 		}
-		fs.BloomParams.NgramSizes = append([]int(nil), base.BloomParams.NgramSizes...)
+		fs.ProbabilisticParams.NgramSizes = append([]int(nil), base.ProbabilisticParams.NgramSizes...)
 		fn(&fs)
 		return fs
 	}
@@ -72,9 +72,9 @@ func TestFingerprint_SensitivityMatrix(t *testing.T) {
 		{"RequiredFlip", mutate(func(fs *FieldSet) { fs.Fields[0].Required = false }).Fingerprint()},
 		{"WeightChange", mutate(func(fs *FieldSet) { fs.Fields[0].Weight = 1.5 }).Fingerprint()},
 		{"PathChange", mutate(func(fs *FieldSet) { fs.Fields[0].Path = FieldNameFull }).Fingerprint()},
-		{"BloomSizeChange", mutate(func(fs *FieldSet) { fs.BloomParams.SizeBits = 2048 }).Fingerprint()},
-		{"BloomHashCountChange", mutate(func(fs *FieldSet) { fs.BloomParams.HashCount = 3 }).Fingerprint()},
-		{"NgramSizesChange", mutate(func(fs *FieldSet) { fs.BloomParams.NgramSizes = []int{2} }).Fingerprint()},
+		{"BloomSizeChange", mutate(func(fs *FieldSet) { fs.ProbabilisticParams.SizeBits = 2048 }).Fingerprint()},
+		{"BloomHashCountChange", mutate(func(fs *FieldSet) { fs.ProbabilisticParams.HashCount = 3 }).Fingerprint()},
+		{"NgramSizesChange", mutate(func(fs *FieldSet) { fs.ProbabilisticParams.NgramSizes = []int{2} }).Fingerprint()},
 	}
 
 	baseFP := base.Fingerprint()

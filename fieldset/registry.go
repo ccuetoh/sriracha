@@ -22,7 +22,7 @@ var defaultV01 = sriracha.FieldSet{
 		{Path: sriracha.FieldContactEmail, Required: false, Weight: 2.0},
 		{Path: sriracha.FieldContactPhone, Required: false, Weight: 1.5},
 	},
-	BloomParams: sriracha.DefaultBloomConfig(),
+	ProbabilisticParams: sriracha.DefaultProbabilisticConfig(),
 }
 
 // DefaultFieldSet returns a deep copy of the canonical Sriracha FieldSet
@@ -51,12 +51,12 @@ func DefaultFieldSet() sriracha.FieldSet {
 	fields := make([]sriracha.FieldSpec, len(defaultV01.Fields))
 	copy(fields, defaultV01.Fields)
 
-	bp := defaultV01.BloomParams
-	bp.NgramSizes = append([]int(nil), defaultV01.BloomParams.NgramSizes...)
+	bp := defaultV01.ProbabilisticParams
+	bp.NgramSizes = append([]int(nil), defaultV01.ProbabilisticParams.NgramSizes...)
 
 	return sriracha.FieldSet{
-		Version:     defaultV01.Version,
-		Fields:      fields,
-		BloomParams: bp,
+		Version:             defaultV01.Version,
+		Fields:              fields,
+		ProbabilisticParams: bp,
 	}
 }

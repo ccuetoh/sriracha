@@ -33,7 +33,7 @@ func bloomFS(fields ...sriracha.FieldSpec) sriracha.FieldSet {
 	return sriracha.FieldSet{
 		Version: "1.0.0-test",
 		Fields:  fields,
-		BloomParams: sriracha.BloomConfig{
+		ProbabilisticParams: sriracha.ProbabilisticConfig{
 			SizeBits:   1024,
 			NgramSizes: []int{2, 3},
 			HashCount:  2,
@@ -68,7 +68,7 @@ func TestNew(t *testing.T) {
 	}
 }
 
-func TestTokenizeRecord(t *testing.T) {
+func TestTokenizeDeterministic(t *testing.T) {
 	t.Parallel()
 	givenSpec := sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0}
 	familySpec := sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: true, Weight: 1.0}
@@ -86,9 +86,9 @@ func TestTokenizeRecord(t *testing.T) {
 				rec := sriracha.RawRecord{sriracha.FieldNameGiven: "John"}
 				fs := deterministicFS(givenSpec)
 
-				tr1, err := tok.TokenizeRecord(rec, fs)
+				tr1, err := tok.TokenizeDeterministic(rec, fs)
 				require.NoError(t, err)
-				tr2, err := tok.TokenizeRecord(rec, fs)
+				tr2, err := tok.TokenizeDeterministic(rec, fs)
 				require.NoError(t, err)
 				assert.True(t, Equal(tr1, tr2), "identical inputs should produce equal tokens")
 			},
@@ -101,7 +101,7 @@ func TestTokenizeRecord(t *testing.T) {
 					sriracha.FieldNameGiven:  "John",
 					sriracha.FieldNameFamily: "John",
 				}
-				tr, err := tok.TokenizeRecord(rec, deterministicFS(givenSpec, familySpec))
+				tr, err := tok.TokenizeDeterministic(rec, deterministicFS(givenSpec, familySpec))
 				require.NoError(t, err)
 				require.Len(t, tr.Fields, 2)
 				assert.Len(t, tr.Fields[0], 32, "expected 32-byte HMAC for given name")
@@ -115,9 +115,9 @@ func TestTokenizeRecord(t *testing.T) {
 				rec := sriracha.RawRecord{sriracha.FieldNameGiven: "John"}
 				fs := deterministicFS(givenSpec)
 
-				tr1, err := newTok(t, "secret-a").TokenizeRecord(rec, fs)
+				tr1, err := newTok(t, "secret-a").TokenizeDeterministic(rec, fs)
 				require.NoError(t, err)
-				tr2, err := newTok(t, "secret-b").TokenizeRecord(rec, fs)
+				tr2, err := newTok(t, "secret-b").TokenizeDeterministic(rec, fs)
 				require.NoError(t, err)
 				assert.False(t, Equal(tr1, tr2), "different secrets should produce different tokens")
 			},
@@ -126,7 +126,7 @@ func TestTokenizeRecord(t *testing.T) {
 			name: "MissingRequired",
 			run: func(t *testing.T) {
 				tok := newTok(t, "secret")
-				_, err := tok.TokenizeRecord(sriracha.RawRecord{}, deterministicFS(givenSpec))
+				_, err := tok.TokenizeDeterministic(sriracha.RawRecord{}, deterministicFS(givenSpec))
 				assert.Error(t, err)
 			},
 		},
@@ -135,7 +135,7 @@ func TestTokenizeRecord(t *testing.T) {
 			run: func(t *testing.T) {
 				tok := newTok(t, "secret")
 				rec := sriracha.RawRecord{sriracha.FieldNameGiven: "John"}
-				tr, err := tok.TokenizeRecord(rec, deterministicFS(givenSpec, familyOptional))
+				tr, err := tok.TokenizeDeterministic(rec, deterministicFS(givenSpec, familyOptional))
 				require.NoError(t, err)
 				require.Len(t, tr.Fields, 2)
 				assert.Len(t, tr.Fields[0], 32, "present field should have 32-byte HMAC")
@@ -146,7 +146,7 @@ func TestTokenizeRecord(t *testing.T) {
 			name: "EmptyAllOptional",
 			run: func(t *testing.T) {
 				tok := newTok(t, "secret")
-				tr, err := tok.TokenizeRecord(sriracha.RawRecord{}, deterministicFS(givenOptional, familyOptional))
+				tr, err := tok.TokenizeDeterministic(sriracha.RawRecord{}, deterministicFS(givenOptional, familyOptional))
 				require.NoError(t, err)
 				require.Len(t, tr.Fields, 2)
 				assert.Nil(t, tr.Fields[0])
@@ -159,7 +159,7 @@ func TestTokenizeRecord(t *testing.T) {
 				tok := newTok(t, "secret")
 				rec := sriracha.RawRecord{sriracha.FieldDateBirth: "not-a-date"}
 				fs := deterministicFS(sriracha.FieldSpec{Path: sriracha.FieldDateBirth, Required: true, Weight: 1.0})
-				_, err := tok.TokenizeRecord(rec, fs)
+				_, err := tok.TokenizeDeterministic(rec, fs)
 				assert.Error(t, err)
 			},
 		},
@@ -168,7 +168,7 @@ func TestTokenizeRecord(t *testing.T) {
 			run: func(t *testing.T) {
 				tok := newTok(t, "secret")
 				fs := deterministicFS(givenSpec)
-				tr, err := tok.TokenizeRecord(sriracha.RawRecord{sriracha.FieldNameGiven: "John"}, fs)
+				tr, err := tok.TokenizeDeterministic(sriracha.RawRecord{sriracha.FieldNameGiven: "John"}, fs)
 				require.NoError(t, err)
 				assert.Equal(t, fs.Version, tr.FieldSetVersion)
 			},
@@ -177,7 +177,7 @@ func TestTokenizeRecord(t *testing.T) {
 			name: "KeyIDPropagated",
 			run: func(t *testing.T) {
 				tok := newTok(t, "secret", WithKeyID("k1"))
-				tr, err := tok.TokenizeRecord(sriracha.RawRecord{sriracha.FieldNameGiven: "John"}, deterministicFS(givenSpec))
+				tr, err := tok.TokenizeDeterministic(sriracha.RawRecord{sriracha.FieldNameGiven: "John"}, deterministicFS(givenSpec))
 				require.NoError(t, err)
 				assert.Equal(t, "k1", tr.KeyID)
 			},
@@ -193,9 +193,9 @@ func TestTokenizeRecord(t *testing.T) {
 				tok := newTok(t, "secret")
 				rec := sriracha.RawRecord{sriracha.FieldNameGiven: "x"}
 				fs := deterministicFS(givenSpec)
-				tr1, err := tok.TokenizeRecord(rec, fs)
+				tr1, err := tok.TokenizeDeterministic(rec, fs)
 				require.NoError(t, err)
-				tr2, err := tok.TokenizeRecord(rec, fs)
+				tr2, err := tok.TokenizeDeterministic(rec, fs)
 				require.NoError(t, err)
 				require.Len(t, tr1.Fields, 1)
 				assert.Equal(t, tr1.Fields[0], tr2.Fields[0])
@@ -231,11 +231,11 @@ func TestTokenizeField(t *testing.T) {
 
 		fromField, err := tok.TokenizeField("Alice", sriracha.FieldNameGiven)
 		require.NoError(t, err)
-		fromRecord, err := tok.TokenizeRecord(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
+		fromRecord, err := tok.TokenizeDeterministic(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
 		require.NoError(t, err)
 		require.Len(t, fromRecord.Fields, 1)
 		assert.Equal(t, fromField, fromRecord.Fields[0],
-			"TokenizeField must produce the same bytes as TokenizeRecord for that field")
+			"TokenizeField must produce the same bytes as TokenizeDeterministic for that field")
 	})
 
 	t.Run("DifferentPathsDiffer", func(t *testing.T) {
@@ -256,7 +256,7 @@ func TestTokenizeField(t *testing.T) {
 	})
 }
 
-func TestTokenizeRecordBloom(t *testing.T) {
+func TestTokenizeProbabilistic(t *testing.T) {
 	t.Parallel()
 	givenSpec := sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0}
 	familySpec := sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: true, Weight: 1.0}
@@ -270,7 +270,7 @@ func TestTokenizeRecordBloom(t *testing.T) {
 			name: "MissingRequired",
 			run: func(t *testing.T) {
 				tok := newTok(t, "secret")
-				_, err := tok.TokenizeRecordBloom(sriracha.RawRecord{}, bloomFS(givenSpec))
+				_, err := tok.TokenizeProbabilistic(sriracha.RawRecord{}, bloomFS(givenSpec))
 				assert.Error(t, err)
 			},
 		},
@@ -280,7 +280,7 @@ func TestTokenizeRecordBloom(t *testing.T) {
 				tok := newTok(t, "secret")
 				rec := sriracha.RawRecord{sriracha.FieldDateBirth: "not-a-date"}
 				fs := bloomFS(sriracha.FieldSpec{Path: sriracha.FieldDateBirth, Required: true, Weight: 1.0})
-				_, err := tok.TokenizeRecordBloom(rec, fs)
+				_, err := tok.TokenizeProbabilistic(rec, fs)
 				assert.Error(t, err)
 			},
 		},
@@ -289,7 +289,7 @@ func TestTokenizeRecordBloom(t *testing.T) {
 			run: func(t *testing.T) {
 				tok := newTok(t, "secret")
 				fs := bloomFS(givenSpec, familyOptional)
-				tr, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: "John"}, fs)
+				tr, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: "John"}, fs)
 				require.NoError(t, err)
 				require.Len(t, tr.Fields, 2)
 				assert.Equal(t, make([]byte, 128), tr.Fields[1], "absent optional field should be all-zero filter")
@@ -304,12 +304,12 @@ func TestTokenizeRecordBloom(t *testing.T) {
 					sriracha.FieldNameGiven:  "John",
 					sriracha.FieldNameFamily: "Doe",
 				}
-				tr, err := tok.TokenizeRecordBloom(rec, fs)
+				tr, err := tok.TokenizeProbabilistic(rec, fs)
 				require.NoError(t, err)
 				require.Len(t, tr.Fields, 2, "expected one filter per FieldSet entry")
 				assert.Len(t, tr.Fields[0], 128, "expected 128 bytes per 1024-bit filter")
 				assert.Len(t, tr.Fields[1], 128, "expected 128 bytes per 1024-bit filter")
-				assert.Equal(t, fs.BloomParams, tr.BloomParams)
+				assert.Equal(t, fs.ProbabilisticParams, tr.ProbabilisticParams)
 				assert.Equal(t, fs.Version, tr.FieldSetVersion)
 			},
 		},
@@ -317,7 +317,7 @@ func TestTokenizeRecordBloom(t *testing.T) {
 			name: "KeyIDPropagated",
 			run: func(t *testing.T) {
 				tok := newTok(t, "secret", WithKeyID("k1"))
-				tr, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: "John"}, bloomFS(givenSpec))
+				tr, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: "John"}, bloomFS(givenSpec))
 				require.NoError(t, err)
 				assert.Equal(t, "k1", tr.KeyID)
 			},
@@ -334,7 +334,7 @@ func TestTokenizeRecordBloom(t *testing.T) {
 // "John" vs "Jon" yields very few bigrams/trigrams and unreliable Dice scores,
 // so this case uses "Christopher" vs "Cristopher" to exercise typo similarity
 // with a meaningful number of ngrams.
-func TestTokenizeRecordBloom_NameSimilarity(t *testing.T) {
+func TestTokenizeProbabilistic_NameSimilarity(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -353,9 +353,9 @@ func TestTokenizeRecordBloom_NameSimilarity(t *testing.T) {
 			tok := newTok(t, "secret")
 			fs := bloomFS(sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
 
-			tr1, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: tc.nameA}, fs)
+			tr1, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: tc.nameA}, fs)
 			require.NoError(t, err)
-			tr2, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: tc.nameB}, fs)
+			tr2, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: tc.nameB}, fs)
 			require.NoError(t, err)
 
 			scores, err := DicePerField(tr1, tr2)
@@ -396,7 +396,7 @@ func TestTokenizer_Concurrent(t *testing.T) {
 					wg.Add(1)
 					go func(i int) {
 						defer wg.Done()
-						tr, err := tok.TokenizeRecord(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, dfs)
+						tr, err := tok.TokenizeDeterministic(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, dfs)
 						assert.NoError(t, err)
 						results[i] = tr
 					}(i)
@@ -411,13 +411,13 @@ func TestTokenizer_Concurrent(t *testing.T) {
 			name: "Bloom",
 			run: func(t *testing.T) {
 				const n = 64
-				results := make([]sriracha.BloomToken, n)
+				results := make([]sriracha.ProbabilisticToken, n)
 				var wg sync.WaitGroup
 				for i := range n {
 					wg.Add(1)
 					go func(i int) {
 						defer wg.Done()
-						tr, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: "Christopher"}, bfs)
+						tr, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: "Christopher"}, bfs)
 						assert.NoError(t, err)
 						results[i] = tr
 					}(i)
@@ -535,7 +535,7 @@ func TestNgrams(t *testing.T) {
 	}
 }
 
-func BenchmarkTokenizeRecord(b *testing.B) {
+func BenchmarkTokenizeDeterministic(b *testing.B) {
 	tok, _ := New([]byte("bench-secret-32-bytes-long!!!!!"))
 	rec := sriracha.RawRecord{
 		sriracha.FieldNameGiven:    "Alice",
@@ -551,11 +551,11 @@ func BenchmarkTokenizeRecord(b *testing.B) {
 	)
 	b.ResetTimer()
 	for range b.N {
-		_, _ = tok.TokenizeRecord(rec, fs)
+		_, _ = tok.TokenizeDeterministic(rec, fs)
 	}
 }
 
-func BenchmarkTokenizeRecordBloom(b *testing.B) {
+func BenchmarkTokenizeProbabilistic(b *testing.B) {
 	tok, _ := New([]byte("bench-secret-32-bytes-long!!!!!"))
 	rec := sriracha.RawRecord{
 		sriracha.FieldNameGiven:    "Alice",
@@ -571,7 +571,7 @@ func BenchmarkTokenizeRecordBloom(b *testing.B) {
 	)
 	b.ResetTimer()
 	for range b.N {
-		_, _ = tok.TokenizeRecordBloom(rec, fs)
+		_, _ = tok.TokenizeProbabilistic(rec, fs)
 	}
 }
 
@@ -616,9 +616,9 @@ func FuzzNgrams(f *testing.F) {
 	})
 }
 
-// FuzzTokenizeRecord verifies that TokenizeRecord never panics for arbitrary
+// FuzzTokenizeDeterministic verifies that TokenizeDeterministic never panics for arbitrary
 // field values and that its output is self-consistent under Equal.
-func FuzzTokenizeRecord(f *testing.F) {
+func FuzzTokenizeDeterministic(f *testing.F) {
 	f.Add("Alice", "Smith")
 	f.Add("", "")
 	f.Add("\x00", "\xff")
@@ -634,14 +634,14 @@ func FuzzTokenizeRecord(f *testing.F) {
 			sriracha.FieldNameGiven:  given,
 			sriracha.FieldNameFamily: family,
 		}
-		tr1, err := tok.TokenizeRecord(rec, fs)
+		tr1, err := tok.TokenizeDeterministic(rec, fs)
 		// Skip inputs that legitimately fail tokenization (e.g. invalid normalization).
 		if err != nil {
 			return
 		}
-		tr2, err := tok.TokenizeRecord(rec, fs)
+		tr2, err := tok.TokenizeDeterministic(rec, fs)
 		if err != nil {
-			t.Fatalf("second TokenizeRecord call failed: %v", err)
+			t.Fatalf("second TokenizeDeterministic call failed: %v", err)
 		}
 		if !Equal(tr1, tr2) {
 			t.Fatalf("Equal returned false for identical inputs")
@@ -649,10 +649,10 @@ func FuzzTokenizeRecord(f *testing.F) {
 	})
 }
 
-// FuzzTokenizeRecordBloom verifies that TokenizeRecordBloom never panics for
+// FuzzTokenizeProbabilistic verifies that TokenizeProbabilistic never panics for
 // arbitrary field values, that its layout is positional (one filter per field
 // of the FieldSet), and that DicePerField scores a token against itself at 1.0.
-func FuzzTokenizeRecordBloom(f *testing.F) {
+func FuzzTokenizeProbabilistic(f *testing.F) {
 	f.Add("Alice", "Smith")
 	f.Add("", "")
 	f.Add("Christopher", "Jones")
@@ -662,14 +662,14 @@ func FuzzTokenizeRecordBloom(f *testing.F) {
 		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 1.0},
 	)
 	tok, _ := New([]byte("fuzz-secret"))
-	fieldFilterBytes := int((fs.BloomParams.SizeBits + 63) / 64 * 8)
+	fieldFilterBytes := int((fs.ProbabilisticParams.SizeBits + 63) / 64 * 8)
 
 	f.Fuzz(func(t *testing.T, given, family string) {
 		rec := sriracha.RawRecord{
 			sriracha.FieldNameGiven:  given,
 			sriracha.FieldNameFamily: family,
 		}
-		tr, err := tok.TokenizeRecordBloom(rec, fs)
+		tr, err := tok.TokenizeProbabilistic(rec, fs)
 		// Skip inputs that legitimately fail tokenization (e.g. invalid normalization).
 		if err != nil {
 			return

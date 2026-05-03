@@ -18,9 +18,9 @@ func TestCalibrate(t *testing.T) {
 		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 1.0},
 	)
 
-	tokenize := func(t *testing.T, given, family string) sriracha.BloomToken {
+	tokenize := func(t *testing.T, given, family string) sriracha.ProbabilisticToken {
 		t.Helper()
-		tr, err := tok.TokenizeRecordBloom(sriracha.RawRecord{
+		tr, err := tok.TokenizeProbabilistic(sriracha.RawRecord{
 			sriracha.FieldNameGiven:  given,
 			sriracha.FieldNameFamily: family,
 		}, fs)

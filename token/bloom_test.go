@@ -11,11 +11,11 @@ import (
 	"github.com/ccuetoh/sriracha"
 )
 
-func bloomFSWithCfg(cfg sriracha.BloomConfig, fields ...sriracha.FieldSpec) sriracha.FieldSet {
+func bloomFSWithCfg(cfg sriracha.ProbabilisticConfig, fields ...sriracha.FieldSpec) sriracha.FieldSet {
 	return sriracha.FieldSet{
-		Version:     "1.0.0-test",
-		Fields:      fields,
-		BloomParams: cfg,
+		Version:             "1.0.0-test",
+		Fields:              fields,
+		ProbabilisticParams: cfg,
 	}
 }
 
@@ -27,14 +27,14 @@ func popcount(b []byte) int {
 	return n
 }
 
-func TestTokenizeRecordBloom_BLIP(t *testing.T) {
+func TestTokenizeProbabilistic_BLIP(t *testing.T) {
 	t.Parallel()
 	givenSpec := sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0}
 	rec := sriracha.RawRecord{sriracha.FieldNameGiven: "Christopher"}
 
 	t.Run("Determinism", func(t *testing.T) {
 		t.Parallel()
-		cfg := sriracha.BloomConfig{
+		cfg := sriracha.ProbabilisticConfig{
 			SizeBits:        1024,
 			NgramSizes:      []int{2, 3},
 			HashCount:       2,
@@ -44,9 +44,9 @@ func TestTokenizeRecordBloom_BLIP(t *testing.T) {
 
 		tokA := newTok(t, "secret")
 		tokB := newTok(t, "secret")
-		trA, err := tokA.TokenizeRecordBloom(rec, fs)
+		trA, err := tokA.TokenizeProbabilistic(rec, fs)
 		require.NoError(t, err)
-		trB, err := tokB.TokenizeRecordBloom(rec, fs)
+		trB, err := tokB.TokenizeProbabilistic(rec, fs)
 		require.NoError(t, err)
 		require.Len(t, trA.Fields, 1)
 		require.Len(t, trB.Fields, 1)
@@ -56,14 +56,14 @@ func TestTokenizeRecordBloom_BLIP(t *testing.T) {
 
 	t.Run("ChangesBits", func(t *testing.T) {
 		t.Parallel()
-		baseCfg := sriracha.BloomConfig{SizeBits: 1024, NgramSizes: []int{2, 3}, HashCount: 2}
+		baseCfg := sriracha.ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2, 3}, HashCount: 2}
 		blipCfg := baseCfg
 		blipCfg.FlipProbability = 0.05
 
 		tok := newTok(t, "secret")
-		base, err := tok.TokenizeRecordBloom(rec, bloomFSWithCfg(baseCfg, givenSpec))
+		base, err := tok.TokenizeProbabilistic(rec, bloomFSWithCfg(baseCfg, givenSpec))
 		require.NoError(t, err)
-		blip, err := tok.TokenizeRecordBloom(rec, bloomFSWithCfg(blipCfg, givenSpec))
+		blip, err := tok.TokenizeProbabilistic(rec, bloomFSWithCfg(blipCfg, givenSpec))
 		require.NoError(t, err)
 
 		require.Equal(t, len(base.Fields[0]), len(blip.Fields[0]))
@@ -73,14 +73,14 @@ func TestTokenizeRecordBloom_BLIP(t *testing.T) {
 
 	t.Run("ZeroProbabilityIsNoOp", func(t *testing.T) {
 		t.Parallel()
-		baseCfg := sriracha.BloomConfig{SizeBits: 1024, NgramSizes: []int{2, 3}, HashCount: 2}
+		baseCfg := sriracha.ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2, 3}, HashCount: 2}
 		zeroCfg := baseCfg
 		zeroCfg.FlipProbability = 0
 
 		tok := newTok(t, "secret")
-		base, err := tok.TokenizeRecordBloom(rec, bloomFSWithCfg(baseCfg, givenSpec))
+		base, err := tok.TokenizeProbabilistic(rec, bloomFSWithCfg(baseCfg, givenSpec))
 		require.NoError(t, err)
-		zero, err := tok.TokenizeRecordBloom(rec, bloomFSWithCfg(zeroCfg, givenSpec))
+		zero, err := tok.TokenizeProbabilistic(rec, bloomFSWithCfg(zeroCfg, givenSpec))
 		require.NoError(t, err)
 		assert.True(t, bytes.Equal(base.Fields[0], zero.Fields[0]),
 			"FlipProbability=0 must be a byte-identical no-op")
@@ -88,7 +88,7 @@ func TestTokenizeRecordBloom_BLIP(t *testing.T) {
 
 	t.Run("DifferentValuesProduceDifferentFlipPatterns", func(t *testing.T) {
 		t.Parallel()
-		cfg := sriracha.BloomConfig{
+		cfg := sriracha.ProbabilisticConfig{
 			SizeBits:        1024,
 			NgramSizes:      []int{2, 3},
 			HashCount:       2,
@@ -97,22 +97,22 @@ func TestTokenizeRecordBloom_BLIP(t *testing.T) {
 		fs := bloomFSWithCfg(cfg, givenSpec)
 		tok := newTok(t, "secret")
 
-		trA, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
+		trA, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
 		require.NoError(t, err)
-		trB, err := tok.TokenizeRecordBloom(sriracha.RawRecord{sriracha.FieldNameGiven: "Bob"}, fs)
+		trB, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: "Bob"}, fs)
 		require.NoError(t, err)
 		assert.False(t, bytes.Equal(trA.Fields[0], trB.Fields[0]),
 			"different values must produce different filters even under BLIP")
 	})
 }
 
-func TestTokenizeRecordBloom_Balanced(t *testing.T) {
+func TestTokenizeProbabilistic_Balanced(t *testing.T) {
 	t.Parallel()
 	givenSpec := sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0}
 
 	t.Run("Determinism", func(t *testing.T) {
 		t.Parallel()
-		cfg := sriracha.BloomConfig{
+		cfg := sriracha.ProbabilisticConfig{
 			SizeBits:       1024,
 			NgramSizes:     []int{2, 3},
 			HashCount:      2,
@@ -121,9 +121,9 @@ func TestTokenizeRecordBloom_Balanced(t *testing.T) {
 		fs := bloomFSWithCfg(cfg, givenSpec)
 		rec := sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}
 
-		trA, err := newTok(t, "secret").TokenizeRecordBloom(rec, fs)
+		trA, err := newTok(t, "secret").TokenizeProbabilistic(rec, fs)
 		require.NoError(t, err)
-		trB, err := newTok(t, "secret").TokenizeRecordBloom(rec, fs)
+		trB, err := newTok(t, "secret").TokenizeProbabilistic(rec, fs)
 		require.NoError(t, err)
 		assert.True(t, bytes.Equal(trA.Fields[0], trB.Fields[0]),
 			"balanced filter must be deterministic across tokenizers")
@@ -131,7 +131,7 @@ func TestTokenizeRecordBloom_Balanced(t *testing.T) {
 
 	t.Run("ReachesTargetWhenBelow", func(t *testing.T) {
 		t.Parallel()
-		cfg := sriracha.BloomConfig{
+		cfg := sriracha.ProbabilisticConfig{
 			SizeBits:       1024,
 			NgramSizes:     []int{2, 3},
 			HashCount:      2,
@@ -142,7 +142,7 @@ func TestTokenizeRecordBloom_Balanced(t *testing.T) {
 
 		// "Alice" produces few ngrams under 2/3; pre-balance popcount is small.
 		basePop := popcount(mustField(t, tok, sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, bloomFSWithCfg(
-			sriracha.BloomConfig{SizeBits: 1024, NgramSizes: []int{2, 3}, HashCount: 2}, givenSpec)))
+			sriracha.ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2, 3}, HashCount: 2}, givenSpec)))
 		require.Less(t, basePop, 300, "test invariant: pre-balance popcount must be below target")
 
 		filter := mustField(t, tok, sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
@@ -151,7 +151,7 @@ func TestTokenizeRecordBloom_Balanced(t *testing.T) {
 
 	t.Run("NoOpWhenAtOrAboveTarget", func(t *testing.T) {
 		t.Parallel()
-		baseCfg := sriracha.BloomConfig{SizeBits: 1024, NgramSizes: []int{2, 3}, HashCount: 2}
+		baseCfg := sriracha.ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2, 3}, HashCount: 2}
 		tok := newTok(t, "secret")
 		rec := sriracha.RawRecord{sriracha.FieldNameGiven: "Christopher"}
 
@@ -176,7 +176,7 @@ func TestTokenizeRecordBloom_Balanced(t *testing.T) {
 
 	t.Run("ComposesWithBLIP", func(t *testing.T) {
 		t.Parallel()
-		cfg := sriracha.BloomConfig{
+		cfg := sriracha.ProbabilisticConfig{
 			SizeBits:        2048,
 			NgramSizes:      []int{2, 3},
 			HashCount:       3,
@@ -186,9 +186,9 @@ func TestTokenizeRecordBloom_Balanced(t *testing.T) {
 		fs := bloomFSWithCfg(cfg, givenSpec)
 		rec := sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}
 
-		trA, err := newTok(t, "secret").TokenizeRecordBloom(rec, fs)
+		trA, err := newTok(t, "secret").TokenizeProbabilistic(rec, fs)
 		require.NoError(t, err)
-		trB, err := newTok(t, "secret").TokenizeRecordBloom(rec, fs)
+		trB, err := newTok(t, "secret").TokenizeProbabilistic(rec, fs)
 		require.NoError(t, err)
 		assert.True(t, bytes.Equal(trA.Fields[0], trB.Fields[0]),
 			"BLIP+balanced must remain deterministic")
@@ -197,41 +197,41 @@ func TestTokenizeRecordBloom_Balanced(t *testing.T) {
 	})
 }
 
-func TestTokenizeRecordBloom_HardenedMatch(t *testing.T) {
+func TestTokenizeProbabilistic_HardenedMatch(t *testing.T) {
 	t.Parallel()
 
-	cfg := sriracha.HardenedBloomConfig()
+	cfg := sriracha.HardenedProbabilisticConfig()
 	fs := bloomFSWithCfg(cfg,
 		sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: false, Weight: 2.0},
 		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 2.5},
 	)
 	tok := newTok(t, "secret")
 
-	trA, err := tok.TokenizeRecordBloom(sriracha.RawRecord{
+	trA, err := tok.TokenizeProbabilistic(sriracha.RawRecord{
 		sriracha.FieldNameGiven:  "Christopher",
 		sriracha.FieldNameFamily: "Smith",
 	}, fs)
 	require.NoError(t, err)
-	trB, err := tok.TokenizeRecordBloom(sriracha.RawRecord{
+	trB, err := tok.TokenizeProbabilistic(sriracha.RawRecord{
 		sriracha.FieldNameGiven:  "Cristopher",
 		sriracha.FieldNameFamily: "Smyth",
 	}, fs)
 	require.NoError(t, err)
 
-	// Threshold is intentionally lenient: HardenedBloomConfig adds substantial
+	// Threshold is intentionally lenient: HardenedProbabilisticConfig adds substantial
 	// noise (BLIP at p=0.02, padded to popcount 400 of 2048 bits), so Dice
 	// scores compress relative to the unhardened baseline. This is a smoke
 	// test that Match still produces a usable signal — not a precision claim.
 	res, err := Match(trA, trB, fs, 0.20)
 	require.NoError(t, err)
-	assert.True(t, res.IsMatch, "similar records under HardenedBloomConfig should match at threshold 0.20, got %v (score %.3f)", res.IsMatch, res.Score)
+	assert.True(t, res.IsMatch, "similar records under HardenedProbabilisticConfig should match at threshold 0.20, got %v (score %.3f)", res.IsMatch, res.Score)
 }
 
 // mustField tokenizes rec under fs and returns the first field's bytes.
 // Fails the test on any error or unexpected layout.
 func mustField(t *testing.T, tok Tokenizer, rec sriracha.RawRecord, fs sriracha.FieldSet) []byte {
 	t.Helper()
-	tr, err := tok.TokenizeRecordBloom(rec, fs)
+	tr, err := tok.TokenizeProbabilistic(rec, fs)
 	require.NoError(t, err)
 	require.NotEmpty(t, tr.Fields)
 	return tr.Fields[0]
@@ -246,7 +246,7 @@ func FuzzBloomBLIP(f *testing.F) {
 	f.Add("")
 	f.Add("\x00\xff")
 
-	cfg := sriracha.BloomConfig{
+	cfg := sriracha.ProbabilisticConfig{
 		SizeBits:        512,
 		NgramSizes:      []int{2, 3},
 		HashCount:       2,
@@ -258,7 +258,7 @@ func FuzzBloomBLIP(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, given string) {
 		rec := sriracha.RawRecord{sriracha.FieldNameGiven: given}
-		tr1, err := tok.TokenizeRecordBloom(rec, fs)
+		tr1, err := tok.TokenizeProbabilistic(rec, fs)
 		if err != nil {
 			return
 		}
@@ -268,7 +268,7 @@ func FuzzBloomBLIP(f *testing.F) {
 		if got := len(tr1.Fields[0]); got != fieldBytes {
 			t.Fatalf("field byte length %d, want %d", got, fieldBytes)
 		}
-		tr2, err := tok.TokenizeRecordBloom(rec, fs)
+		tr2, err := tok.TokenizeProbabilistic(rec, fs)
 		if err != nil {
 			t.Fatalf("second BLIP tokenization failed: %v", err)
 		}
@@ -288,7 +288,7 @@ func FuzzBloomBalanced(f *testing.F) {
 	f.Add("a")
 
 	const target uint32 = 200
-	balCfg := sriracha.BloomConfig{
+	balCfg := sriracha.ProbabilisticConfig{
 		SizeBits:       1024,
 		NgramSizes:     []int{2, 3},
 		HashCount:      2,
@@ -304,11 +304,11 @@ func FuzzBloomBalanced(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, given string) {
 		rec := sriracha.RawRecord{sriracha.FieldNameGiven: given}
-		tr, err := tok.TokenizeRecordBloom(rec, fs)
+		tr, err := tok.TokenizeProbabilistic(rec, fs)
 		if err != nil {
 			return
 		}
-		raw, err := tok.TokenizeRecordBloom(rec, rawFs)
+		raw, err := tok.TokenizeProbabilistic(rec, rawFs)
 		if err != nil {
 			t.Fatalf("raw tokenization failed: %v", err)
 		}

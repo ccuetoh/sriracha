@@ -8,18 +8,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBloomConfigs(t *testing.T) {
+func TestProbabilisticConfigs(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
 		name      string
-		cfg       BloomConfig
+		cfg       ProbabilisticConfig
 		sizeBits  uint32
 		hashCount int
 	}{
-		{"Fast", FastBloomConfig(), 1024, 2},
-		{"Default", DefaultBloomConfig(), 2048, 3},
-		{"HighPrecision", HighPrecisionBloomConfig(), 4096, 5},
+		{"Fast", FastProbabilisticConfig(), 1024, 2},
+		{"Default", DefaultProbabilisticConfig(), 2048, 3},
+		{"HighPrecision", HighPrecisionProbabilisticConfig(), 4096, 5},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -33,9 +33,9 @@ func TestBloomConfigs(t *testing.T) {
 	}
 }
 
-func TestHardenedBloomConfig(t *testing.T) {
+func TestHardenedProbabilisticConfig(t *testing.T) {
 	t.Parallel()
-	cfg := HardenedBloomConfig()
+	cfg := HardenedProbabilisticConfig()
 	assert.Equal(t, uint32(2048), cfg.SizeBits, "SizeBits matches Default")
 	assert.Equal(t, []int{2, 3}, cfg.NgramSizes, "NgramSizes matches Default")
 	assert.Equal(t, 3, cfg.HashCount, "HashCount matches Default")
@@ -107,10 +107,10 @@ func TestDeterministicToken_JSON(t *testing.T) {
 	}
 }
 
-func TestBloomToken_JSON(t *testing.T) {
+func TestProbabilisticToken_JSON(t *testing.T) {
 	t.Parallel()
 
-	cfg := BloomConfig{SizeBits: 1024, NgramSizes: []int{2, 3}, HashCount: 2}
+	cfg := ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2, 3}, HashCount: 2}
 	cases := []struct {
 		name string
 		run  func(t *testing.T)
@@ -118,21 +118,21 @@ func TestBloomToken_JSON(t *testing.T) {
 		{
 			name: "RoundTrip",
 			run: func(t *testing.T) {
-				orig := BloomToken{
+				orig := ProbabilisticToken{
 					FieldSetVersion:     "0.1",
 					KeyID:               "k1",
 					FieldSetFingerprint: "cafebabe",
-					BloomParams:         cfg,
+					ProbabilisticParams: cfg,
 					Fields:              [][]byte{{0xff, 0x00}, nil},
 				}
 				data, err := json.Marshal(orig)
 				require.NoError(t, err)
-				var got BloomToken
+				var got ProbabilisticToken
 				require.NoError(t, json.Unmarshal(data, &got))
 				assert.Equal(t, orig.FieldSetVersion, got.FieldSetVersion)
 				assert.Equal(t, orig.KeyID, got.KeyID)
 				assert.Equal(t, orig.FieldSetFingerprint, got.FieldSetFingerprint)
-				assert.Equal(t, orig.BloomParams, got.BloomParams)
+				assert.Equal(t, orig.ProbabilisticParams, got.ProbabilisticParams)
 				require.Len(t, got.Fields, 2)
 				assert.Equal(t, []byte{0xff, 0x00}, got.Fields[0])
 				assert.Nil(t, got.Fields[1])
@@ -141,15 +141,15 @@ func TestBloomToken_JSON(t *testing.T) {
 		{
 			name: "BadBase64Rejected",
 			run: func(t *testing.T) {
-				var got BloomToken
-				err := json.Unmarshal([]byte(`{"field_set_version":"0.1","bloom_params":{},"fields":["not!valid!base64!"]}`), &got)
+				var got ProbabilisticToken
+				err := json.Unmarshal([]byte(`{"field_set_version":"0.1","probabilistic_params":{},"fields":["not!valid!base64!"]}`), &got)
 				require.Error(t, err)
 			},
 		},
 		{
 			name: "MalformedJSONRejected",
 			run: func(t *testing.T) {
-				var got BloomToken
+				var got ProbabilisticToken
 				err := json.Unmarshal([]byte(`not json`), &got)
 				require.Error(t, err)
 			},
@@ -196,7 +196,7 @@ func TestAnnotate(t *testing.T) {
 
 	t.Run("BloomZeroFilterIsAbsent", func(t *testing.T) {
 		t.Parallel()
-		tr := BloomToken{
+		tr := ProbabilisticToken{
 			FieldSetVersion: "v1",
 			Fields:          [][]byte{{0x01}, {0x00, 0x00}},
 		}
@@ -252,11 +252,11 @@ func TestToken_String(t *testing.T) {
 
 	t.Run("BloomPopulated", func(t *testing.T) {
 		t.Parallel()
-		tr := BloomToken{
-			FieldSetVersion: "0.1",
-			KeyID:           "k1",
-			BloomParams:     BloomConfig{SizeBits: 1024},
-			Fields:          [][]byte{make([]byte, 128)},
+		tr := ProbabilisticToken{
+			FieldSetVersion:     "0.1",
+			KeyID:               "k1",
+			ProbabilisticParams: ProbabilisticConfig{SizeBits: 1024},
+			Fields:              [][]byte{make([]byte, 128)},
 		}
 		s := tr.String()
 		assert.Contains(t, s, "size=1024b")

@@ -168,12 +168,12 @@ func calibrate(sess session.Session, records []record, opts pairOptions) (token.
 	return token.Calibrate(labeled, sess.FieldSet())
 }
 
-// tokenizeAll converts every record to a BloomToken under sess and times
+// tokenizeAll converts every record to a ProbabilisticToken under sess and times
 // each call. Sanitisation drops fields the normalizer rejects (common in
 // real-world corpora) so a single bad country code does not abort the
 // run; the per-path drop counts are returned alongside.
-func tokenizeAll(sess session.Session, records []record) ([]sriracha.BloomToken, performance, map[sriracha.FieldPath]int, error) {
-	tokens := make([]sriracha.BloomToken, len(records))
+func tokenizeAll(sess session.Session, records []record) ([]sriracha.ProbabilisticToken, performance, map[sriracha.FieldPath]int, error) {
+	tokens := make([]sriracha.ProbabilisticToken, len(records))
 	durs := make([]time.Duration, len(records))
 	drops := make(map[sriracha.FieldPath]int)
 
@@ -184,7 +184,7 @@ func tokenizeAll(sess session.Session, records []record) ([]sriracha.BloomToken,
 			drops[path]++
 		}
 		callStart := time.Now()
-		tok, err := sess.TokenizeBloom(clean)
+		tok, err := sess.TokenizeProbabilistic(clean)
 		if err != nil {
 			return nil, performance{}, nil, fmt.Errorf("bench: tokenize record %d (entity=%q dataset=%q): %w",
 				i, r.EntityID, r.Dataset, err)
@@ -205,7 +205,7 @@ func tokenizeAll(sess session.Session, records []record) ([]sriracha.BloomToken,
 // threshold=0 because we only care about the aggregate Score here — the
 // thresholded IsMatch decision is recomputed by sweep across the full
 // 101-point grid.
-func matchAll(sess session.Session, pairs []pair, tokens []sriracha.BloomToken) ([]float64, []bool, performance, error) {
+func matchAll(sess session.Session, pairs []pair, tokens []sriracha.ProbabilisticToken) ([]float64, []bool, performance, error) {
 	scores := make([]float64, len(pairs))
 	labels := make([]bool, len(pairs))
 	durs := make([]time.Duration, len(pairs))

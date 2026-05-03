@@ -85,12 +85,12 @@ func Equal(a, b sriracha.DeterministicToken) bool {
 // order. A field with an all-zero filter on either side scores 0.
 //
 // Returns an error if FieldSetVersion, KeyID, FieldSetFingerprint (when both
-// sides set it), BloomParams, or field count differ — scores would not be
+// sides set it), ProbabilisticParams, or field count differ — scores would not be
 // comparable.
 //
 // Most callers want Match — it wraps DicePerField + Score and returns the
 // thresholded decision.
-func DicePerField(a, b sriracha.BloomToken) ([]float64, error) {
+func DicePerField(a, b sriracha.ProbabilisticToken) ([]float64, error) {
 	if a.FieldSetVersion != b.FieldSetVersion {
 		return nil, fmt.Errorf("token: FieldSetVersion mismatch: %q vs %q", a.FieldSetVersion, b.FieldSetVersion)
 	}
@@ -101,8 +101,8 @@ func DicePerField(a, b sriracha.BloomToken) ([]float64, error) {
 		a.FieldSetFingerprint != b.FieldSetFingerprint {
 		return nil, fmt.Errorf("token: FieldSetFingerprint mismatch: %q vs %q", a.FieldSetFingerprint, b.FieldSetFingerprint)
 	}
-	if !bloomParamsEqual(a.BloomParams, b.BloomParams) {
-		return nil, fmt.Errorf("token: BloomParams mismatch")
+	if !bloomParamsEqual(a.ProbabilisticParams, b.ProbabilisticParams) {
+		return nil, fmt.Errorf("token: ProbabilisticParams mismatch")
 	}
 	if len(a.Fields) != len(b.Fields) {
 		return nil, fmt.Errorf("token: field count mismatch: %d vs %d", len(a.Fields), len(b.Fields))
@@ -118,10 +118,10 @@ func DicePerField(a, b sriracha.BloomToken) ([]float64, error) {
 	return scores, nil
 }
 
-// bloomParamsEqual reports whether two BloomConfig values are field-for-field
-// identical. BloomConfig contains a []int (NgramSizes) and so is not comparable
+// bloomParamsEqual reports whether two ProbabilisticConfig values are field-for-field
+// identical. ProbabilisticConfig contains a []int (NgramSizes) and so is not comparable
 // with ==.
-func bloomParamsEqual(a, b sriracha.BloomConfig) bool {
+func bloomParamsEqual(a, b sriracha.ProbabilisticConfig) bool {
 	return a.SizeBits == b.SizeBits && a.HashCount == b.HashCount && slices.Equal(a.NgramSizes, b.NgramSizes)
 }
 
@@ -163,7 +163,7 @@ func Score(perField []float64, fs sriracha.FieldSet) (float64, error) {
 // return is reserved for genuine mismatches: threshold out of range, version /
 // key / fingerprint / params drift, or field-count disagreement between the
 // tokens and fs.
-func Match(a, b sriracha.BloomToken, fs sriracha.FieldSet, threshold float64) (MatchResult, error) {
+func Match(a, b sriracha.ProbabilisticToken, fs sriracha.FieldSet, threshold float64) (MatchResult, error) {
 	if threshold < 0 || threshold > 1 {
 		return MatchResult{}, fmt.Errorf("token: threshold must be in [0,1], got %v", threshold)
 	}

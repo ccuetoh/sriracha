@@ -16,7 +16,7 @@ func TestValidate_DefaultFieldSet(t *testing.T) {
 
 func TestValidate(t *testing.T) {
 	t.Parallel()
-	validBloom := sriracha.DefaultBloomConfig()
+	validBloom := sriracha.DefaultProbabilisticConfig()
 	cases := []struct {
 		name        string
 		fs          sriracha.FieldSet
@@ -26,9 +26,9 @@ func TestValidate(t *testing.T) {
 		{
 			name: "EmptyVersion",
 			fs: sriracha.FieldSet{
-				Version:     "",
-				Fields:      []sriracha.FieldSpec{{Path: sriracha.FieldNameGiven, Weight: 1.0}},
-				BloomParams: validBloom,
+				Version:             "",
+				Fields:              []sriracha.FieldSpec{{Path: sriracha.FieldNameGiven, Weight: 1.0}},
+				ProbabilisticParams: validBloom,
 			},
 			wantErr:     true,
 			errContains: "version",
@@ -41,7 +41,7 @@ func TestValidate(t *testing.T) {
 					{Path: sriracha.FieldNameGiven, Weight: 1.0},
 					{Path: sriracha.FieldNameGiven, Weight: 2.0},
 				},
-				BloomParams: validBloom,
+				ProbabilisticParams: validBloom,
 			},
 			wantErr:     true,
 			errContains: "duplicate",
@@ -53,7 +53,7 @@ func TestValidate(t *testing.T) {
 				Fields: []sriracha.FieldSpec{
 					{Path: sriracha.FieldNameGiven, Weight: -1.0},
 				},
-				BloomParams: validBloom,
+				ProbabilisticParams: validBloom,
 			},
 			wantErr:     true,
 			errContains: "negative",
@@ -65,20 +65,20 @@ func TestValidate(t *testing.T) {
 				Fields: []sriracha.FieldSpec{
 					{Path: sriracha.FieldNameGiven, Weight: 0.0},
 				},
-				BloomParams: validBloom,
+				ProbabilisticParams: validBloom,
 			},
 			wantErr: false,
 		},
 		{
 			name:    "EmptyFields",
-			fs:      sriracha.FieldSet{Version: "0.1", Fields: nil, BloomParams: validBloom},
+			fs:      sriracha.FieldSet{Version: "0.1", Fields: nil, ProbabilisticParams: validBloom},
 			wantErr: false,
 		},
 		{
 			name: "BloomZeroSizeBits",
 			fs: sriracha.FieldSet{
-				Version:     "0.1",
-				BloomParams: sriracha.BloomConfig{SizeBits: 0, HashCount: 2, NgramSizes: []int{2}},
+				Version:             "0.1",
+				ProbabilisticParams: sriracha.ProbabilisticConfig{SizeBits: 0, HashCount: 2, NgramSizes: []int{2}},
 			},
 			wantErr:     true,
 			errContains: "SizeBits",
@@ -86,8 +86,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "BloomZeroHashCount",
 			fs: sriracha.FieldSet{
-				Version:     "0.1",
-				BloomParams: sriracha.BloomConfig{SizeBits: 1024, HashCount: 0, NgramSizes: []int{2}},
+				Version:             "0.1",
+				ProbabilisticParams: sriracha.ProbabilisticConfig{SizeBits: 1024, HashCount: 0, NgramSizes: []int{2}},
 			},
 			wantErr:     true,
 			errContains: "HashCount",
@@ -95,8 +95,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "BloomEmptyNgramSizes",
 			fs: sriracha.FieldSet{
-				Version:     "0.1",
-				BloomParams: sriracha.BloomConfig{SizeBits: 1024, HashCount: 2, NgramSizes: nil},
+				Version:             "0.1",
+				ProbabilisticParams: sriracha.ProbabilisticConfig{SizeBits: 1024, HashCount: 2, NgramSizes: nil},
 			},
 			wantErr:     true,
 			errContains: "NgramSizes",
@@ -104,8 +104,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "BloomNonPositiveNgramSize",
 			fs: sriracha.FieldSet{
-				Version:     "0.1",
-				BloomParams: sriracha.BloomConfig{SizeBits: 1024, HashCount: 2, NgramSizes: []int{0, 2}},
+				Version:             "0.1",
+				ProbabilisticParams: sriracha.ProbabilisticConfig{SizeBits: 1024, HashCount: 2, NgramSizes: []int{0, 2}},
 			},
 			wantErr:     true,
 			errContains: "NgramSizes[0]",
@@ -114,7 +114,7 @@ func TestValidate(t *testing.T) {
 			name: "BloomFlipProbabilityNegative",
 			fs: sriracha.FieldSet{
 				Version: "0.1",
-				BloomParams: sriracha.BloomConfig{
+				ProbabilisticParams: sriracha.ProbabilisticConfig{
 					SizeBits:        1024,
 					HashCount:       2,
 					NgramSizes:      []int{2, 3},
@@ -128,7 +128,7 @@ func TestValidate(t *testing.T) {
 			name: "BloomFlipProbabilityOne",
 			fs: sriracha.FieldSet{
 				Version: "0.1",
-				BloomParams: sriracha.BloomConfig{
+				ProbabilisticParams: sriracha.ProbabilisticConfig{
 					SizeBits:        1024,
 					HashCount:       2,
 					NgramSizes:      []int{2, 3},
@@ -142,7 +142,7 @@ func TestValidate(t *testing.T) {
 			name: "BloomFlipProbabilityAboveOne",
 			fs: sriracha.FieldSet{
 				Version: "0.1",
-				BloomParams: sriracha.BloomConfig{
+				ProbabilisticParams: sriracha.ProbabilisticConfig{
 					SizeBits:        1024,
 					HashCount:       2,
 					NgramSizes:      []int{2, 3},
@@ -156,7 +156,7 @@ func TestValidate(t *testing.T) {
 			name: "BloomTargetPopcountEqualsSize",
 			fs: sriracha.FieldSet{
 				Version: "0.1",
-				BloomParams: sriracha.BloomConfig{
+				ProbabilisticParams: sriracha.ProbabilisticConfig{
 					SizeBits:       1024,
 					HashCount:      2,
 					NgramSizes:     []int{2, 3},
@@ -170,7 +170,7 @@ func TestValidate(t *testing.T) {
 			name: "BloomTargetPopcountAboveSize",
 			fs: sriracha.FieldSet{
 				Version: "0.1",
-				BloomParams: sriracha.BloomConfig{
+				ProbabilisticParams: sriracha.ProbabilisticConfig{
 					SizeBits:       1024,
 					HashCount:      2,
 					NgramSizes:     []int{2, 3},
@@ -183,8 +183,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "BloomHardenedConfigValid",
 			fs: sriracha.FieldSet{
-				Version:     "0.1",
-				BloomParams: sriracha.HardenedBloomConfig(),
+				Version:             "0.1",
+				ProbabilisticParams: sriracha.HardenedProbabilisticConfig(),
 			},
 			wantErr: false,
 		},
@@ -227,7 +227,7 @@ func TestDefaultFieldSetContents(t *testing.T) {
 			assert.Equalf(t, want, got, "field %s weight", path)
 		}
 	}
-	assert.Equal(t, uint32(2048), fs.BloomParams.SizeBits)
+	assert.Equal(t, uint32(2048), fs.ProbabilisticParams.SizeBits)
 }
 
 func TestDefaultFieldSet_IsCopy(t *testing.T) {
@@ -248,7 +248,7 @@ func TestValidateRecord(t *testing.T) {
 			{Path: sriracha.FieldNameFamily, Required: false, Weight: 1.0},
 			{Path: sriracha.FieldDateBirth, Required: false, Weight: 1.0},
 		},
-		BloomParams: sriracha.DefaultBloomConfig(),
+		ProbabilisticParams: sriracha.DefaultProbabilisticConfig(),
 	}
 
 	t.Run("Valid", func(t *testing.T) {
@@ -289,8 +289,8 @@ func TestDefaultFieldSet_NgramSizesIndependent(t *testing.T) {
 	t.Parallel()
 	fs1 := DefaultFieldSet()
 	fs2 := DefaultFieldSet()
-	require.NotEmpty(t, fs1.BloomParams.NgramSizes)
-	fs1.BloomParams.NgramSizes[0] = 99
-	assert.NotEqual(t, 99, fs2.BloomParams.NgramSizes[0],
-		"DefaultFieldSet must deep-copy BloomParams.NgramSizes")
+	require.NotEmpty(t, fs1.ProbabilisticParams.NgramSizes)
+	fs1.ProbabilisticParams.NgramSizes[0] = 99
+	assert.NotEqual(t, 99, fs2.ProbabilisticParams.NgramSizes[0],
+		"DefaultFieldSet must deep-copy ProbabilisticParams.NgramSizes")
 }

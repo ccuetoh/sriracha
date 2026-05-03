@@ -1,3 +1,14 @@
+// Package normalize implements the Unicode normalization pipeline applied
+// to every field value before tokenization.
+//
+// The pipeline replaces invalid UTF-8 bytes with U+FFFD, applies NFKD
+// decomposition, casefolds with Unicode-aware lowercasing, and then
+// dispatches to a field-specific normalizer chosen by the FieldPath
+// namespace (digits-only for identifiers, RFC 3339 parsing for dates,
+// diacritic-stripping for names, and so on). Calling Normalize directly
+// is rarely needed — token.Tokenizer runs it as the first stage of every
+// tokenize call. The surface is exported so callers can pre-validate
+// input or build custom indexing pipelines that share the canonical form.
 package normalize
 
 import (

@@ -69,6 +69,72 @@ func (_c *MockTokenizer_Destroy_Call) RunAndReturn(run func()) *MockTokenizer_De
 	return _c
 }
 
+// TokenizeDeterministic provides a mock function for the type MockTokenizer
+func (_mock *MockTokenizer) TokenizeDeterministic(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.DeterministicToken, error) {
+	ret := _mock.Called(record, fs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for TokenizeDeterministic")
+	}
+
+	var r0 sriracha.DeterministicToken
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(sriracha.RawRecord, sriracha.FieldSet) (sriracha.DeterministicToken, error)); ok {
+		return returnFunc(record, fs)
+	}
+	if returnFunc, ok := ret.Get(0).(func(sriracha.RawRecord, sriracha.FieldSet) sriracha.DeterministicToken); ok {
+		r0 = returnFunc(record, fs)
+	} else {
+		r0 = ret.Get(0).(sriracha.DeterministicToken)
+	}
+	if returnFunc, ok := ret.Get(1).(func(sriracha.RawRecord, sriracha.FieldSet) error); ok {
+		r1 = returnFunc(record, fs)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockTokenizer_TokenizeDeterministic_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TokenizeDeterministic'
+type MockTokenizer_TokenizeDeterministic_Call struct {
+	*mock.Call
+}
+
+// TokenizeDeterministic is a helper method to define mock.On call
+//   - record sriracha.RawRecord
+//   - fs sriracha.FieldSet
+func (_e *MockTokenizer_Expecter) TokenizeDeterministic(record interface{}, fs interface{}) *MockTokenizer_TokenizeDeterministic_Call {
+	return &MockTokenizer_TokenizeDeterministic_Call{Call: _e.mock.On("TokenizeDeterministic", record, fs)}
+}
+
+func (_c *MockTokenizer_TokenizeDeterministic_Call) Run(run func(record sriracha.RawRecord, fs sriracha.FieldSet)) *MockTokenizer_TokenizeDeterministic_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 sriracha.RawRecord
+		if args[0] != nil {
+			arg0 = args[0].(sriracha.RawRecord)
+		}
+		var arg1 sriracha.FieldSet
+		if args[1] != nil {
+			arg1 = args[1].(sriracha.FieldSet)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockTokenizer_TokenizeDeterministic_Call) Return(deterministicToken sriracha.DeterministicToken, err error) *MockTokenizer_TokenizeDeterministic_Call {
+	_c.Call.Return(deterministicToken, err)
+	return _c
+}
+
+func (_c *MockTokenizer_TokenizeDeterministic_Call) RunAndReturn(run func(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.DeterministicToken, error)) *MockTokenizer_TokenizeDeterministic_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // TokenizeField provides a mock function for the type MockTokenizer
 func (_mock *MockTokenizer) TokenizeField(value string, path sriracha.FieldPath) ([]byte, error) {
 	ret := _mock.Called(value, path)
@@ -137,23 +203,23 @@ func (_c *MockTokenizer_TokenizeField_Call) RunAndReturn(run func(value string, 
 	return _c
 }
 
-// TokenizeRecord provides a mock function for the type MockTokenizer
-func (_mock *MockTokenizer) TokenizeRecord(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.DeterministicToken, error) {
+// TokenizeProbabilistic provides a mock function for the type MockTokenizer
+func (_mock *MockTokenizer) TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.ProbabilisticToken, error) {
 	ret := _mock.Called(record, fs)
 
 	if len(ret) == 0 {
-		panic("no return value specified for TokenizeRecord")
+		panic("no return value specified for TokenizeProbabilistic")
 	}
 
-	var r0 sriracha.DeterministicToken
+	var r0 sriracha.ProbabilisticToken
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(sriracha.RawRecord, sriracha.FieldSet) (sriracha.DeterministicToken, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(sriracha.RawRecord, sriracha.FieldSet) (sriracha.ProbabilisticToken, error)); ok {
 		return returnFunc(record, fs)
 	}
-	if returnFunc, ok := ret.Get(0).(func(sriracha.RawRecord, sriracha.FieldSet) sriracha.DeterministicToken); ok {
+	if returnFunc, ok := ret.Get(0).(func(sriracha.RawRecord, sriracha.FieldSet) sriracha.ProbabilisticToken); ok {
 		r0 = returnFunc(record, fs)
 	} else {
-		r0 = ret.Get(0).(sriracha.DeterministicToken)
+		r0 = ret.Get(0).(sriracha.ProbabilisticToken)
 	}
 	if returnFunc, ok := ret.Get(1).(func(sriracha.RawRecord, sriracha.FieldSet) error); ok {
 		r1 = returnFunc(record, fs)
@@ -163,19 +229,19 @@ func (_mock *MockTokenizer) TokenizeRecord(record sriracha.RawRecord, fs srirach
 	return r0, r1
 }
 
-// MockTokenizer_TokenizeRecord_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TokenizeRecord'
-type MockTokenizer_TokenizeRecord_Call struct {
+// MockTokenizer_TokenizeProbabilistic_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TokenizeProbabilistic'
+type MockTokenizer_TokenizeProbabilistic_Call struct {
 	*mock.Call
 }
 
-// TokenizeRecord is a helper method to define mock.On call
+// TokenizeProbabilistic is a helper method to define mock.On call
 //   - record sriracha.RawRecord
 //   - fs sriracha.FieldSet
-func (_e *MockTokenizer_Expecter) TokenizeRecord(record interface{}, fs interface{}) *MockTokenizer_TokenizeRecord_Call {
-	return &MockTokenizer_TokenizeRecord_Call{Call: _e.mock.On("TokenizeRecord", record, fs)}
+func (_e *MockTokenizer_Expecter) TokenizeProbabilistic(record interface{}, fs interface{}) *MockTokenizer_TokenizeProbabilistic_Call {
+	return &MockTokenizer_TokenizeProbabilistic_Call{Call: _e.mock.On("TokenizeProbabilistic", record, fs)}
 }
 
-func (_c *MockTokenizer_TokenizeRecord_Call) Run(run func(record sriracha.RawRecord, fs sriracha.FieldSet)) *MockTokenizer_TokenizeRecord_Call {
+func (_c *MockTokenizer_TokenizeProbabilistic_Call) Run(run func(record sriracha.RawRecord, fs sriracha.FieldSet)) *MockTokenizer_TokenizeProbabilistic_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 sriracha.RawRecord
 		if args[0] != nil {
@@ -193,78 +259,12 @@ func (_c *MockTokenizer_TokenizeRecord_Call) Run(run func(record sriracha.RawRec
 	return _c
 }
 
-func (_c *MockTokenizer_TokenizeRecord_Call) Return(deterministicToken sriracha.DeterministicToken, err error) *MockTokenizer_TokenizeRecord_Call {
-	_c.Call.Return(deterministicToken, err)
+func (_c *MockTokenizer_TokenizeProbabilistic_Call) Return(probabilisticToken sriracha.ProbabilisticToken, err error) *MockTokenizer_TokenizeProbabilistic_Call {
+	_c.Call.Return(probabilisticToken, err)
 	return _c
 }
 
-func (_c *MockTokenizer_TokenizeRecord_Call) RunAndReturn(run func(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.DeterministicToken, error)) *MockTokenizer_TokenizeRecord_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// TokenizeRecordBloom provides a mock function for the type MockTokenizer
-func (_mock *MockTokenizer) TokenizeRecordBloom(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.BloomToken, error) {
-	ret := _mock.Called(record, fs)
-
-	if len(ret) == 0 {
-		panic("no return value specified for TokenizeRecordBloom")
-	}
-
-	var r0 sriracha.BloomToken
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(sriracha.RawRecord, sriracha.FieldSet) (sriracha.BloomToken, error)); ok {
-		return returnFunc(record, fs)
-	}
-	if returnFunc, ok := ret.Get(0).(func(sriracha.RawRecord, sriracha.FieldSet) sriracha.BloomToken); ok {
-		r0 = returnFunc(record, fs)
-	} else {
-		r0 = ret.Get(0).(sriracha.BloomToken)
-	}
-	if returnFunc, ok := ret.Get(1).(func(sriracha.RawRecord, sriracha.FieldSet) error); ok {
-		r1 = returnFunc(record, fs)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockTokenizer_TokenizeRecordBloom_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TokenizeRecordBloom'
-type MockTokenizer_TokenizeRecordBloom_Call struct {
-	*mock.Call
-}
-
-// TokenizeRecordBloom is a helper method to define mock.On call
-//   - record sriracha.RawRecord
-//   - fs sriracha.FieldSet
-func (_e *MockTokenizer_Expecter) TokenizeRecordBloom(record interface{}, fs interface{}) *MockTokenizer_TokenizeRecordBloom_Call {
-	return &MockTokenizer_TokenizeRecordBloom_Call{Call: _e.mock.On("TokenizeRecordBloom", record, fs)}
-}
-
-func (_c *MockTokenizer_TokenizeRecordBloom_Call) Run(run func(record sriracha.RawRecord, fs sriracha.FieldSet)) *MockTokenizer_TokenizeRecordBloom_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 sriracha.RawRecord
-		if args[0] != nil {
-			arg0 = args[0].(sriracha.RawRecord)
-		}
-		var arg1 sriracha.FieldSet
-		if args[1] != nil {
-			arg1 = args[1].(sriracha.FieldSet)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *MockTokenizer_TokenizeRecordBloom_Call) Return(bloomToken sriracha.BloomToken, err error) *MockTokenizer_TokenizeRecordBloom_Call {
-	_c.Call.Return(bloomToken, err)
-	return _c
-}
-
-func (_c *MockTokenizer_TokenizeRecordBloom_Call) RunAndReturn(run func(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.BloomToken, error)) *MockTokenizer_TokenizeRecordBloom_Call {
+func (_c *MockTokenizer_TokenizeProbabilistic_Call) RunAndReturn(run func(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.ProbabilisticToken, error)) *MockTokenizer_TokenizeProbabilistic_Call {
 	_c.Call.Return(run)
 	return _c
 }
