@@ -14,17 +14,17 @@ jobs:
     name: Benchmark
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Set up Go
-        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version-file: go.mod
 
       - name: Raise memlock limit for memguard
         run: sudo prlimit --pid $PPID --memlock=unlimited:unlimited
 
-      - uses: bencherdev/bencher@46d007c103827da37db1a25b705dc73d3aaff7e6 # v0.6.3
+      - uses: bencherdev/bencher@fa25a72c516046b4c0e31659bef70c5266b0f94d # v0.6.4
 
       - name: Track benchmarks (main)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -36,7 +36,7 @@ jobs:
           SRIRACHA_BENCH_OUT: ${{ github.workspace }}/quality.json
         run: go test -tags=bench -count=1 -timeout 10m ./test/bench/...
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           name: bench-results-main
@@ -67,7 +67,7 @@ jobs:
           printf '%s\n' "$BASE_REF" > base-ref.txt
           printf '%s\n' "$BASE_SHA" > base-sha.txt
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: github.event_name == 'pull_request'
         with:
           name: bench-results
