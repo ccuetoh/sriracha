@@ -7,7 +7,7 @@
 [![pkg.go.dev](https://pkg.go.dev/badge/github.com/ccuetoh/sriracha.svg)](https://pkg.go.dev/github.com/ccuetoh/sriracha)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-> **Experimental.** API is unstable. Not production-ready.
+> **API is unstable**. Not production-ready.
 
 
 Sriracha is a Go library for privacy-preserving record linkage. It enables institutions
@@ -29,7 +29,7 @@ that can be compared without exposing the underlying identifiers.
 Requires Go 1.24+
 
 ```bash
-go get github.com/ccuetoh/sriracha
+go get github.com/ccuetoh/sriracha@v0.1.0
 ```
 
 ## Quickstart

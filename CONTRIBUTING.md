@@ -63,6 +63,8 @@ good reason.
   in the description.
 - Public API changes should be called out in the PR description. Pre-1.0
   breakage is allowed but should be deliberate.
+- User-facing changes (features, fixes, breakage) should be summarised in
+  the `[Unreleased]` section of [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Testing expectations
 
