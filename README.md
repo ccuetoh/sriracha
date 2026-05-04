@@ -4,6 +4,7 @@
 [![CI](https://github.com/ccuetoh/sriracha/actions/workflows/ci.yml/badge.svg)](https://github.com/ccuetoh/sriracha/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/ccuetoh/sriracha/graph/badge.svg?token=1JRW9RH43K)](https://codecov.io/gh/ccuetoh/sriracha)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ccuetoh/sriracha)](https://goreportcard.com/report/github.com/ccuetoh/sriracha)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12741/badge)](https://www.bestpractices.dev/projects/12741)
 [![pkg.go.dev](https://pkg.go.dev/badge/github.com/ccuetoh/sriracha.svg)](https://pkg.go.dev/github.com/ccuetoh/sriracha)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
