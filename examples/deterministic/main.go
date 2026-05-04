@@ -14,16 +14,12 @@ import (
 	"github.com/ccuetoh/sriracha"
 	"github.com/ccuetoh/sriracha/fieldset"
 	"github.com/ccuetoh/sriracha/session"
-	"github.com/ccuetoh/sriracha/token"
 )
 
 func main() {
 	secret := []byte("shared-secret-between-institutions")
 
-	// WithKeyID labels every token with the secret's identifier so a
-	// post-rotation comparison surfaces an explicit mismatch instead of
-	// silently producing different HMACs.
-	s, err := session.New(secret, fieldset.DefaultFieldSet(), token.WithKeyID("k-2026-01"))
+	s, err := session.New(secret, fieldset.DefaultFieldSet())
 	if err != nil {
 		log.Fatalf("session.New: %v", err)
 	}
