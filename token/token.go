@@ -129,6 +129,10 @@ func (t *tokenizer) release(h hash.Hash) {
 
 func (t *tokenizer) TokenizeDeterministic(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.DeterministicToken, error) {
 	fields := make([][]byte, len(fs.Fields))
+	// Lazy-allocated on first present field. Skipping the alloc for
+	// all-absent records preserves the existing one-alloc footprint of
+	// that case; the per-present-field nil check is negligible.
+	var backing []byte
 	h := t.acquire()
 	defer t.release(h)
 
@@ -144,7 +148,12 @@ func (t *tokenizer) TokenizeDeterministic(record sriracha.RawRecord, fs sriracha
 		if err != nil {
 			return sriracha.DeterministicToken{}, fmt.Errorf("token: normalization failed for field %q: %w", spec.Path, err)
 		}
-		fields[i] = hmacField(h, normalized, spec.Path)
+		if backing == nil {
+			backing = make([]byte, len(fs.Fields)*sha256.Size)
+		}
+		out := backing[i*sha256.Size : (i+1)*sha256.Size]
+		hmacField(h, out, normalized, spec.Path)
+		fields[i] = out
 	}
 
 	return sriracha.DeterministicToken{
@@ -161,13 +170,16 @@ func (t *tokenizer) TokenizeField(value string, path sriracha.FieldPath) ([]byte
 	}
 	h := t.acquire()
 	defer t.release(h)
-	return hmacField(h, normalized, path), nil
+	out := make([]byte, sha256.Size)
+	hmacField(h, out, normalized, path)
+	return out, nil
 }
 
 // hmacField writes the canonical length-prefixed (value, path) preimage into
-// h and returns the digest. Length-prefixing is what prevents
+// h and writes the digest into out. out must be exactly sha256.Size bytes;
+// the caller owns the buffer. Length-prefixing is what prevents
 // (value="ab", path="c") from colliding with (value="a", path="bc").
-func hmacField(h hash.Hash, normalizedValue string, path sriracha.FieldPath) []byte {
+func hmacField(h hash.Hash, out []byte, normalizedValue string, path sriracha.FieldPath) {
 	h.Reset()
 	var lp [4]byte
 	nv := []byte(normalizedValue)
@@ -178,5 +190,5 @@ func hmacField(h hash.Hash, normalizedValue string, path sriracha.FieldPath) []b
 	binary.BigEndian.PutUint32(lp[:], uint32(len(pb))) //nolint:gosec // G115: field path length bounded by parser
 	h.Write(lp[:])
 	h.Write(pb)
-	return h.Sum(nil)
+	h.Sum(out[:0])
 }
