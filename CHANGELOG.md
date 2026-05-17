@@ -11,6 +11,11 @@ change in any release.
 
 ### Changed
 
+- `TokenizeProbabilistic` and the BLIP / balanced-filter HMAC stream
+  now pass a stack-allocated scratch buffer to `hash.Hash.Sum` instead
+  of `nil`, eliminating one 32-byte allocation per hashed gram (and
+  per HMAC-stream refill). Output is byte-identical; per-token
+  allocation count drops by `N_grams × cfg.HashCount` per field.
 - `TokenizeProbabilistic` now allocates one contiguous backing buffer per
   token instead of one byte slice per field. Field bytes are
   byte-identical to before; the per-token allocation count drops by

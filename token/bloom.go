@@ -77,6 +77,7 @@ func tokenizeFieldBloom(h hash.Hash, out []byte, normalizedValue string, path sr
 
 	var lp [4]byte
 	var ib [4]byte
+	var sumBuf [32]byte
 	for _, g := range grams {
 		gb := []byte(g)
 		for i := range cfg.HashCount {
@@ -89,7 +90,7 @@ func tokenizeFieldBloom(h hash.Hash, out []byte, normalizedValue string, path sr
 			h.Write(pathBytes)
 			binary.BigEndian.PutUint32(ib[:], uint32(i)) //nolint:gosec // i bounded by cfg.HashCount
 			h.Write(ib[:])
-			sum := h.Sum(nil)
+			sum := h.Sum(sumBuf[:0])
 			pos := binary.BigEndian.Uint64(sum[:8]) % uint64(cfg.SizeBits)
 			bs.Set(uint(pos))
 		}
@@ -172,8 +173,8 @@ func (s *hmacStream) refill() {
 	var ctrBuf [4]byte
 	binary.BigEndian.PutUint32(ctrBuf[:], s.ctr)
 	s.h.Write(ctrBuf[:])
-	sum := s.h.Sum(nil)
-	copy(s.buf[:], sum)
+	// Sum into the stream's own buffer; no per-refill allocation.
+	s.h.Sum(s.buf[:0])
 	s.pos = 0
 	s.ctr++
 }
