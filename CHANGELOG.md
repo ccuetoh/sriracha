@@ -11,6 +11,10 @@ change in any release.
 
 ### Changed
 
+- `tokenizeFieldBloom` now reuses `*bitset.BitSet` instances via a
+  per-`SizeBits` `sync.Pool` instead of allocating a fresh bitset per
+  field. Output is byte-identical; per-token allocations drop by
+  `2 × N_fields` after the first call warms the pool.
 - `TokenizeDeterministic` now allocates one contiguous backing buffer
   (sized `len(fs.Fields) × sha256.Size`) per token and slices into it
   for each present field, replacing the per-field `h.Sum(nil)`

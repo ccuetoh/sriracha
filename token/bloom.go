@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/bits-and-blooms/bitset"
@@ -72,7 +73,8 @@ func (t *tokenizer) TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha
 // target. Both transforms are deterministic — identical inputs produce
 // identical filters.
 func tokenizeFieldBloom(h hash.Hash, out []byte, normalizedValue string, path sriracha.FieldPath, cfg sriracha.ProbabilisticConfig) {
-	bs := bitset.New(uint(cfg.SizeBits))
+	bs := acquireBitset(cfg.SizeBits)
+	defer releaseBitset(cfg.SizeBits, bs)
 	pathBytes := []byte(path.String())
 
 	var lp [4]byte
@@ -194,6 +196,43 @@ func bitsetToBytes(bs *bitset.BitSet, out []byte) {
 	for i, w := range words {
 		binary.LittleEndian.PutUint64(out[i*8:], w)
 	}
+}
+
+// bitsetPools keys a sync.Pool by SizeBits so reuse only matches bitsets
+// of the same word count. The typical workload is one Tokenizer with one
+// FieldSet (a single SizeBits), so a single pool ends up hot.
+var bitsetPools sync.Map // map[uint32]*sync.Pool
+
+// acquireBitset returns a zeroed BitSet sized for sizeBits, drawn from a
+// per-SizeBits pool. The caller must hand it back via releaseBitset.
+// ClearAll runs on acquire (not release) so the caller always sees a
+// zeroed filter regardless of whether the pool returned a freshly-
+// allocated bitset or a reused one whose words were left dirty by the
+// previous user.
+func acquireBitset(sizeBits uint32) *bitset.BitSet {
+	// Fast path: most calls land here once the pool exists. Going through
+	// LoadOrStore on every call would force the &sync.Pool{...} literal
+	// (and its closure) to be allocated on the heap before LoadOrStore
+	// can decide to discard it; the Load gate skips that.
+	p, ok := bitsetPools.Load(sizeBits)
+	if !ok {
+		p, _ = bitsetPools.LoadOrStore(sizeBits, &sync.Pool{
+			New: func() any { return bitset.New(uint(sizeBits)) },
+		})
+	}
+	bs, _ := p.(*sync.Pool).Get().(*bitset.BitSet)
+	bs.ClearAll()
+	return bs
+}
+
+// releaseBitset returns bs to the pool for the given sizeBits. The bitset's
+// dirty state is wiped lazily on the next acquireBitset. Must be paired
+// with an acquireBitset call for the same sizeBits; mismatched usage
+// panics on the nil type assertion below, which is the intended failure
+// mode for an internal helper.
+func releaseBitset(sizeBits uint32, bs *bitset.BitSet) {
+	p, _ := bitsetPools.Load(sizeBits)
+	p.(*sync.Pool).Put(bs)
 }
 
 // eachNgram invokes fn for each n-gram (across all sizes in sizes) extracted
