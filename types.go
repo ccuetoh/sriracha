@@ -15,7 +15,10 @@ type RawRecord map[FieldPath]string
 // FieldSetFingerprint is the hex SHA-256 of the FieldSet canonical encoding
 // (see FieldSet.Fingerprint); when both sides of a comparison have it set, it
 // surfaces silent schema drift (e.g. reordered fields) that the user-set
-// FieldSetVersion alone would miss.
+// FieldSetVersion alone would miss. session.Session populates this field
+// automatically using a value cached at session.New time; direct
+// token.Tokenizer callers must set it themselves if they want drift
+// detection.
 type DeterministicToken struct {
 	FieldSetVersion     string   `json:"field_set_version"`
 	KeyID               string   `json:"key_id,omitempty"`
@@ -32,7 +35,10 @@ type DeterministicToken struct {
 // FieldSetFingerprint is the hex SHA-256 of the FieldSet canonical encoding
 // (see FieldSet.Fingerprint); when both sides of a comparison have it set, it
 // surfaces silent schema drift (e.g. reordered fields) that the user-set
-// FieldSetVersion alone would miss.
+// FieldSetVersion alone would miss. session.Session populates this field
+// automatically using a value cached at session.New time; direct
+// token.Tokenizer callers must set it themselves if they want drift
+// detection.
 type ProbabilisticToken struct {
 	FieldSetVersion     string              `json:"field_set_version"`
 	KeyID               string              `json:"key_id,omitempty"`

@@ -47,10 +47,13 @@ type Session interface {
 }
 
 // session is the default Session implementation backed by a token.Tokenizer
-// and a stored FieldSet.
+// and a stored FieldSet. The fingerprint of fs is computed once at New time
+// and reused on every token; the underlying token.Tokenizer no longer
+// recomputes it on each call.
 type session struct {
-	tok token.Tokenizer
-	fs  sriracha.FieldSet
+	tok         token.Tokenizer
+	fs          sriracha.FieldSet
+	fingerprint string
 }
 
 // New constructs a Session. It validates fs once with fieldset.Validate and
@@ -60,7 +63,10 @@ type session struct {
 //
 // fs is deep-copied before being stored, so post-construction mutation of
 // the caller's FieldSet (Fields slice or ProbabilisticParams.NgramSizes)
-// cannot affect subsequent tokenize / match calls.
+// cannot affect subsequent tokenize / match calls. The FieldSet fingerprint
+// is computed once here and stamped onto every token returned by
+// TokenizeDeterministic / TokenizeProbabilistic, avoiding a SHA-256 over the
+// canonical schema encoding on every call.
 //
 // opts are forwarded to token.New unchanged.
 func New(secret []byte, fs sriracha.FieldSet, opts ...token.Option) (Session, error) {
@@ -71,7 +77,8 @@ func New(secret []byte, fs sriracha.FieldSet, opts ...token.Option) (Session, er
 	if err != nil {
 		return nil, err
 	}
-	return &session{tok: tok, fs: copyFieldSet(fs)}, nil
+	stored := copyFieldSet(fs)
+	return &session{tok: tok, fs: stored, fingerprint: stored.Fingerprint()}, nil
 }
 
 func (s *session) FieldSet() sriracha.FieldSet {
@@ -93,11 +100,21 @@ func copyFieldSet(fs sriracha.FieldSet) sriracha.FieldSet {
 }
 
 func (s *session) TokenizeDeterministic(record sriracha.RawRecord) (sriracha.DeterministicToken, error) {
-	return s.tok.TokenizeDeterministic(record, s.fs)
+	tok, err := s.tok.TokenizeDeterministic(record, s.fs)
+	if err != nil {
+		return tok, err
+	}
+	tok.FieldSetFingerprint = s.fingerprint
+	return tok, nil
 }
 
 func (s *session) TokenizeProbabilistic(record sriracha.RawRecord) (sriracha.ProbabilisticToken, error) {
-	return s.tok.TokenizeProbabilistic(record, s.fs)
+	tok, err := s.tok.TokenizeProbabilistic(record, s.fs)
+	if err != nil {
+		return tok, err
+	}
+	tok.FieldSetFingerprint = s.fingerprint
+	return tok, nil
 }
 
 func (s *session) TokenizeField(value string, path sriracha.FieldPath) ([]byte, error) {

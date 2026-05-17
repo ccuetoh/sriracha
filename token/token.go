@@ -39,12 +39,21 @@ type Tokenizer interface {
 	// per field). The returned token's Fields slice is aligned with fs.Fields:
 	// each entry is a 32-byte HMAC for a present field, or nil for an absent
 	// optional field. Missing required fields return an error.
+	//
+	// The returned token has FieldSetFingerprint left empty — fingerprint
+	// management is the caller's responsibility, so a session can cache
+	// fs.Fingerprint() once at construction time rather than re-running it on
+	// every tokenize call. session.Session.TokenizeDeterministic stamps the
+	// cached value automatically.
 	TokenizeDeterministic(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.DeterministicToken, error)
 	// TokenizeProbabilistic tokenizes a RawRecord in probabilistic (Bloom filter)
 	// mode. The returned token's Fields slice is aligned with fs.Fields:
 	// present fields contain the populated filter, absent optional fields
 	// contain an all-zero filter of the same length. Missing required fields
 	// return an error.
+	//
+	// As with TokenizeDeterministic, FieldSetFingerprint is left empty on the
+	// returned token; the caller (typically session.Session) stamps it.
 	TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.ProbabilisticToken, error)
 	// TokenizeField returns the deterministic 32-byte HMAC for a single
 	// (value, path) pair, after running the same normalization pipeline
@@ -139,10 +148,9 @@ func (t *tokenizer) TokenizeDeterministic(record sriracha.RawRecord, fs sriracha
 	}
 
 	return sriracha.DeterministicToken{
-		FieldSetVersion:     fs.Version,
-		KeyID:               t.keyID,
-		FieldSetFingerprint: fs.Fingerprint(),
-		Fields:              fields,
+		FieldSetVersion: fs.Version,
+		KeyID:           t.keyID,
+		Fields:          fields,
 	}, nil
 }
 

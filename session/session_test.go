@@ -114,6 +114,44 @@ func TestSession_FieldSetIsCopy(t *testing.T) {
 	assert.NotEqual(t, 99, fs2.ProbabilisticParams.NgramSizes[0], "FieldSet() NgramSizes must be deep-copied")
 }
 
+func TestSession_TokenizesStampFingerprint(t *testing.T) {
+	t.Parallel()
+	s := newSess(t)
+	want := s.FieldSet().Fingerprint()
+
+	detTok, err := s.TokenizeDeterministic(sriracha.RawRecord{
+		sriracha.FieldNameGiven: "Alice",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, want, detTok.FieldSetFingerprint,
+		"session.TokenizeDeterministic must stamp the cached fingerprint")
+
+	probTok, err := s.TokenizeProbabilistic(sriracha.RawRecord{
+		sriracha.FieldNameGiven: "Alice",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, want, probTok.FieldSetFingerprint,
+		"session.TokenizeProbabilistic must stamp the cached fingerprint")
+}
+
+func TestSession_TokenizeErrorReturnsEmptyToken(t *testing.T) {
+	t.Parallel()
+	s := newSess(t)
+
+	// Missing required field — token.* returns an error without producing
+	// useful token bytes. Session must not stamp the fingerprint onto an
+	// error result.
+	detTok, err := s.TokenizeDeterministic(sriracha.RawRecord{})
+	require.Error(t, err)
+	assert.Empty(t, detTok.FieldSetFingerprint,
+		"error path must not stamp fingerprint")
+
+	probTok, err := s.TokenizeProbabilistic(sriracha.RawRecord{})
+	require.Error(t, err)
+	assert.Empty(t, probTok.FieldSetFingerprint,
+		"error path must not stamp fingerprint")
+}
+
 func TestSession_NewCopiesFieldSet(t *testing.T) {
 	t.Parallel()
 	fs := sriracha.FieldSet{

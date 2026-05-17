@@ -41,7 +41,6 @@ func (t *tokenizer) TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha
 	return sriracha.ProbabilisticToken{
 		FieldSetVersion:     fs.Version,
 		KeyID:               t.keyID,
-		FieldSetFingerprint: fs.Fingerprint(),
 		ProbabilisticParams: cfg,
 		Fields:              fields,
 	}, nil

@@ -183,6 +183,18 @@ func TestTokenizeDeterministic(t *testing.T) {
 			},
 		},
 		{
+			name: "FingerprintLeftEmpty",
+			run: func(t *testing.T) {
+				// Direct token.* callers are responsible for setting
+				// FieldSetFingerprint themselves so session can cache it once.
+				tok := newTok(t, "secret")
+				tr, err := tok.TokenizeDeterministic(sriracha.RawRecord{sriracha.FieldNameGiven: "John"}, deterministicFS(givenSpec))
+				require.NoError(t, err)
+				assert.Empty(t, tr.FieldSetFingerprint,
+					"token.TokenizeDeterministic must not populate FieldSetFingerprint")
+			},
+		},
+		{
 			name: "DomainSeparationByPath",
 			run: func(t *testing.T) {
 				// Length-prefixed HMAC must distinguish (value="ab", path A) from
@@ -320,6 +332,17 @@ func TestTokenizeProbabilistic(t *testing.T) {
 				tr, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: "John"}, bloomFS(givenSpec))
 				require.NoError(t, err)
 				assert.Equal(t, "k1", tr.KeyID)
+			},
+		},
+		{
+			name: "FingerprintLeftEmpty",
+			run: func(t *testing.T) {
+				// See TestTokenizeDeterministic/FingerprintLeftEmpty for rationale.
+				tok := newTok(t, "secret")
+				tr, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: "John"}, bloomFS(givenSpec))
+				require.NoError(t, err)
+				assert.Empty(t, tr.FieldSetFingerprint,
+					"token.TokenizeProbabilistic must not populate FieldSetFingerprint")
 			},
 		},
 	}
