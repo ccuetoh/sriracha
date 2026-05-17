@@ -30,7 +30,7 @@ const benchSecret = "test-bench-fixed-secret-not-for-production" //nolint:gosec 
 // fields, new field, weight tweak) trips a clear test failure rather than
 // silently shifting every metric Bencher tracks. Update this constant
 // only when DefaultFieldSet changes are intentional.
-const expectedFingerprintPrefix = "5812c087"
+const expectedFingerprintPrefix = "35e93001"
 
 // corpus is one labeled benchmark dataset. Both quality tests iterate
 // this list, so adding a new corpus is a single struct entry — no per-

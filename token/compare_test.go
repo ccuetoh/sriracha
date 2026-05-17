@@ -204,6 +204,21 @@ func TestDicePerField_Errors(t *testing.T) {
 			b:    bloomTokWith(sriracha.ProbabilisticConfig{SizeBits: 2048, NgramSizes: []int{2}, HashCount: 2}),
 		},
 		{
+			name: "FlipProbabilityMismatch",
+			a:    bloomTokWith(sriracha.ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2}, HashCount: 2}),
+			b:    bloomTokWith(sriracha.ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2}, HashCount: 2, FlipProbability: 0.02}),
+		},
+		{
+			name: "TargetPopcountMismatch",
+			a:    bloomTokWith(sriracha.ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2}, HashCount: 2}),
+			b:    bloomTokWith(sriracha.ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2}, HashCount: 2, TargetPopcount: 400}),
+		},
+		{
+			name: "BothHardeningParamsMismatch",
+			a:    bloomTokWith(sriracha.ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2}, HashCount: 2}),
+			b:    bloomTokWith(sriracha.ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2}, HashCount: 2, FlipProbability: 0.02, TargetPopcount: 400}),
+		},
+		{
 			name: "FieldCountMismatch",
 			a:    bloomTokWith(cfg, []byte{0x00}),
 			b:    bloomTokWith(cfg, []byte{0x00}, []byte{0x00}),
