@@ -58,6 +58,10 @@ type session struct {
 // Tokenizer; this lets callers fail fast on a malformed schema without ever
 // allocating locked memory.
 //
+// fs is deep-copied before being stored, so post-construction mutation of
+// the caller's FieldSet (Fields slice or ProbabilisticParams.NgramSizes)
+// cannot affect subsequent tokenize / match calls.
+//
 // opts are forwarded to token.New unchanged.
 func New(secret []byte, fs sriracha.FieldSet, opts ...token.Option) (Session, error) {
 	if err := fieldset.Validate(fs); err != nil {
@@ -67,16 +71,24 @@ func New(secret []byte, fs sriracha.FieldSet, opts ...token.Option) (Session, er
 	if err != nil {
 		return nil, err
 	}
-	return &session{tok: tok, fs: fs}, nil
+	return &session{tok: tok, fs: copyFieldSet(fs)}, nil
 }
 
 func (s *session) FieldSet() sriracha.FieldSet {
+	return copyFieldSet(s.fs)
+}
+
+// copyFieldSet returns a deep copy of fs. The Fields slice and the
+// ProbabilisticParams.NgramSizes slice are freshly allocated so mutation
+// of either side leaves the other unaffected; every other FieldSet field
+// is a value type and copies via struct assignment.
+func copyFieldSet(fs sriracha.FieldSet) sriracha.FieldSet {
 	out := sriracha.FieldSet{
-		Version:             s.fs.Version,
-		Fields:              append([]sriracha.FieldSpec(nil), s.fs.Fields...),
-		ProbabilisticParams: s.fs.ProbabilisticParams,
+		Version:             fs.Version,
+		Fields:              append([]sriracha.FieldSpec(nil), fs.Fields...),
+		ProbabilisticParams: fs.ProbabilisticParams,
 	}
-	out.ProbabilisticParams.NgramSizes = append([]int(nil), s.fs.ProbabilisticParams.NgramSizes...)
+	out.ProbabilisticParams.NgramSizes = append([]int(nil), fs.ProbabilisticParams.NgramSizes...)
 	return out
 }
 
