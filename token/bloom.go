@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash"
+	"unicode/utf8"
 
 	"github.com/bits-and-blooms/bitset"
 
@@ -72,14 +73,12 @@ func (t *tokenizer) TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha
 // identical filters.
 func tokenizeFieldBloom(h hash.Hash, out []byte, normalizedValue string, path sriracha.FieldPath, cfg sriracha.ProbabilisticConfig) {
 	bs := bitset.New(uint(cfg.SizeBits))
-	grams := ngrams(normalizedValue, cfg.NgramSizes)
 	pathBytes := []byte(path.String())
 
 	var lp [4]byte
 	var ib [4]byte
 	var sumBuf [32]byte
-	for _, g := range grams {
-		gb := []byte(g)
+	eachNgram(normalizedValue, cfg.NgramSizes, func(gb []byte) {
 		for i := range cfg.HashCount {
 			h.Reset()
 			binary.BigEndian.PutUint32(lp[:], uint32(len(gb))) //nolint:gosec // G115: gram length bounded by ngram size
@@ -94,7 +93,7 @@ func tokenizeFieldBloom(h hash.Hash, out []byte, normalizedValue string, path sr
 			pos := binary.BigEndian.Uint64(sum[:8]) % uint64(cfg.SizeBits)
 			bs.Set(uint(pos))
 		}
-	}
+	})
 
 	if cfg.FlipProbability > 0 {
 		applyBLIP(h, bs, cfg.SizeBits, cfg.FlipProbability, path, normalizedValue)
@@ -197,29 +196,50 @@ func bitsetToBytes(bs *bitset.BitSet, out []byte) {
 	}
 }
 
-// ngrams returns all n-grams of the given sizes from s.
-// Iterates Unicode runes (not bytes) to correctly handle multi-byte UTF-8.
-// Returns nil if s has fewer runes than the smallest requested size, or if sizes is empty.
-func ngrams(s string, sizes []int) []string {
+// eachNgram invokes fn for each n-gram (across all sizes in sizes) extracted
+// from s, decoded as runes (not bytes) so multi-byte UTF-8 input produces
+// correct gram boundaries. The byte slice passed to fn aliases an internal
+// scratch buffer; fn must not retain it past the call. Iteration order is:
+// for each size in sizes (in order), all grams of that size left-to-right.
+// No-ops when s has fewer runes than the smallest size, or sizes is empty.
+func eachNgram(s string, sizes []int, fn func(gram []byte)) {
 	runes := []rune(s)
 	n := len(runes)
 	if n == 0 || len(sizes) == 0 {
-		return nil
+		return
 	}
-	minSize := sizes[0]
+	minSize, maxSize := sizes[0], sizes[0]
 	for _, sz := range sizes[1:] {
 		if sz < minSize {
 			minSize = sz
 		}
-	}
-	if n < minSize {
-		return nil
-	}
-	var result []string
-	for _, sz := range sizes {
-		for i := 0; i+sz <= n; i++ {
-			result = append(result, string(runes[i:i+sz]))
+		if sz > maxSize {
+			maxSize = sz
 		}
 	}
+	if n < minSize {
+		return
+	}
+	// Scratch is sized to the worst case (largest gram, all 4-byte runes).
+	scratch := make([]byte, 0, maxSize*utf8.UTFMax)
+	for _, sz := range sizes {
+		for i := 0; i+sz <= n; i++ {
+			scratch = scratch[:0]
+			for _, r := range runes[i : i+sz] {
+				scratch = utf8.AppendRune(scratch, r)
+			}
+			fn(scratch)
+		}
+	}
+}
+
+// ngrams collects the output of eachNgram into a string slice. Used by
+// tests and any caller that needs random access; the per-field hot path
+// uses eachNgram directly to avoid the gram-string allocation.
+func ngrams(s string, sizes []int) []string {
+	var result []string
+	eachNgram(s, sizes, func(g []byte) {
+		result = append(result, string(g))
+	})
 	return result
 }

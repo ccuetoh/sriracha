@@ -11,6 +11,10 @@ change in any release.
 
 ### Changed
 
+- `tokenizeFieldBloom` now iterates n-grams via an internal callback
+  (`eachNgram`) that writes each gram into a shared scratch buffer,
+  eliminating both the per-gram string allocation inside `ngrams` and
+  the `[]byte(g)` conversion at the callsite. Output is byte-identical.
 - `TokenizeProbabilistic` and the BLIP / balanced-filter HMAC stream
   now pass a stack-allocated scratch buffer to `hash.Hash.Sum` instead
   of `nil`, eliminating one 32-byte allocation per hashed gram (and
