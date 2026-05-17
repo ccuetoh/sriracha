@@ -470,6 +470,37 @@ func TestNew_FinalizerWipesOnGC(t *testing.T) {
 	t.Fatal("locked buffer still alive after GC + 2s wait — finalizer did not run")
 }
 
+// TestDestroy_ClearsFinalizer pins the lifecycle invariant that an explicit
+// Destroy() also unregisters the runtime finalizer registered by New, so
+// the finalizer cannot re-invoke t.secret.Destroy() on an already-destroyed
+// buffer. memguard.LockedBuffer.Destroy is idempotent today (guarded by
+// !b.alive), so any regression here would be silently absorbed at runtime —
+// hence the pinned test. Skipped under -short because it relies on GC timing.
+func TestDestroy_ClearsFinalizer(t *testing.T) {
+	t.Parallel()
+	if testing.Short() {
+		t.Skip("skipping GC-timing-sensitive test in -short mode")
+	}
+
+	var buf *memguard.LockedBuffer
+	func() {
+		tok, err := New([]byte("explicit-destroy"))
+		require.NoError(t, err)
+		impl, ok := tok.(*tokenizer)
+		require.True(t, ok)
+		buf = impl.secret
+		tok.Destroy()
+		require.False(t, buf.IsAlive(), "explicit Destroy must wipe the locked buffer immediately")
+	}()
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		runtime.GC()
+		time.Sleep(20 * time.Millisecond)
+	}
+	assert.False(t, buf.IsAlive(), "buffer must remain destroyed after GC")
+}
+
 func TestNgrams(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
