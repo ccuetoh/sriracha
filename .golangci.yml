@@ -14,10 +14,17 @@ linters:
     - errorlint
     - forcetypeassert
     - gosec
+    - depguard
   settings:
     gosec:
       excludes:
         - G304
+    depguard:
+      rules:
+        no-unsafe:
+          deny:
+            - pkg: unsafe
+              desc: the unsafe package is forbidden in this repository
 
 formatters:
   enable:
