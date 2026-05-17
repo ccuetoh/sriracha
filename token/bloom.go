@@ -228,11 +228,11 @@ func acquireBitset(sizeBits uint32) *bitset.BitSet {
 // releaseBitset returns bs to the pool for the given sizeBits. The bitset's
 // dirty state is wiped lazily on the next acquireBitset. Must be paired
 // with an acquireBitset call for the same sizeBits; mismatched usage
-// panics on the nil type assertion below, which is the intended failure
-// mode for an internal helper.
+// panics on the unchecked type assertion below, which is the intended
+// failure mode for an internal helper.
 func releaseBitset(sizeBits uint32, bs *bitset.BitSet) {
 	p, _ := bitsetPools.Load(sizeBits)
-	p.(*sync.Pool).Put(bs)
+	p.(*sync.Pool).Put(bs) //nolint:forcetypeassert // acquireBitset always stores a *sync.Pool first
 }
 
 // eachNgram invokes fn for each n-gram (across all sizes in sizes) extracted
