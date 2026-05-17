@@ -15,18 +15,25 @@ func (t *tokenizer) TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha
 	cfg := fs.ProbabilisticParams
 	fieldBytes := int(((cfg.SizeBits + 63) / 64) * 8)
 	fields := make([][]byte, len(fs.Fields))
+	// One contiguous backing slab per token; each field's bytes is a
+	// sub-slice. Drops the per-field allocation that the previous
+	// implementation paid for both absent and present fields.
+	backing := make([]byte, len(fs.Fields)*fieldBytes)
 
 	// Reuse a single pooled HMAC across every field/gram in this record.
 	h := t.acquire()
 	defer t.release(h)
 
 	for i, spec := range fs.Fields {
+		out := backing[i*fieldBytes : (i+1)*fieldBytes]
 		raw, ok := record[spec.Path]
 		if !ok {
 			if spec.Required {
 				return sriracha.ProbabilisticToken{}, fmt.Errorf("token: required field %q missing", spec.Path)
 			}
-			fields[i] = make([]byte, fieldBytes)
+			// out is zero-initialised by make; absent optional fields
+			// match the previous all-zero-filter convention.
+			fields[i] = out
 			continue
 		}
 
@@ -34,7 +41,8 @@ func (t *tokenizer) TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha
 		if err != nil {
 			return sriracha.ProbabilisticToken{}, fmt.Errorf("token: normalization failed for field %q: %w", spec.Path, err)
 		}
-		fields[i] = tokenizeFieldBloom(h, normalized, spec.Path, cfg)
+		tokenizeFieldBloom(h, out, normalized, spec.Path, cfg)
+		fields[i] = out
 	}
 
 	return sriracha.ProbabilisticToken{
@@ -45,8 +53,10 @@ func (t *tokenizer) TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha
 	}, nil
 }
 
-// tokenizeFieldBloom returns serialized Bloom filter bytes for a single
-// normalized field value, using h (which is reset between hashes).
+// tokenizeFieldBloom writes the serialized Bloom filter bytes for a single
+// normalized field value into out, using h (which is reset between hashes).
+// out must be exactly ((cfg.SizeBits + 63) / 64) * 8 bytes — the caller
+// owns it and slices into the per-token backing buffer.
 //
 // Bit positions are derived from HMAC-SHA256 over (gram, path, counter), each
 // component written separately and length-prefixed so distinct (gram, path)
@@ -60,7 +70,7 @@ func (t *tokenizer) TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha
 // (chosen via a separate "balance:" stream) until the popcount reaches the
 // target. Both transforms are deterministic — identical inputs produce
 // identical filters.
-func tokenizeFieldBloom(h hash.Hash, normalizedValue string, path sriracha.FieldPath, cfg sriracha.ProbabilisticConfig) []byte {
+func tokenizeFieldBloom(h hash.Hash, out []byte, normalizedValue string, path sriracha.FieldPath, cfg sriracha.ProbabilisticConfig) {
 	bs := bitset.New(uint(cfg.SizeBits))
 	grams := ngrams(normalizedValue, cfg.NgramSizes)
 	pathBytes := []byte(path.String())
@@ -92,7 +102,7 @@ func tokenizeFieldBloom(h hash.Hash, normalizedValue string, path sriracha.Field
 		applyBalance(h, bs, cfg.SizeBits, cfg.TargetPopcount, path, normalizedValue)
 	}
 
-	return bitsetToBytes(bs)
+	bitsetToBytes(bs, out)
 }
 
 // applyBLIP flips each of the first sizeBits bits of bs with probability p,
@@ -177,14 +187,13 @@ func (s *hmacStream) uint64() uint64 {
 	return v
 }
 
-// bitsetToBytes serialises a BitSet as little-endian uint64 words.
-func bitsetToBytes(bs *bitset.BitSet) []byte {
+// bitsetToBytes serialises a BitSet as little-endian uint64 words into out.
+// out must be exactly len(bs.Words())*8 bytes; the caller owns the buffer.
+func bitsetToBytes(bs *bitset.BitSet, out []byte) {
 	words := bs.Words()
-	out := make([]byte, len(words)*8)
 	for i, w := range words {
 		binary.LittleEndian.PutUint64(out[i*8:], w)
 	}
-	return out
 }
 
 // ngrams returns all n-grams of the given sizes from s.
