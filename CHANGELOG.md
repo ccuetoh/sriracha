@@ -11,6 +11,12 @@ change in any release.
 
 ### Changed
 
+- `TokenizeDeterministic` now allocates one contiguous backing buffer
+  (sized `len(fs.Fields) × sha256.Size`) per token and slices into it
+  for each present field, replacing the per-field `h.Sum(nil)`
+  allocation in `hmacField`. Output is byte-identical; per-token
+  allocations drop by `K - 1` (K = number of present fields). All-
+  absent tokens skip the backing allocation entirely.
 - `tokenizeFieldBloom` now iterates n-grams via an internal callback
   (`eachNgram`) that writes each gram into a shared scratch buffer,
   eliminating both the per-gram string allocation inside `ngrams` and
