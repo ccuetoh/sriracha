@@ -255,6 +255,10 @@ func TestDicePerField_FingerprintOneSideSkipsCheck(t *testing.T) {
 
 	a, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
 	require.NoError(t, err)
+	// token.TokenizeProbabilistic leaves FieldSetFingerprint empty; the
+	// caller is responsible for setting it. Set it on a so this test
+	// exercises the asymmetric (one side set, one side empty) path.
+	a.FieldSetFingerprint = fs.Fingerprint()
 	b := a
 	b.FieldSetFingerprint = ""
 

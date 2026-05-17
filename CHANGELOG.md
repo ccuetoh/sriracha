@@ -11,6 +11,13 @@ change in any release.
 
 ### Changed
 
+- `token.Tokenizer.TokenizeDeterministic` and `TokenizeProbabilistic` no
+  longer populate `FieldSetFingerprint` on the returned token. Direct
+  `token.Tokenizer` callers must set it themselves if they want downstream
+  schema-drift detection. `session.Session.TokenizeDeterministic` and
+  `TokenizeProbabilistic` set it automatically using a fingerprint
+  computed once at `session.New` time — eliminating a redundant SHA-256
+  over the canonical FieldSet encoding on every tokenize call.
 - `token.Tokenizer.Destroy` now clears the runtime finalizer registered by
   `New`, so the finalizer cannot re-fire on the already-destroyed locked
   buffer after an explicit `Destroy` call. Defensive only — `memguard`'s
