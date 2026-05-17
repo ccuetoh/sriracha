@@ -11,6 +11,10 @@ change in any release.
 
 ### Fixed
 
+- `session.New` now deep-copies the caller's FieldSet. Previously the stored
+  Fields and `ProbabilisticParams.NgramSizes` slices aliased the caller's
+  backing arrays, so post-construction mutation by the caller would silently
+  affect every subsequent tokenize / match call from that session.
 - `DicePerField` and `Match` now reject probabilistic tokens whose
   `ProbabilisticParams` differ in `FlipProbability` or `TargetPopcount`.
   Previously these hardening parameters were ignored by the equality gate, so
