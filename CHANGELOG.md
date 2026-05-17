@@ -11,6 +11,10 @@ change in any release.
 
 ### Changed
 
+- `TokenizeProbabilistic` now allocates one contiguous backing buffer per
+  token instead of one byte slice per field. Field bytes are
+  byte-identical to before; the per-token allocation count drops by
+  N-1 (where N is the number of fields in the FieldSet).
 - Removed the `github.com/bits-and-blooms/bloom/v3` runtime dependency
   (and its transitive `github.com/twmb/murmur3`). Probabilistic
   tokenization used the bloom package only to reach its underlying
