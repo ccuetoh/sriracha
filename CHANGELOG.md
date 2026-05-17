@@ -9,6 +9,13 @@ change in any release.
 
 ## [Unreleased]
 
+### Changed
+
+- `token.Tokenizer.Destroy` now clears the runtime finalizer registered by
+  `New`, so the finalizer cannot re-fire on the already-destroyed locked
+  buffer after an explicit `Destroy` call. Defensive only — `memguard`'s
+  `Destroy` is idempotent today.
+
 ### Fixed
 
 - `DicePerField` and `Match` now reject probabilistic tokens whose

@@ -105,6 +105,7 @@ func New(secret []byte, opts ...Option) (Tokenizer, error) {
 
 func (t *tokenizer) Destroy() {
 	t.secret.Destroy()
+	runtime.SetFinalizer(t, nil)
 }
 
 func (t *tokenizer) acquire() hash.Hash {
