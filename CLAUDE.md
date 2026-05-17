@@ -19,6 +19,7 @@ test/bench/      # OpenSanctions quality + perf harness, gated by //go:build ben
 - **No panics** anywhere except `MustParsePath` (init-time field path declarations only).
 - **All error paths must return `error`** — bounds checks, type assertions, I/O all return errors.
 - **No comment separators** like `// --- Section name ---`.
+- **No `unsafe`** — importing the `unsafe` package is forbidden (enforced by `depguard` in `.golangci.yml`).
 
 ## Key design decisions
 - `FieldPath` is a struct with precomputed `org`, `namespace`, `localName` fields — never split the string at call time.
