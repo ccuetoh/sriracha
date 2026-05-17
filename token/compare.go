@@ -120,9 +120,15 @@ func DicePerField(a, b sriracha.ProbabilisticToken) ([]float64, error) {
 
 // bloomParamsEqual reports whether two ProbabilisticConfig values are field-for-field
 // identical. ProbabilisticConfig contains a []int (NgramSizes) and so is not comparable
-// with ==.
+// with ==. FlipProbability and TargetPopcount drive the hardening transforms in
+// tokenizeFieldBloom; tokens produced with different values are not statistically
+// comparable, so they must match here.
 func bloomParamsEqual(a, b sriracha.ProbabilisticConfig) bool {
-	return a.SizeBits == b.SizeBits && a.HashCount == b.HashCount && slices.Equal(a.NgramSizes, b.NgramSizes)
+	return a.SizeBits == b.SizeBits &&
+		a.HashCount == b.HashCount &&
+		a.FlipProbability == b.FlipProbability &&
+		a.TargetPopcount == b.TargetPopcount &&
+		slices.Equal(a.NgramSizes, b.NgramSizes)
 }
 
 // Score returns the weight-normalised aggregate of perField against

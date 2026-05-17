@@ -32,7 +32,7 @@ func TestFingerprint_GoldenVector(t *testing.T) {
 		},
 		ProbabilisticParams: ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2}, HashCount: 2},
 	}
-	const want = "d99c25e70d90b328d83991580082cccb64c22a07ec7df5f829d0b75bc7a06262"
+	const want = "c7d429004484a1f5380b109495126b4b3e15acca52b6a46feb6fa783659ecc3b"
 	got := fs.Fingerprint()
 	if got != want {
 		t.Logf("If this golden vector changed intentionally, update the canonical encoding doc in fingerprint.go")
@@ -75,6 +75,8 @@ func TestFingerprint_SensitivityMatrix(t *testing.T) {
 		{"BloomSizeChange", mutate(func(fs *FieldSet) { fs.ProbabilisticParams.SizeBits = 2048 }).Fingerprint()},
 		{"BloomHashCountChange", mutate(func(fs *FieldSet) { fs.ProbabilisticParams.HashCount = 3 }).Fingerprint()},
 		{"NgramSizesChange", mutate(func(fs *FieldSet) { fs.ProbabilisticParams.NgramSizes = []int{2} }).Fingerprint()},
+		{"FlipProbabilityChange", mutate(func(fs *FieldSet) { fs.ProbabilisticParams.FlipProbability = 0.02 }).Fingerprint()},
+		{"TargetPopcountChange", mutate(func(fs *FieldSet) { fs.ProbabilisticParams.TargetPopcount = 400 }).Fingerprint()},
 	}
 
 	baseFP := base.Fingerprint()

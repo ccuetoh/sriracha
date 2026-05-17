@@ -47,16 +47,26 @@ type Session interface {
 }
 
 // session is the default Session implementation backed by a token.Tokenizer
-// and a stored FieldSet.
+// and a stored FieldSet. The fingerprint of fs is computed once at New time
+// and reused on every token; the underlying token.Tokenizer no longer
+// recomputes it on each call.
 type session struct {
-	tok token.Tokenizer
-	fs  sriracha.FieldSet
+	tok         token.Tokenizer
+	fs          sriracha.FieldSet
+	fingerprint string
 }
 
 // New constructs a Session. It validates fs once with fieldset.Validate and
 // returns the resulting validation error (if any) before creating the
 // Tokenizer; this lets callers fail fast on a malformed schema without ever
 // allocating locked memory.
+//
+// fs is deep-copied before being stored, so post-construction mutation of
+// the caller's FieldSet (Fields slice or ProbabilisticParams.NgramSizes)
+// cannot affect subsequent tokenize / match calls. The FieldSet fingerprint
+// is computed once here and stamped onto every token returned by
+// TokenizeDeterministic / TokenizeProbabilistic, avoiding a SHA-256 over the
+// canonical schema encoding on every call.
 //
 // opts are forwarded to token.New unchanged.
 func New(secret []byte, fs sriracha.FieldSet, opts ...token.Option) (Session, error) {
@@ -67,25 +77,44 @@ func New(secret []byte, fs sriracha.FieldSet, opts ...token.Option) (Session, er
 	if err != nil {
 		return nil, err
 	}
-	return &session{tok: tok, fs: fs}, nil
+	stored := copyFieldSet(fs)
+	return &session{tok: tok, fs: stored, fingerprint: stored.Fingerprint()}, nil
 }
 
 func (s *session) FieldSet() sriracha.FieldSet {
+	return copyFieldSet(s.fs)
+}
+
+// copyFieldSet returns a deep copy of fs. The Fields slice and the
+// ProbabilisticParams.NgramSizes slice are freshly allocated so mutation
+// of either side leaves the other unaffected; every other FieldSet field
+// is a value type and copies via struct assignment.
+func copyFieldSet(fs sriracha.FieldSet) sriracha.FieldSet {
 	out := sriracha.FieldSet{
-		Version:             s.fs.Version,
-		Fields:              append([]sriracha.FieldSpec(nil), s.fs.Fields...),
-		ProbabilisticParams: s.fs.ProbabilisticParams,
+		Version:             fs.Version,
+		Fields:              append([]sriracha.FieldSpec(nil), fs.Fields...),
+		ProbabilisticParams: fs.ProbabilisticParams,
 	}
-	out.ProbabilisticParams.NgramSizes = append([]int(nil), s.fs.ProbabilisticParams.NgramSizes...)
+	out.ProbabilisticParams.NgramSizes = append([]int(nil), fs.ProbabilisticParams.NgramSizes...)
 	return out
 }
 
 func (s *session) TokenizeDeterministic(record sriracha.RawRecord) (sriracha.DeterministicToken, error) {
-	return s.tok.TokenizeDeterministic(record, s.fs)
+	tok, err := s.tok.TokenizeDeterministic(record, s.fs)
+	if err != nil {
+		return tok, err
+	}
+	tok.FieldSetFingerprint = s.fingerprint
+	return tok, nil
 }
 
 func (s *session) TokenizeProbabilistic(record sriracha.RawRecord) (sriracha.ProbabilisticToken, error) {
-	return s.tok.TokenizeProbabilistic(record, s.fs)
+	tok, err := s.tok.TokenizeProbabilistic(record, s.fs)
+	if err != nil {
+		return tok, err
+	}
+	tok.FieldSetFingerprint = s.fingerprint
+	return tok, nil
 }
 
 func (s *session) TokenizeField(value string, path sriracha.FieldPath) ([]byte, error) {
