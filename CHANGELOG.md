@@ -11,6 +11,12 @@ change in any release.
 
 ### Changed
 
+- Removed the `github.com/bits-and-blooms/bloom/v3` runtime dependency
+  (and its transitive `github.com/twmb/murmur3`). Probabilistic
+  tokenization used the bloom package only to reach its underlying
+  bitset (`bloom.New(...).BitSet()`); switched to `bitset.New` directly.
+  Output is byte-identical, the dependency surface is smaller, and one
+  allocation per field is eliminated.
 - `token.Tokenizer.TokenizeDeterministic` and `TokenizeProbabilistic` no
   longer populate `FieldSetFingerprint` on the returned token. Direct
   `token.Tokenizer` callers must set it themselves if they want downstream

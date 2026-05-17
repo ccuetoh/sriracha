@@ -5,7 +5,6 @@ go 1.24.0
 require (
 	github.com/awnumar/memguard v0.22.5
 	github.com/bits-and-blooms/bitset v1.24.4
-	github.com/bits-and-blooms/bloom/v3 v3.7.1
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/text v0.31.0
 )

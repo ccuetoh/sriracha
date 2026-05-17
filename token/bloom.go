@@ -6,7 +6,6 @@ import (
 	"hash"
 
 	"github.com/bits-and-blooms/bitset"
-	"github.com/bits-and-blooms/bloom/v3"
 
 	"github.com/ccuetoh/sriracha"
 	"github.com/ccuetoh/sriracha/normalize"
@@ -62,8 +61,7 @@ func (t *tokenizer) TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha
 // target. Both transforms are deterministic — identical inputs produce
 // identical filters.
 func tokenizeFieldBloom(h hash.Hash, normalizedValue string, path sriracha.FieldPath, cfg sriracha.ProbabilisticConfig) []byte {
-	f := bloom.New(uint(cfg.SizeBits), uint(cfg.HashCount))
-	bs := f.BitSet()
+	bs := bitset.New(uint(cfg.SizeBits))
 	grams := ngrams(normalizedValue, cfg.NgramSizes)
 	pathBytes := []byte(path.String())
 
