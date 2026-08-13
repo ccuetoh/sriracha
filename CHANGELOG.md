@@ -9,6 +9,8 @@ change in any release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-13
+
 ### Changed
 
 - `tokenizeFieldBloom` now reuses `*bitset.BitSet` instances via a
@@ -83,6 +85,8 @@ change in any release.
 
 Initial public release.
 
-[Unreleased]: https://github.com/ccuetoh/sriracha/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ccuetoh/sriracha/compare/v0.1.1...HEAD
+
+[0.1.1]: https://github.com/ccuetoh/sriracha/compare/v0.1.0...v0.1.1
 
 [0.1.0]: https://github.com/ccuetoh/sriracha/releases/tag/v0.1.0

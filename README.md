@@ -30,7 +30,7 @@ that can be compared without exposing the underlying identifiers.
 Requires Go 1.25+
 
 ```bash
-go get github.com/ccuetoh/sriracha@v0.1.0
+go get github.com/ccuetoh/sriracha@v0.1.1
 ```
 
 ## Quickstart
