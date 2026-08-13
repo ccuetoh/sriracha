@@ -21,7 +21,7 @@ By participating, you agree to uphold it.
 
 ## Development setup
 
-Sriracha targets **Go 1.24+**. The dev workflow is driven by
+Sriracha targets **Go 1.25+**. The dev workflow is driven by
 [Task](https://taskfile.dev/); install it once, then everything else is
 discoverable from [`Taskfile.yml`](Taskfile.yml).
 

@@ -27,7 +27,7 @@ that can be compared without exposing the underlying identifiers.
 
 ## Installation
 
-Requires Go 1.24+
+Requires Go 1.25+
 
 ```bash
 go get github.com/ccuetoh/sriracha@v0.1.0

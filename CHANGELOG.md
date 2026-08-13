@@ -72,6 +72,13 @@ change in any release.
   this version even for otherwise-unchanged FieldSets. Persisted
   `FieldSetFingerprint` values must be regenerated.
 
+### Security
+
+- Bumped `golang.org/x/text` from v0.31.0 to v0.41.0 to fix
+  [GO-2026-5970](https://pkg.go.dev/vuln/GO-2026-5970) (infinite loop on
+  invalid input). This raises the minimum Go version to 1.25. Also bumped
+  `awnumar/memguard` to v0.23.0 and `bits-and-blooms/bitset` to v1.25.0.
+
 ## [0.1.0] - 2026-05-03
 
 Initial public release.
