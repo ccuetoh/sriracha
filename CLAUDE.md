@@ -2,7 +2,7 @@
 
 ## Module
 
-`github.com/ccuetoh/sriracha`, Go 1.24+. External runtime deps should be carefully considered. Tests use
+`github.com/ccuetoh/sriracha`, Go 1.25+. External runtime deps should be carefully considered. Tests use
 `github.com/stretchr/testify`.
 
 ## Package layout
