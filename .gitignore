@@ -16,6 +16,9 @@ coverage.html
 testdata/fuzz/
 quality.json
 
+# Downloaded benchmark corpora
+testdata/corpus/.cache/
+
 # OS
 .DS_Store
 Thumbs.db

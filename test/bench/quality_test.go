@@ -3,11 +3,10 @@
 package bench
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -62,7 +61,10 @@ var (
 // TestMain owns the corpora and session lifetimes so each subtest avoids
 // reloading the JSONLs and re-allocating the locked secret. Loading every
 // corpus up front also fails fast if any file is missing — you find out
-// before the first test runs, not three subtests deep.
+// before the first test runs, not three subtests deep. Corpora that are
+// not in the tree are downloaded and cached by ensureCorpus; when
+// SRIRACHA_CORPUS_OFFLINE blocks a download the corpus is left out of
+// sharedCorpora and its subtests skip.
 //
 // On exit, if SRIRACHA_BENCH_OUT is set, the accumulated BMF blocks are
 // flushed to the named file. CI reads this file via `bencher run --adapter
@@ -72,7 +74,16 @@ func TestMain(m *testing.M) {
 
 	sharedCorpora = make(map[string][]record, len(corpora))
 	for _, c := range corpora {
-		records, err := loadJSONL(corpusPath(c.rel))
+		path, err := ensureCorpus(c.rel)
+		if errors.Is(err, errCorpusOffline) {
+			fmt.Fprintf(os.Stderr, "bench: corpus %q not cached and SRIRACHA_CORPUS_OFFLINE is set; its tests will skip\n", c.name)
+			continue
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "bench: load corpus %q: %v\n", c.name, err)
+			os.Exit(1)
+		}
+		records, err := loadJSONL(path)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "bench: load corpus %q: %v\n", c.name, err)
 			os.Exit(1)
@@ -101,15 +112,6 @@ func TestMain(m *testing.M) {
 	}
 
 	os.Exit(code)
-}
-
-// corpusPath resolves rel against the module's testdata/corpus/.
-// runtime.Caller anchors the lookup to this file's location so the path
-// holds whether tests are launched from the repo root, the package
-// directory, or an IDE.
-func corpusPath(rel string) string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(file), "..", "..", "testdata", "corpus", filepath.FromSlash(rel))
 }
 
 // recordReport stashes one benchmark's metrics under name for later BMF
@@ -146,7 +148,11 @@ func flushBMF(path string) error {
 func TestQualityBaseline(t *testing.T) {
 	for _, c := range corpora {
 		t.Run(c.name, func(t *testing.T) {
-			runBaseline(t, c.name, sharedCorpora[c.name])
+			records, ok := sharedCorpora[c.name]
+			if !ok {
+				t.Skipf("corpus %q not cached and SRIRACHA_CORPUS_OFFLINE is set", c.name)
+			}
+			runBaseline(t, c.name, records)
 		})
 	}
 }
@@ -178,7 +184,11 @@ func runBaseline(t *testing.T, name string, records []record) {
 func TestQualityCalibrated(t *testing.T) {
 	for _, c := range corpora {
 		t.Run(c.name, func(t *testing.T) {
-			runCalibrated(t, c.name, sharedCorpora[c.name])
+			records, ok := sharedCorpora[c.name]
+			if !ok {
+				t.Skipf("corpus %q not cached and SRIRACHA_CORPUS_OFFLINE is set", c.name)
+			}
+			runCalibrated(t, c.name, records)
 		})
 	}
 }
