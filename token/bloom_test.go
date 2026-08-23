@@ -2,6 +2,7 @@ package token
 
 import (
 	"bytes"
+	"math"
 	"math/bits"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ccuetoh/sriracha"
+	"github.com/ccuetoh/sriracha/normalize"
 )
 
 func bloomFSWithCfg(cfg sriracha.ProbabilisticConfig, fields ...sriracha.FieldSpec) sriracha.FieldSet {
@@ -25,6 +27,80 @@ func popcount(b []byte) int {
 		n += bits.OnesCount8(x)
 	}
 	return n
+}
+
+func TestTokenizeProbabilistic_InvalidConfig(t *testing.T) {
+	t.Parallel()
+	valid := sriracha.ProbabilisticConfig{
+		SizeBits:   1024,
+		NgramSizes: []int{2, 3},
+		HashCount:  2,
+	}
+	cases := []struct {
+		name   string
+		mutate func(cfg *sriracha.ProbabilisticConfig)
+	}{
+		{"ZeroSizeBits", func(cfg *sriracha.ProbabilisticConfig) { cfg.SizeBits = 0 }},
+		{"ZeroHashCount", func(cfg *sriracha.ProbabilisticConfig) { cfg.HashCount = 0 }},
+		{"NegativeHashCount", func(cfg *sriracha.ProbabilisticConfig) { cfg.HashCount = -1 }},
+		{"EmptyNgramSizes", func(cfg *sriracha.ProbabilisticConfig) { cfg.NgramSizes = nil }},
+		{"NegativeNgramSize", func(cfg *sriracha.ProbabilisticConfig) { cfg.NgramSizes = []int{2, -1} }},
+		{"NaNFlipProbability", func(cfg *sriracha.ProbabilisticConfig) { cfg.FlipProbability = math.NaN() }},
+		{"NegativeFlipProbability", func(cfg *sriracha.ProbabilisticConfig) { cfg.FlipProbability = -0.1 }},
+		{"FlipProbabilityOne", func(cfg *sriracha.ProbabilisticConfig) { cfg.FlipProbability = 1 }},
+		{"TargetPopcountEqualsSizeBits", func(cfg *sriracha.ProbabilisticConfig) { cfg.TargetPopcount = 1024 }},
+		{"TargetPopcountAboveSizeBits", func(cfg *sriracha.ProbabilisticConfig) { cfg.TargetPopcount = 2048 }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := valid
+			cfg.NgramSizes = append([]int(nil), valid.NgramSizes...)
+			tc.mutate(&cfg)
+			tok := newTok(t, "secret")
+			fs := bloomFSWithCfg(cfg, sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
+			_, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
+			assert.Error(t, err)
+		})
+	}
+}
+
+func TestTokenizeProbabilistic_EmptyValues(t *testing.T) {
+	t.Parallel()
+	// BLIP and balance are enabled to prove neither runs on an empty value.
+	cfg := sriracha.ProbabilisticConfig{
+		SizeBits:        2048,
+		NgramSizes:      []int{2, 3},
+		HashCount:       3,
+		FlipProbability: 0.02,
+		TargetPopcount:  400,
+	}
+	cases := []struct {
+		name  string
+		path  sriracha.FieldPath
+		value string
+	}{
+		{"EmptyName", sriracha.FieldNameGiven, ""},
+		{"IdentifierNormalizesToEmpty", sriracha.FieldIdentifierPassport, "---"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tok := newTok(t, "secret")
+			rec := sriracha.RawRecord{tc.path: tc.value}
+
+			optional := bloomFSWithCfg(cfg, sriracha.FieldSpec{Path: tc.path, Required: false, Weight: 1.0})
+			tr, err := tok.TokenizeProbabilistic(rec, optional)
+			require.NoError(t, err)
+			require.Len(t, tr.Fields, 1)
+			assert.Equal(t, 0, popcount(tr.Fields[0]),
+				"empty value must keep an all-zero filter with no BLIP or balance noise")
+
+			required := bloomFSWithCfg(cfg, sriracha.FieldSpec{Path: tc.path, Required: true, Weight: 1.0})
+			_, err = tok.TokenizeProbabilistic(rec, required)
+			assert.Error(t, err)
+		})
+	}
 }
 
 func TestTokenizeProbabilistic_BLIP(t *testing.T) {
@@ -306,6 +382,18 @@ func FuzzBloomBalanced(f *testing.F) {
 		rec := sriracha.RawRecord{sriracha.FieldNameGiven: given}
 		tr, err := tok.TokenizeProbabilistic(rec, fs)
 		if err != nil {
+			return
+		}
+		norm, err := normalize.Normalize(given, sriracha.FieldNameGiven)
+		if err != nil {
+			return
+		}
+		if norm == "" {
+			// Values normalizing to empty are treated as absent, so no
+			// balance padding is applied.
+			if got := popcount(tr.Fields[0]); got != 0 {
+				t.Fatalf("empty value: popcount %d, want 0", got)
+			}
 			return
 		}
 		raw, err := tok.TokenizeProbabilistic(rec, rawFs)

@@ -9,6 +9,35 @@ change in any release.
 
 ## [Unreleased]
 
+### Added
+
+- `token.ErrDestroyed`, returned by all tokenize methods once `Destroy` has
+  been called. Previously a destroyed tokenizer could silently emit tokens
+  keyed with an empty secret.
+
+### Changed
+
+- Values that normalize to the empty string are now treated as absent in both
+  tokenize modes. Optional fields keep a nil entry or all-zero filter, and
+  required fields return an error. Hardened configs no longer emit noise
+  filters for empty values. Tokens produced from records with blank field
+  values change as a result.
+
+### Fixed
+
+- `token.New` rejects secrets that are all zero bytes, which usually means the
+  slice was wiped by an earlier call and reused. It also returns an error
+  instead of panicking when locked memory cannot be allocated.
+- `TokenizeProbabilistic` validates `ProbabilisticParams` and returns an error
+  for configs that previously caused a divide by zero panic, a makeslice
+  panic, or an infinite loop.
+- `fieldset.Validate` rejects empty field paths, NaN and infinite weights,
+  negative hash counts, and NaN flip probabilities. `ValidateRecord` reports
+  required fields that normalize to empty.
+- `token.Match` rejects NaN thresholds.
+- The README quickstart handles errors, and the benchmark table renders its
+  throughput column.
+
 ## [0.1.1] - 2026-08-13
 
 ### Changed

@@ -2,6 +2,7 @@ package token
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash"
 	"sync"
@@ -14,7 +15,13 @@ import (
 )
 
 func (t *tokenizer) TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.ProbabilisticToken, error) {
+	if t.destroyed.Load() {
+		return sriracha.ProbabilisticToken{}, ErrDestroyed
+	}
 	cfg := fs.ProbabilisticParams
+	if err := validateBloomConfig(cfg); err != nil {
+		return sriracha.ProbabilisticToken{}, err
+	}
 	fieldBytes := int(((cfg.SizeBits + 63) / 64) * 8)
 	fields := make([][]byte, len(fs.Fields))
 	// One contiguous backing slab per token; each field's bytes is a
@@ -43,6 +50,16 @@ func (t *tokenizer) TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha
 		if err != nil {
 			return sriracha.ProbabilisticToken{}, fmt.Errorf("token: normalization failed for field %q: %w", spec.Path, err)
 		}
+		if normalized == "" {
+			if spec.Required {
+				return sriracha.ProbabilisticToken{}, fmt.Errorf("token: required field %q is empty", spec.Path)
+			}
+			// The value is treated as absent. Keep the all-zero filter
+			// and skip tokenizeFieldBloom so BLIP and balance noise are
+			// never applied to an empty value.
+			fields[i] = out
+			continue
+		}
 		tokenizeFieldBloom(h, out, normalized, spec.Path, cfg)
 		fields[i] = out
 	}
@@ -53,6 +70,35 @@ func (t *tokenizer) TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha
 		ProbabilisticParams: cfg,
 		Fields:              fields,
 	}, nil
+}
+
+// validateBloomConfig rejects ProbabilisticConfig values that would divide
+// by zero at position selection, allocate a negative-size gram buffer, or
+// loop forever in applyBalance. FieldSets built through fieldset.Validate
+// are already checked; this guards direct Tokenizer callers. The
+// FlipProbability check is written so NaN is rejected too.
+func validateBloomConfig(cfg sriracha.ProbabilisticConfig) error {
+	if cfg.SizeBits == 0 {
+		return errors.New("token: ProbabilisticParams.SizeBits must be > 0")
+	}
+	if cfg.HashCount <= 0 {
+		return fmt.Errorf("token: ProbabilisticParams.HashCount must be > 0, got %d", cfg.HashCount)
+	}
+	if len(cfg.NgramSizes) == 0 {
+		return errors.New("token: ProbabilisticParams.NgramSizes must not be empty")
+	}
+	for i, sz := range cfg.NgramSizes {
+		if sz <= 0 {
+			return fmt.Errorf("token: ProbabilisticParams.NgramSizes[%d] must be > 0, got %d", i, sz)
+		}
+	}
+	if !(cfg.FlipProbability >= 0 && cfg.FlipProbability < 1) {
+		return fmt.Errorf("token: ProbabilisticParams.FlipProbability must be in [0, 1), got %v", cfg.FlipProbability)
+	}
+	if cfg.TargetPopcount >= cfg.SizeBits {
+		return fmt.Errorf("token: ProbabilisticParams.TargetPopcount must be < SizeBits, got %d (size %d)", cfg.TargetPopcount, cfg.SizeBits)
+	}
+	return nil
 }
 
 // tokenizeFieldBloom writes the serialized Bloom filter bytes for a single
