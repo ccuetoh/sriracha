@@ -38,7 +38,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/ccuetoh/sriracha"
 	"github.com/ccuetoh/sriracha/fieldset"
@@ -48,53 +47,35 @@ import (
 func main() {
 	secret := []byte("super-secret-key")
 
-	s, err := session.New(secret, fieldset.DefaultFieldSet())
-	if err != nil {
-		log.Fatalf("session.New: %v", err)
-	}
+	s, _ := session.New(secret, fieldset.DefaultFieldSet())
 	defer s.Destroy()
 
 	// Deterministic tokenization
-	tokA, err := s.TokenizeDeterministic(sriracha.RawRecord{
+	tokA, _ := s.TokenizeDeterministic(sriracha.RawRecord{
 		sriracha.FieldNameGiven:  "Alice",
 		sriracha.FieldNameFamily: "Smith",
 	})
-	if err != nil {
-		log.Fatalf("TokenizeDeterministic A: %v", err)
-	}
 
-	tokB, err := s.TokenizeDeterministic(sriracha.RawRecord{
+	tokB, _ := s.TokenizeDeterministic(sriracha.RawRecord{
 		sriracha.FieldNameGiven:  "Alice",
 		sriracha.FieldNameFamily: "Smith",
 	})
-	if err != nil {
-		log.Fatalf("TokenizeDeterministic B: %v", err)
-	}
 
 	eq := s.Equal(tokA, tokB)
 	fmt.Printf("match: %v\n", eq)
 
 	// Probabilistic tokenization
-	bloomA, err := s.TokenizeProbabilistic(sriracha.RawRecord{
+	bloomA, _ := s.TokenizeProbabilistic(sriracha.RawRecord{
 		sriracha.FieldNameGiven:  "Alice",
 		sriracha.FieldNameFamily: "Smith",
 	})
-	if err != nil {
-		log.Fatalf("TokenizeProbabilistic A: %v", err)
-	}
 
-	bloomB, err := s.TokenizeProbabilistic(sriracha.RawRecord{
+	bloomB, _ := s.TokenizeProbabilistic(sriracha.RawRecord{
 		sriracha.FieldNameGiven:  "Alice",
 		sriracha.FieldNameFamily: "Smyth", // typo
 	})
-	if err != nil {
-		log.Fatalf("TokenizeProbabilistic B: %v", err)
-	}
 
-	result, err := s.Match(bloomA, bloomB, 0.85)
-	if err != nil {
-		log.Fatalf("Match: %v", err)
-	}
+	result, _ := s.Match(bloomA, bloomB, 0.85)
 	fmt.Printf("match: %v (score: %.2f)\n", result.IsMatch, result.Score)
 }
 ```
@@ -103,8 +84,8 @@ func main() {
 
 Live history on [Bencher](https://bencher.dev/perf/sriracha).
 
-| Corpus                                          | Records | Pairs                      | AUROC | Accuracy | Recall | Throughput |
-|-------------------------------------------------|--------:|:---------------------------|------:|---------:|-------:|-----------:|
-| [OpenSanctions](testdata/corpus/opensanctions/) |  26 841 | natural cross-source       |  0.93 |     0.91 |   0.87 | 20 k rec/s |
-| [FEBRL4](testdata/corpus/febrl4/)               |  10 000 | synthetic (FEBRL4 noise)   |  1.00 |     1.00 |   1.00 |          - |
-| [NCVR](testdata/corpus/ncvr/)                   |   8 848 | synthetic (1–2 char edits) |  1.00 |     1.00 |   1.00 |          - |
+| Corpus                                          | Records | Pairs                      | AUROC | Accuracy | Recall |
+|-------------------------------------------------|--------:|:---------------------------|------:|---------:|-------:|
+| [OpenSanctions](testdata/corpus/opensanctions/) |  26 841 | natural cross-source       |  0.93 |     0.91 |   0.87 |
+| [FEBRL4](testdata/corpus/febrl4/)               |  10 000 | synthetic (FEBRL4 noise)   |  1.00 |     1.00 |   1.00 |
+| [NCVR](testdata/corpus/ncvr/)                   |   8 848 | synthetic (1–2 char edits) |  1.00 |     1.00 |   1.00 |

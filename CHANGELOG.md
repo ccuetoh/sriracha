@@ -35,8 +35,7 @@ change in any release.
   negative hash counts, and NaN flip probabilities. `ValidateRecord` reports
   required fields that normalize to empty.
 - `token.Match` rejects NaN thresholds.
-- The README quickstart handles errors, and the benchmark table renders its
-  throughput column.
+- The README benchmark table had a dangling cell that GitHub did not render.
 
 ## [0.1.1] - 2026-08-13
 
