@@ -170,7 +170,7 @@ func Score(perField []float64, fs sriracha.FieldSet) (float64, error) {
 // key / fingerprint / params drift, or field-count disagreement between the
 // tokens and fs.
 func Match(a, b sriracha.ProbabilisticToken, fs sriracha.FieldSet, threshold float64) (MatchResult, error) {
-	if threshold < 0 || threshold > 1 {
+	if !(threshold >= 0 && threshold <= 1) {
 		return MatchResult{}, fmt.Errorf("token: threshold must be in [0,1], got %v", threshold)
 	}
 	perField, err := DicePerField(a, b)

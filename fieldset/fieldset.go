@@ -15,6 +15,7 @@ package fieldset
 import (
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/ccuetoh/sriracha"
 	"github.com/ccuetoh/sriracha/normalize"
@@ -23,16 +24,20 @@ import (
 // Validate checks that fs is a well-formed FieldSet.
 // Returns an error if:
 //   - Version is empty
+//   - Any Path is the zero value
 //   - Any Path appears more than once
-//   - Any Weight is negative
-//   - ProbabilisticParams is invalid (zero size, zero hash count, or empty/non-positive ngram sizes)
+//   - Any Weight is negative, NaN, or infinite
+//   - ProbabilisticParams is invalid (zero size, non-positive hash count, or empty/non-positive ngram sizes)
 func Validate(fs sriracha.FieldSet) error {
 	if fs.Version == "" {
 		return errors.New("fieldset: version must not be empty")
 	}
 
 	seen := make(map[sriracha.FieldPath]struct{}, len(fs.Fields))
-	for _, f := range fs.Fields {
+	for i, f := range fs.Fields {
+		if f.Path.String() == "" {
+			return fmt.Errorf("fieldset: field %d has empty path", i)
+		}
 		if _, dup := seen[f.Path]; dup {
 			return fmt.Errorf("fieldset: duplicate field path %q", f.Path)
 		}
@@ -41,14 +46,18 @@ func Validate(fs sriracha.FieldSet) error {
 		if f.Weight < 0 {
 			return fmt.Errorf("fieldset: field %q has negative weight %f", f.Path, f.Weight)
 		}
+		if math.IsNaN(f.Weight) || math.IsInf(f.Weight, 0) {
+			return fmt.Errorf("fieldset: field %q has non-finite weight %f", f.Path, f.Weight)
+		}
 	}
 
 	return validateProbabilisticParams(fs.ProbabilisticParams)
 }
 
 // ValidateRecord reports every problem with record relative to fs in one
-// pass: required-but-missing fields, unknown paths in record, and per-field
-// normalization failures. Returns nil when record is fully valid.
+// pass: required-but-missing fields, required fields that normalize to the
+// empty string, unknown paths in record, and per-field normalization
+// failures. Returns nil when record is fully valid.
 //
 // This is a pre-flight check. Calling it followed by tokenization runs the
 // normalizer twice — acceptable for batch ingest where surfacing all errors
@@ -66,8 +75,13 @@ func ValidateRecord(record sriracha.RawRecord, fs sriracha.FieldSet) []error {
 			}
 			continue
 		}
-		if _, err := normalize.Normalize(raw, spec.Path); err != nil {
+		norm, err := normalize.Normalize(raw, spec.Path)
+		if err != nil {
 			errs = append(errs, fmt.Errorf("fieldset: field %q: %w", spec.Path, err))
+			continue
+		}
+		if spec.Required && norm == "" {
+			errs = append(errs, fmt.Errorf("fieldset: required field %q is empty", spec.Path))
 		}
 	}
 
@@ -86,7 +100,7 @@ func validateProbabilisticParams(cfg sriracha.ProbabilisticConfig) error {
 	if cfg.SizeBits == 0 {
 		return errors.New("fieldset: ProbabilisticParams.SizeBits must be > 0")
 	}
-	if cfg.HashCount == 0 {
+	if cfg.HashCount <= 0 {
 		return errors.New("fieldset: ProbabilisticParams.HashCount must be > 0")
 	}
 	if len(cfg.NgramSizes) == 0 {
@@ -97,7 +111,7 @@ func validateProbabilisticParams(cfg sriracha.ProbabilisticConfig) error {
 			return fmt.Errorf("fieldset: ProbabilisticParams.NgramSizes[%d] must be > 0, got %d", i, sz)
 		}
 	}
-	if cfg.FlipProbability < 0 || cfg.FlipProbability >= 1 {
+	if !(cfg.FlipProbability >= 0 && cfg.FlipProbability < 1) {
 		return fmt.Errorf("fieldset: ProbabilisticParams.FlipProbability must be in [0, 1), got %v", cfg.FlipProbability)
 	}
 	if cfg.TargetPopcount >= cfg.SizeBits {

@@ -17,6 +17,7 @@ import (
 	"hash"
 	"runtime"
 	"sync"
+	"sync/atomic"
 
 	"github.com/awnumar/memguard"
 
@@ -24,13 +25,16 @@ import (
 	"github.com/ccuetoh/sriracha/normalize"
 )
 
+// ErrDestroyed is returned by tokenize methods called after Destroy.
+var ErrDestroyed = errors.New("token: tokenizer has been destroyed")
+
 // Tokenizer produces tokens from RawRecords using a shared secret.
 // Call Destroy when finished to wipe the source secret buffer; if you forget,
 // a runtime cleanup wipes it once the Tokenizer becomes unreachable.
 //
 // Tokenizer is safe for concurrent use by multiple goroutines until Destroy
-// is called; HMAC instances are pooled internally. Calling any tokenize
-// method after Destroy is undefined.
+// is called; HMAC instances are pooled internally. Tokenize methods called
+// after Destroy return ErrDestroyed.
 //
 // Most callers want a session.Session — it bundles a Tokenizer with a
 // FieldSet so you don't have to thread the schema through every call.
@@ -38,7 +42,9 @@ type Tokenizer interface {
 	// TokenizeDeterministic tokenizes a RawRecord in deterministic mode (HMAC-SHA256
 	// per field). The returned token's Fields slice is aligned with fs.Fields:
 	// each entry is a 32-byte HMAC for a present field, or nil for an absent
-	// optional field. Missing required fields return an error.
+	// optional field. Missing required fields return an error. A value that
+	// normalizes to the empty string is treated as absent, so an optional
+	// field keeps a nil entry and a required field returns an error.
 	//
 	// The returned token has FieldSetFingerprint left empty — fingerprint
 	// management is the caller's responsibility, so a session can cache
@@ -50,7 +56,10 @@ type Tokenizer interface {
 	// mode. The returned token's Fields slice is aligned with fs.Fields:
 	// present fields contain the populated filter, absent optional fields
 	// contain an all-zero filter of the same length. Missing required fields
-	// return an error.
+	// return an error. fs.ProbabilisticParams is validated first and an
+	// invalid config returns an error. A value that normalizes to the empty
+	// string is treated as absent, so an optional field keeps the all-zero
+	// filter and a required field returns an error.
 	//
 	// As with TokenizeDeterministic, FieldSetFingerprint is left empty on the
 	// returned token; the caller (typically session.Session) stamps it.
@@ -58,12 +67,13 @@ type Tokenizer interface {
 	// TokenizeField returns the deterministic 32-byte HMAC for a single
 	// (value, path) pair, after running the same normalization pipeline
 	// TokenizeDeterministic uses. Useful for stable indexing of one field outside
-	// the FieldSet flow.
+	// the FieldSet flow. Returns an error when the value normalizes to the
+	// empty string.
 	TokenizeField(value string, path sriracha.FieldPath) ([]byte, error)
 	// Destroy wipes the secret buffer that backs this Tokenizer. Pooled HMAC
 	// instances created from the secret may still hold derived key material
-	// (inner/outer pad) on the heap until garbage-collected. The Tokenizer
-	// must not be used after this call.
+	// (inner/outer pad) on the heap until garbage-collected. Tokenize methods
+	// called after Destroy return ErrDestroyed.
 	Destroy()
 }
 
@@ -84,20 +94,33 @@ func WithKeyID(id string) Option {
 // secret. HMAC instances are pooled so concurrent callers do not race on the
 // underlying hash state.
 type tokenizer struct {
-	secret *memguard.LockedBuffer
-	keyID  string
-	pool   sync.Pool
+	secret    *memguard.LockedBuffer
+	keyID     string
+	pool      sync.Pool
+	destroyed atomic.Bool
 }
 
 // New creates a Tokenizer with the given HMAC secret.
 // The secret is copied into a locked, non-swappable memory region and the
-// source slice is wiped. Returns an error if secret is empty.
+// source slice is wiped. Returns an error if secret is empty or all zero
+// bytes, or if allocating the locked memory region fails. An all-zero
+// secret usually means the slice was already wiped by an earlier New call
+// and reused by mistake.
 //
 // A runtime finalizer wipes the locked buffer if the returned Tokenizer
 // becomes unreachable without an explicit Destroy call.
 func New(secret []byte, opts ...Option) (Tokenizer, error) {
+	return newTokenizer(secret, memguard.NewBufferFromBytes, opts...)
+}
+
+// newTokenizer implements New with the locked buffer allocator injected so
+// tests can exercise the allocation failure path.
+func newTokenizer(secret []byte, alloc func([]byte) *memguard.LockedBuffer, opts ...Option) (Tokenizer, error) {
 	if len(secret) == 0 {
 		return nil, errors.New("token: secret must not be empty")
+	}
+	if isAllZero(secret) {
+		return nil, errors.New("token: secret must not be all zero bytes")
 	}
 
 	var o tokenizerOpts
@@ -105,15 +128,43 @@ func New(secret []byte, opts ...Option) (Tokenizer, error) {
 		opt(&o)
 	}
 
-	locked := memguard.NewBufferFromBytes(secret)
+	var locked *memguard.LockedBuffer
+	if err := recoverToError(func() { locked = alloc(secret) }); err != nil {
+		return nil, err
+	}
 	t := &tokenizer{secret: locked, keyID: o.keyID}
 	t.pool.New = func() any { return hmac.New(sha256.New, locked.Bytes()) }
 	runtime.SetFinalizer(t, func(t *tokenizer) { t.secret.Destroy() })
 	return t, nil
 }
 
+// isAllZero reports whether every byte of b is zero.
+func isAllZero(b []byte) bool {
+	for _, v := range b {
+		if v != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// recoverToError runs fn and converts a panic inside it into an error.
+// memguard panics when locking or allocating protected memory fails.
+func recoverToError(fn func()) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("token: locked buffer allocation failed: %v", r)
+		}
+	}()
+	fn()
+	return nil
+}
+
 func (t *tokenizer) Destroy() {
-	t.secret.Destroy()
+	t.destroyed.Store(true)
+	// Destroy has no error return. The recover wrapper only keeps a
+	// memguard panic from escaping.
+	_ = recoverToError(t.secret.Destroy)
 	runtime.SetFinalizer(t, nil)
 }
 
@@ -128,6 +179,9 @@ func (t *tokenizer) release(h hash.Hash) {
 }
 
 func (t *tokenizer) TokenizeDeterministic(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.DeterministicToken, error) {
+	if t.destroyed.Load() {
+		return sriracha.DeterministicToken{}, ErrDestroyed
+	}
 	fields := make([][]byte, len(fs.Fields))
 	// Lazy-allocated on first present field. Skipping the alloc for
 	// all-absent records preserves the existing one-alloc footprint of
@@ -148,6 +202,12 @@ func (t *tokenizer) TokenizeDeterministic(record sriracha.RawRecord, fs sriracha
 		if err != nil {
 			return sriracha.DeterministicToken{}, fmt.Errorf("token: normalization failed for field %q: %w", spec.Path, err)
 		}
+		if normalized == "" {
+			if spec.Required {
+				return sriracha.DeterministicToken{}, fmt.Errorf("token: required field %q is empty", spec.Path)
+			}
+			continue
+		}
 		if backing == nil {
 			backing = make([]byte, len(fs.Fields)*sha256.Size)
 		}
@@ -164,9 +224,15 @@ func (t *tokenizer) TokenizeDeterministic(record sriracha.RawRecord, fs sriracha
 }
 
 func (t *tokenizer) TokenizeField(value string, path sriracha.FieldPath) ([]byte, error) {
+	if t.destroyed.Load() {
+		return nil, ErrDestroyed
+	}
 	normalized, err := normalize.Normalize(value, path)
 	if err != nil {
 		return nil, fmt.Errorf("token: normalization failed for field %q: %w", path, err)
+	}
+	if normalized == "" {
+		return nil, fmt.Errorf("token: value for field %q normalizes to empty", path)
 	}
 	h := t.acquire()
 	defer t.release(h)

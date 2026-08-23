@@ -1,6 +1,7 @@
 package token
 
 import (
+	"errors"
 	"runtime"
 	"sync"
 	"testing"
@@ -51,6 +52,8 @@ func TestNew(t *testing.T) {
 	}{
 		{"NilSecret", nil, nil, true},
 		{"EmptySecret", []byte{}, nil, true},
+		{"AllZeroSecret", make([]byte, 16), nil, true},
+		{"SingleNonZeroByte", []byte{0x01}, nil, false},
 		{"ValidSecret", []byte("secret"), nil, false},
 		{"WithKeyID", []byte("secret"), []Option{WithKeyID("k1")}, false},
 	}
@@ -68,12 +71,90 @@ func TestNew(t *testing.T) {
 	}
 }
 
+func TestNewTokenizer_AllocFailure(t *testing.T) {
+	t.Parallel()
+	alloc := func([]byte) *memguard.LockedBuffer { panic("mlock failed") }
+	tok, err := newTokenizer([]byte("secret"), alloc)
+	require.Error(t, err)
+	assert.Nil(t, tok)
+	assert.Contains(t, err.Error(), "mlock failed")
+}
+
+func TestRecoverToError(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		fn      func()
+		wantErr bool
+	}{
+		{"NoPanic", func() {}, false},
+		{"Panic", func() { panic("boom") }, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := recoverToError(tc.fn)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "boom")
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestTokenize_AfterDestroy(t *testing.T) {
+	t.Parallel()
+	givenSpec := sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0}
+	rec := sriracha.RawRecord{sriracha.FieldNameGiven: "John"}
+
+	cases := []struct {
+		name string
+		call func(tok Tokenizer) error
+	}{
+		{
+			name: "Deterministic",
+			call: func(tok Tokenizer) error {
+				_, err := tok.TokenizeDeterministic(rec, deterministicFS(givenSpec))
+				return err
+			},
+		},
+		{
+			name: "Probabilistic",
+			call: func(tok Tokenizer) error {
+				_, err := tok.TokenizeProbabilistic(rec, bloomFS(givenSpec))
+				return err
+			},
+		},
+		{
+			name: "Field",
+			call: func(tok Tokenizer) error {
+				_, err := tok.TokenizeField("John", sriracha.FieldNameGiven)
+				return err
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tok, err := New([]byte("secret"))
+			require.NoError(t, err)
+			tok.Destroy()
+			err = tc.call(tok)
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, ErrDestroyed), "expected ErrDestroyed, got %v", err)
+		})
+	}
+}
+
 func TestTokenizeDeterministic(t *testing.T) {
 	t.Parallel()
 	givenSpec := sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0}
 	familySpec := sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: true, Weight: 1.0}
 	givenOptional := sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: false, Weight: 1.0}
 	familyOptional := sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 0.5}
+	passportOptional := sriracha.FieldSpec{Path: sriracha.FieldIdentifierPassport, Required: false, Weight: 1.0}
 
 	cases := []struct {
 		name string
@@ -160,6 +241,32 @@ func TestTokenizeDeterministic(t *testing.T) {
 				rec := sriracha.RawRecord{sriracha.FieldDateBirth: "not-a-date"}
 				fs := deterministicFS(sriracha.FieldSpec{Path: sriracha.FieldDateBirth, Required: true, Weight: 1.0})
 				_, err := tok.TokenizeDeterministic(rec, fs)
+				assert.Error(t, err)
+			},
+		},
+		{
+			name: "EmptyValueOptionalTreatedAsAbsent",
+			run: func(t *testing.T) {
+				tok := newTok(t, "secret")
+				rec := sriracha.RawRecord{
+					sriracha.FieldNameGiven:          "John",
+					sriracha.FieldNameFamily:         "",
+					sriracha.FieldIdentifierPassport: "---",
+				}
+				tr, err := tok.TokenizeDeterministic(rec, deterministicFS(givenSpec, familyOptional, passportOptional))
+				require.NoError(t, err)
+				require.Len(t, tr.Fields, 3)
+				assert.Len(t, tr.Fields[0], 32)
+				assert.Nil(t, tr.Fields[1], "empty optional value should keep a nil entry")
+				assert.Nil(t, tr.Fields[2], "value normalizing to empty should keep a nil entry")
+			},
+		},
+		{
+			name: "EmptyValueRequiredErrors",
+			run: func(t *testing.T) {
+				tok := newTok(t, "secret")
+				rec := sriracha.RawRecord{sriracha.FieldNameGiven: ""}
+				_, err := tok.TokenizeDeterministic(rec, deterministicFS(givenSpec))
 				assert.Error(t, err)
 			},
 		},
@@ -265,6 +372,26 @@ func TestTokenizeField(t *testing.T) {
 		tok := newTok(t, "secret")
 		_, err := tok.TokenizeField("not-a-date", sriracha.FieldDateBirth)
 		assert.Error(t, err)
+	})
+
+	t.Run("EmptyValueErrors", func(t *testing.T) {
+		t.Parallel()
+		cases := []struct {
+			name  string
+			value string
+			path  sriracha.FieldPath
+		}{
+			{"EmptyName", "", sriracha.FieldNameGiven},
+			{"IdentifierNormalizesToEmpty", "---", sriracha.FieldIdentifierPassport},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				tok := newTok(t, "secret")
+				_, err := tok.TokenizeField(tc.value, tc.path)
+				assert.Error(t, err)
+			})
+		}
 	})
 }
 

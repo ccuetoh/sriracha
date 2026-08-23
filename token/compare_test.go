@@ -1,6 +1,7 @@
 package token
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -427,6 +428,13 @@ func TestMatch(t *testing.T) {
 		assert.Contains(t, err.Error(), "threshold")
 		_, err = Match(identical, identical, fs, -0.1)
 		require.Error(t, err)
+	})
+
+	t.Run("ThresholdNaN", func(t *testing.T) {
+		t.Parallel()
+		_, err := Match(identical, identical, fs, math.NaN())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "threshold")
 	})
 
 	t.Run("DicePerFieldErrorPropagated", func(t *testing.T) {
