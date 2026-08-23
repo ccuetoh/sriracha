@@ -4,6 +4,13 @@ Benchmark corpus for Sriracha's Bloom-filter tokenizer, derived from OpenSanctio
 Measures precision, recall, and latency on real-world multi-jurisdiction person records,
 using natural cross-source duplicates as ground truth.
 
+## Data location
+
+The `open_sanctions.jsonl` snapshot is not stored in the source tree. A frozen gzip
+copy lives on the `testdata-corpus` branch of this repository at
+<https://raw.githubusercontent.com/ccuetoh/sriracha/testdata-corpus/open_sanctions.jsonl.gz>,
+and the bench harness downloads and caches it automatically on first use.
+
 ## Provenance
 
 **Dataset:** OpenSanctions Default dataset (`all`)
@@ -31,4 +38,4 @@ sharing a `canonical_id` are positive pairs; different `canonical_id` values are
 ## Sampling
 
 `open_sanctions.jsonl` is a ~2% deterministic sample (N=50) of canonical groups from the
-full corpus (~1 338 711 records), keeping all source records for each person together:
+full corpus (~1 338 711 records), keeping all source records for each person together.

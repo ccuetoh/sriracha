@@ -5,6 +5,13 @@ North Carolina Statewide Voter Registration roll. Provides a real-world
 English name-and-address distribution to stress the fuzzy-name + Bloom-Dice
 match path that FEBRL4's strong `national_id` signal mostly bypasses.
 
+## Data location
+
+The `ncvr.jsonl` snapshot is not stored in the source tree. A frozen gzip
+copy lives on the `testdata-corpus` branch of this repository at
+<https://raw.githubusercontent.com/ccuetoh/sriracha/testdata-corpus/ncvr.jsonl.gz>,
+and the bench harness downloads and caches it automatically on first use.
+
 ## Provenance
 
 **Dataset:** North Carolina Statewide Voter Registration snapshot (NCVR)
@@ -99,7 +106,8 @@ python3 testdata/corpus/ncvr/scripts/gen_ncvr.py ncvoter_Statewide.txt testdata/
 ```
 
 The upstream URL is mutable: NCSBE re-publishes weekly, so a regeneration
-against today's file will produce a different sample. The committed
-`ncvr.jsonl` is frozen against the snapshot dated above, and the script
-applies a deterministic hash filter so re-running it against the **same**
-input file produces the **same** output bytes.
+against today's file will produce a different sample. The `ncvr.jsonl`
+snapshot on the `testdata-corpus` branch is frozen against the snapshot
+dated above, and the script applies a deterministic hash filter so
+re-running it against the **same** input file produces the **same** output
+bytes.

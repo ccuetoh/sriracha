@@ -24,6 +24,12 @@ jobs:
       - name: Raise memlock limit for memguard
         run: sudo prlimit --pid $PPID --memlock=unlimited:unlimited
 
+      - name: Cache benchmark corpora
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: testdata/corpus/.cache
+          key: sriracha-corpus-7d1ae7084e1329c25a74e2372ffdc2c15873869157e05e1532d718d029261611-8ec089d67f4412c706cfa1bf7885c5ded9a8a389707bbed09743e0bab9f51c22
+
       - uses: bencherdev/bencher@ec56bb69a7f34096002ca3384d10e2f6676b063e # v0.6.7
 
       - name: Track benchmarks (main)

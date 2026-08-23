@@ -23,7 +23,9 @@ per original) with synthetic errors, 5 000 ground-truth match pairs.
 
 Data is published under the **Australian National University Open Source License
 (ANUOS), Version 1.3**. The license text and full terms are obtainable from
-<https://sourceforge.net/projects/febrl/>.
+<https://sourceforge.net/projects/febrl/>. The repository's root `NOTICE` file
+summarises how this and the other corpora relate to the project's Apache-2.0
+grant.
 
 > The Original Software is: "Febrl - Freely Extensible Biomedical Record Linkage".
 > The Initial Developer of the Original Software is Dr Peter Christen

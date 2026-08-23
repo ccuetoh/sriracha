@@ -17,6 +17,9 @@ change in any release.
 
 ### Changed
 
+- The NCVR and OpenSanctions corpus snapshots moved out of the module onto
+  the `testdata-corpus` branch. The bench harness now downloads and caches
+  them on first use, so `go get` no longer ships them.
 - Values that normalize to the empty string are now treated as absent in both
   tokenize modes. Optional fields keep a nil entry or all-zero filter, and
   required fields return an error. Hardened configs no longer emit noise
