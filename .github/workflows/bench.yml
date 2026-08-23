@@ -30,7 +30,7 @@ jobs:
           path: testdata/corpus/.cache
           key: sriracha-corpus-7d1ae7084e1329c25a74e2372ffdc2c15873869157e05e1532d718d029261611-8ec089d67f4412c706cfa1bf7885c5ded9a8a389707bbed09743e0bab9f51c22
 
-      - uses: bencherdev/bencher@ec56bb69a7f34096002ca3384d10e2f6676b063e # v0.6.7
+      - uses: bencherdev/bencher@5f9d4cf890255c35e0354af1ed325108a6a0babd # v0.6.8
 
       - name: Track benchmarks (main)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
