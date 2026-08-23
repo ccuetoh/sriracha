@@ -1,6 +1,7 @@
 package fieldset
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -59,6 +60,54 @@ func TestValidate(t *testing.T) {
 			errContains: "negative",
 		},
 		{
+			name: "EmptyPath",
+			fs: sriracha.FieldSet{
+				Version: "0.1",
+				Fields: []sriracha.FieldSpec{
+					{Path: sriracha.FieldPath{}, Weight: 1.0},
+				},
+				ProbabilisticParams: validBloom,
+			},
+			wantErr:     true,
+			errContains: "empty path",
+		},
+		{
+			name: "NaNWeight",
+			fs: sriracha.FieldSet{
+				Version: "0.1",
+				Fields: []sriracha.FieldSpec{
+					{Path: sriracha.FieldNameGiven, Weight: math.NaN()},
+				},
+				ProbabilisticParams: validBloom,
+			},
+			wantErr:     true,
+			errContains: "non-finite",
+		},
+		{
+			name: "PositiveInfWeight",
+			fs: sriracha.FieldSet{
+				Version: "0.1",
+				Fields: []sriracha.FieldSpec{
+					{Path: sriracha.FieldNameGiven, Weight: math.Inf(1)},
+				},
+				ProbabilisticParams: validBloom,
+			},
+			wantErr:     true,
+			errContains: "non-finite",
+		},
+		{
+			name: "NegativeInfWeight",
+			fs: sriracha.FieldSet{
+				Version: "0.1",
+				Fields: []sriracha.FieldSpec{
+					{Path: sriracha.FieldNameGiven, Weight: math.Inf(-1)},
+				},
+				ProbabilisticParams: validBloom,
+			},
+			wantErr:     true,
+			errContains: "weight",
+		},
+		{
 			name: "ZeroWeightIsValid",
 			fs: sriracha.FieldSet{
 				Version: "0.1",
@@ -88,6 +137,15 @@ func TestValidate(t *testing.T) {
 			fs: sriracha.FieldSet{
 				Version:             "0.1",
 				ProbabilisticParams: sriracha.ProbabilisticConfig{SizeBits: 1024, HashCount: 0, NgramSizes: []int{2}},
+			},
+			wantErr:     true,
+			errContains: "HashCount",
+		},
+		{
+			name: "BloomNegativeHashCount",
+			fs: sriracha.FieldSet{
+				Version:             "0.1",
+				ProbabilisticParams: sriracha.ProbabilisticConfig{SizeBits: 1024, HashCount: -1, NgramSizes: []int{2}},
 			},
 			wantErr:     true,
 			errContains: "HashCount",
@@ -147,6 +205,20 @@ func TestValidate(t *testing.T) {
 					HashCount:       2,
 					NgramSizes:      []int{2, 3},
 					FlipProbability: 1.5,
+				},
+			},
+			wantErr:     true,
+			errContains: "FlipProbability",
+		},
+		{
+			name: "BloomFlipProbabilityNaN",
+			fs: sriracha.FieldSet{
+				Version: "0.1",
+				ProbabilisticParams: sriracha.ProbabilisticConfig{
+					SizeBits:        1024,
+					HashCount:       2,
+					NgramSizes:      []int{2, 3},
+					FlipProbability: math.NaN(),
 				},
 			},
 			wantErr:     true,
@@ -282,6 +354,24 @@ func TestValidateRecord(t *testing.T) {
 			sriracha.FieldNameGiven: "Alice",
 		}, fs)
 		assert.Empty(t, errs, "absent optional fields must not be flagged")
+	})
+
+	t.Run("RequiredNormalizesToEmpty", func(t *testing.T) {
+		t.Parallel()
+		errs := ValidateRecord(sriracha.RawRecord{
+			sriracha.FieldNameGiven: "",
+		}, fs)
+		require.Len(t, errs, 1)
+		assert.Contains(t, errs[0].Error(), "is empty")
+	})
+
+	t.Run("OptionalNormalizesToEmpty", func(t *testing.T) {
+		t.Parallel()
+		errs := ValidateRecord(sriracha.RawRecord{
+			sriracha.FieldNameGiven:  "Alice",
+			sriracha.FieldNameFamily: "",
+		}, fs)
+		assert.Empty(t, errs, "optional fields that normalize to empty must not be flagged")
 	})
 }
 
