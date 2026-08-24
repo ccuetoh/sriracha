@@ -25,9 +25,15 @@ type Session interface {
 	// TokenizeDeterministic produces a deterministic token for record using
 	// the Session's FieldSet.
 	TokenizeDeterministic(record sriracha.RawRecord) (sriracha.DeterministicToken, error)
-	// TokenizeProbabilistic produces a probabilistic token for record using
-	// the Session's FieldSet.
+	// TokenizeProbabilistic produces a per-field probabilistic token for
+	// record using the Session's FieldSet. Per-field tokens reveal which
+	// fields the record carries and how similar each one is; when per-field
+	// scores are not required, prefer TokenizeCLK.
 	TokenizeProbabilistic(record sriracha.RawRecord) (sriracha.ProbabilisticToken, error)
+	// TokenizeCLK produces a record-level CLK token for record using the
+	// Session's FieldSet. CLK is the recommended way to share tokens when
+	// per-field scores are not required. See token.Tokenizer.TokenizeCLK.
+	TokenizeCLK(record sriracha.RawRecord) (sriracha.CLKToken, error)
 	// TokenizeField returns the deterministic 32-byte HMAC for a single
 	// (value, path) pair. Useful for stable indexing of one field outside
 	// the FieldSet flow; see token.Tokenizer.TokenizeField.
@@ -38,6 +44,9 @@ type Session interface {
 	// FieldSet. See token.Match for semantics around absent fields and
 	// thresholds.
 	Match(a, b sriracha.ProbabilisticToken, threshold float64) (token.MatchResult, error)
+	// MatchCLK compares two record-level CLK tokens. See token.MatchCLK for
+	// validation and scoring semantics.
+	MatchCLK(a, b sriracha.CLKToken, threshold float64) (token.CLKMatchResult, error)
 	// ValidateRecord pre-checks record against the Session's FieldSet. See
 	// fieldset.ValidateRecord.
 	ValidateRecord(record sriracha.RawRecord) []error
@@ -118,6 +127,15 @@ func (s *session) TokenizeProbabilistic(record sriracha.RawRecord) (sriracha.Pro
 	return tok, nil
 }
 
+func (s *session) TokenizeCLK(record sriracha.RawRecord) (sriracha.CLKToken, error) {
+	tok, err := s.tok.TokenizeCLK(record, s.fs)
+	if err != nil {
+		return tok, err
+	}
+	tok.FieldSetFingerprint = s.fingerprint
+	return tok, nil
+}
+
 func (s *session) TokenizeField(value string, path sriracha.FieldPath) ([]byte, error) {
 	return s.tok.TokenizeField(value, path)
 }
@@ -128,6 +146,10 @@ func (s *session) Equal(a, b sriracha.DeterministicToken) bool {
 
 func (s *session) Match(a, b sriracha.ProbabilisticToken, threshold float64) (token.MatchResult, error) {
 	return token.Match(a, b, s.fs, threshold)
+}
+
+func (s *session) MatchCLK(a, b sriracha.CLKToken, threshold float64) (token.CLKMatchResult, error) {
+	return token.MatchCLK(a, b, threshold)
 }
 
 func (s *session) ValidateRecord(record sriracha.RawRecord) []error {

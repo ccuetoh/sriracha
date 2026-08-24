@@ -2,8 +2,13 @@ package token
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/binary"
 	"math"
 	"math/bits"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -21,6 +26,15 @@ func bloomFSWithCfg(cfg sriracha.ProbabilisticConfig, fields ...sriracha.FieldSp
 	}
 }
 
+func balancedCfg() sriracha.ProbabilisticConfig {
+	return sriracha.ProbabilisticConfig{
+		SizeBits:   1024,
+		NgramSizes: []int{2, 3},
+		HashCount:  3,
+		Balanced:   true,
+	}
+}
+
 func popcount(b []byte) int {
 	var n int
 	for _, x := range b {
@@ -29,7 +43,7 @@ func popcount(b []byte) int {
 	return n
 }
 
-func TestTokenizeProbabilistic_InvalidConfig(t *testing.T) {
+func TestValidateBloomConfig(t *testing.T) {
 	t.Parallel()
 	valid := sriracha.ProbabilisticConfig{
 		SizeBits:   1024,
@@ -37,19 +51,19 @@ func TestTokenizeProbabilistic_InvalidConfig(t *testing.T) {
 		HashCount:  2,
 	}
 	cases := []struct {
-		name   string
-		mutate func(cfg *sriracha.ProbabilisticConfig)
+		name    string
+		mutate  func(cfg *sriracha.ProbabilisticConfig)
+		wantErr bool
 	}{
-		{"ZeroSizeBits", func(cfg *sriracha.ProbabilisticConfig) { cfg.SizeBits = 0 }},
-		{"ZeroHashCount", func(cfg *sriracha.ProbabilisticConfig) { cfg.HashCount = 0 }},
-		{"NegativeHashCount", func(cfg *sriracha.ProbabilisticConfig) { cfg.HashCount = -1 }},
-		{"EmptyNgramSizes", func(cfg *sriracha.ProbabilisticConfig) { cfg.NgramSizes = nil }},
-		{"NegativeNgramSize", func(cfg *sriracha.ProbabilisticConfig) { cfg.NgramSizes = []int{2, -1} }},
-		{"NaNFlipProbability", func(cfg *sriracha.ProbabilisticConfig) { cfg.FlipProbability = math.NaN() }},
-		{"NegativeFlipProbability", func(cfg *sriracha.ProbabilisticConfig) { cfg.FlipProbability = -0.1 }},
-		{"FlipProbabilityOne", func(cfg *sriracha.ProbabilisticConfig) { cfg.FlipProbability = 1 }},
-		{"TargetPopcountEqualsSizeBits", func(cfg *sriracha.ProbabilisticConfig) { cfg.TargetPopcount = 1024 }},
-		{"TargetPopcountAboveSizeBits", func(cfg *sriracha.ProbabilisticConfig) { cfg.TargetPopcount = 2048 }},
+		{"Valid", func(cfg *sriracha.ProbabilisticConfig) {}, false},
+		{"ValidBalanced", func(cfg *sriracha.ProbabilisticConfig) { cfg.Balanced = true }, false},
+		{"ZeroSizeBits", func(cfg *sriracha.ProbabilisticConfig) { cfg.SizeBits = 0 }, true},
+		{"OddSizeBitsBalanced", func(cfg *sriracha.ProbabilisticConfig) { cfg.SizeBits = 1023; cfg.Balanced = true }, true},
+		{"OddSizeBitsUnbalanced", func(cfg *sriracha.ProbabilisticConfig) { cfg.SizeBits = 1023 }, false},
+		{"ZeroHashCount", func(cfg *sriracha.ProbabilisticConfig) { cfg.HashCount = 0 }, true},
+		{"NegativeHashCount", func(cfg *sriracha.ProbabilisticConfig) { cfg.HashCount = -1 }, true},
+		{"EmptyNgramSizes", func(cfg *sriracha.ProbabilisticConfig) { cfg.NgramSizes = nil }, true},
+		{"NegativeNgramSize", func(cfg *sriracha.ProbabilisticConfig) { cfg.NgramSizes = []int{2, -1} }, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -59,274 +73,507 @@ func TestTokenizeProbabilistic_InvalidConfig(t *testing.T) {
 			tc.mutate(&cfg)
 			tok := newTok(t, "secret")
 			fs := bloomFSWithCfg(cfg, sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
-			_, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
-			assert.Error(t, err)
+			rec := sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}
+			_, err := tok.TokenizeProbabilistic(rec, fs)
+			_, clkErr := tok.TokenizeCLK(rec, fs)
+			if tc.wantErr {
+				assert.Error(t, err)
+				assert.Error(t, clkErr, "TokenizeCLK must reject the same configs")
+			} else {
+				assert.NoError(t, err)
+				// CLK is always balanced, so it additionally requires an
+				// even SizeBits.
+				if cfg.SizeBits%2 != 0 {
+					assert.Error(t, clkErr)
+				} else {
+					assert.NoError(t, clkErr)
+				}
+			}
 		})
 	}
 }
 
-func TestTokenizeProbabilistic_EmptyValues(t *testing.T) {
+func TestTokenizeProbabilistic_AbsentAndEmptyValues(t *testing.T) {
 	t.Parallel()
-	// BLIP and balance are enabled to prove neither runs on an empty value.
-	cfg := sriracha.ProbabilisticConfig{
-		SizeBits:        2048,
-		NgramSizes:      []int{2, 3},
-		HashCount:       3,
-		FlipProbability: 0.02,
-		TargetPopcount:  400,
-	}
+	cfg := balancedCfg()
 	cases := []struct {
-		name  string
-		path  sriracha.FieldPath
-		value string
+		name   string
+		record sriracha.RawRecord
+		path   sriracha.FieldPath
 	}{
-		{"EmptyName", sriracha.FieldNameGiven, ""},
-		{"IdentifierNormalizesToEmpty", sriracha.FieldIdentifierPassport, "---"},
+		{"MissingKey", sriracha.RawRecord{}, sriracha.FieldNameGiven},
+		{"EmptyName", sriracha.RawRecord{sriracha.FieldNameGiven: ""}, sriracha.FieldNameGiven},
+		{"IdentifierNormalizesToEmpty", sriracha.RawRecord{sriracha.FieldIdentifierPassport: "---"}, sriracha.FieldIdentifierPassport},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			tok := newTok(t, "secret")
-			rec := sriracha.RawRecord{tc.path: tc.value}
 
 			optional := bloomFSWithCfg(cfg, sriracha.FieldSpec{Path: tc.path, Required: false, Weight: 1.0})
-			tr, err := tok.TokenizeProbabilistic(rec, optional)
+			tr, err := tok.TokenizeProbabilistic(tc.record, optional)
 			require.NoError(t, err)
 			require.Len(t, tr.Fields, 1)
-			assert.Equal(t, 0, popcount(tr.Fields[0]),
-				"empty value must keep an all-zero filter with no BLIP or balance noise")
+			assert.Nil(t, tr.Fields[0], "absent optional field must be nil, not an all-zero filter")
 
 			required := bloomFSWithCfg(cfg, sriracha.FieldSpec{Path: tc.path, Required: true, Weight: 1.0})
-			_, err = tok.TokenizeProbabilistic(rec, required)
+			_, err = tok.TokenizeProbabilistic(tc.record, required)
 			assert.Error(t, err)
 		})
 	}
 }
 
-func TestTokenizeProbabilistic_BLIP(t *testing.T) {
+func TestGramDoubleHash_KnownDigest(t *testing.T) {
 	t.Parallel()
-	givenSpec := sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0}
-	rec := sriracha.RawRecord{sriracha.FieldNameGiven: "Christopher"}
+	key := []byte("known-test-key")
+	gram := []byte("ab")
+	pathBytes := []byte(sriracha.FieldNameGiven.String())
 
-	t.Run("Determinism", func(t *testing.T) {
-		t.Parallel()
-		cfg := sriracha.ProbabilisticConfig{
-			SizeBits:        1024,
-			NgramSizes:      []int{2, 3},
-			HashCount:       2,
-			FlipProbability: 0.05,
+	// Recompute the digest independently to pin the preimage layout:
+	// len(gram) || gram || len(path) || path with 4-byte big-endian lengths
+	// and no counter.
+	ref := hmac.New(sha256.New, key)
+	var lp [4]byte
+	binary.BigEndian.PutUint32(lp[:], uint32(len(gram))) //nolint:gosec // G115: tiny test fixture
+	ref.Write(lp[:])
+	ref.Write(gram)
+	binary.BigEndian.PutUint32(lp[:], uint32(len(pathBytes))) //nolint:gosec // G115: tiny test fixture
+	ref.Write(lp[:])
+	ref.Write(pathBytes)
+	sum := ref.Sum(nil)
+	wantH1 := binary.BigEndian.Uint64(sum[:8])
+	wantH2 := binary.BigEndian.Uint64(sum[8:16]) | 1
+
+	h1, h2 := gramDoubleHash(hmac.New(sha256.New, key), gram, pathBytes)
+	assert.Equal(t, wantH1, h1, "h1 must be the big-endian uint64 of digest bytes 0..8")
+	assert.Equal(t, wantH2, h2, "h2 must be the big-endian uint64 of digest bytes 8..16 with the low bit set")
+	assert.Equal(t, uint64(1), h2&1, "h2 must be odd")
+}
+
+func TestSetGramBits_DoubleHashingRule(t *testing.T) {
+	t.Parallel()
+	// sizes [1] and a one-rune value produce exactly one gram with no
+	// padding, so the filter holds only that gram's positions.
+	const baseBits = 1024
+	const hashCount = 5
+	cfg := sriracha.ProbabilisticConfig{SizeBits: baseBits, NgramSizes: []int{1}, HashCount: hashCount}
+	key := []byte("position-rule-key")
+	path := sriracha.FieldNameGiven
+
+	h1, h2 := gramDoubleHash(hmac.New(sha256.New, key), []byte("a"), []byte(path.String()))
+	want := make([]uint, 0, hashCount)
+	for i := range hashCount {
+		pos := (h1 + uint64(i)*h2) % uint64(baseBits) //nolint:gosec // G115: i bounded by hashCount
+		if !slices.Contains(want, uint(pos)) {
+			want = append(want, uint(pos))
 		}
-		fs := bloomFSWithCfg(cfg, givenSpec)
+	}
+	slices.Sort(want)
 
-		tokA := newTok(t, "secret")
-		tokB := newTok(t, "secret")
-		trA, err := tokA.TokenizeProbabilistic(rec, fs)
-		require.NoError(t, err)
-		trB, err := tokB.TokenizeProbabilistic(rec, fs)
-		require.NoError(t, err)
-		require.Len(t, trA.Fields, 1)
-		require.Len(t, trB.Fields, 1)
-		assert.True(t, bytes.Equal(trA.Fields[0], trB.Fields[0]),
-			"identical (secret, value) must yield identical filters under BLIP")
-	})
-
-	t.Run("ChangesBits", func(t *testing.T) {
-		t.Parallel()
-		baseCfg := sriracha.ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2, 3}, HashCount: 2}
-		blipCfg := baseCfg
-		blipCfg.FlipProbability = 0.05
-
-		tok := newTok(t, "secret")
-		base, err := tok.TokenizeProbabilistic(rec, bloomFSWithCfg(baseCfg, givenSpec))
-		require.NoError(t, err)
-		blip, err := tok.TokenizeProbabilistic(rec, bloomFSWithCfg(blipCfg, givenSpec))
-		require.NoError(t, err)
-
-		require.Equal(t, len(base.Fields[0]), len(blip.Fields[0]))
-		assert.False(t, bytes.Equal(base.Fields[0], blip.Fields[0]),
-			"BLIP at p=0.05 should change at least one bit on a 1024-bit filter")
-	})
-
-	t.Run("ZeroProbabilityIsNoOp", func(t *testing.T) {
-		t.Parallel()
-		baseCfg := sriracha.ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2, 3}, HashCount: 2}
-		zeroCfg := baseCfg
-		zeroCfg.FlipProbability = 0
-
-		tok := newTok(t, "secret")
-		base, err := tok.TokenizeProbabilistic(rec, bloomFSWithCfg(baseCfg, givenSpec))
-		require.NoError(t, err)
-		zero, err := tok.TokenizeProbabilistic(rec, bloomFSWithCfg(zeroCfg, givenSpec))
-		require.NoError(t, err)
-		assert.True(t, bytes.Equal(base.Fields[0], zero.Fields[0]),
-			"FlipProbability=0 must be a byte-identical no-op")
-	})
-
-	t.Run("DifferentValuesProduceDifferentFlipPatterns", func(t *testing.T) {
-		t.Parallel()
-		cfg := sriracha.ProbabilisticConfig{
-			SizeBits:        1024,
-			NgramSizes:      []int{2, 3},
-			HashCount:       2,
-			FlipProbability: 0.05,
+	bs := acquireBitset(baseBits)
+	defer releaseBitset(baseBits, bs)
+	setGramBits(hmac.New(sha256.New, key), bs, "a", path, cfg, baseBits)
+	got := make([]uint, 0, hashCount)
+	for i := uint(0); i < baseBits; i++ {
+		if bs.Test(i) {
+			got = append(got, i)
 		}
-		fs := bloomFSWithCfg(cfg, givenSpec)
-		tok := newTok(t, "secret")
+	}
+	assert.Equal(t, want, got, "set positions must follow pos_i = (h1 + i*h2) mod baseBits")
+}
 
-		trA, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
+func TestSetGramBits_DifferentGramsLandDifferently(t *testing.T) {
+	t.Parallel()
+	const baseBits = 1024
+	cfg := sriracha.ProbabilisticConfig{SizeBits: baseBits, NgramSizes: []int{1}, HashCount: 3}
+	key := []byte("different-grams-key")
+	path := sriracha.FieldNameGiven
+
+	collect := func(value string) []uint {
+		bs := acquireBitset(baseBits)
+		defer releaseBitset(baseBits, bs)
+		setGramBits(hmac.New(sha256.New, key), bs, value, path, cfg, baseBits)
+		var out []uint
+		for i := uint(0); i < baseBits; i++ {
+			if bs.Test(i) {
+				out = append(out, i)
+			}
+		}
+		return out
+	}
+
+	a := collect("a")
+	b := collect("b")
+	assert.NotEqual(t, a, b, "different grams must produce different position sets")
+}
+
+func TestEachNgram_Padding(t *testing.T) {
+	t.Parallel()
+
+	t.Run("OneRuneValueProducesGrams", func(t *testing.T) {
+		t.Parallel()
+		got := ngrams("a", []int{2, 3})
+		assert.Equal(t, []string{"_a", "a_", "__a", "_a_", "a__"}, got,
+			"a one-rune value must produce grams for every size")
+	})
+
+	t.Run("EdgeCharactersAppearInAsManyGramsAsInteriorOnes", func(t *testing.T) {
+		t.Parallel()
+		grams := ngrams("abc", []int{2})
+		assert.Equal(t, []string{"_a", "ab", "bc", "c_"}, grams)
+		count := func(r string) int {
+			n := 0
+			for _, g := range grams {
+				n += strings.Count(g, r)
+			}
+			return n
+		}
+		assert.Equal(t, count("b"), count("a"), "boundary characters must appear in as many bigrams as interior ones")
+		assert.Equal(t, count("b"), count("c"), "boundary characters must appear in as many bigrams as interior ones")
+	})
+
+	t.Run("BalancedShortValueIsPresent", func(t *testing.T) {
+		t.Parallel()
+		tok := newTok(t, "secret")
+		fs := bloomFSWithCfg(balancedCfg(), sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
+		tr, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: "a"}, fs)
 		require.NoError(t, err)
-		trB, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: "Bob"}, fs)
-		require.NoError(t, err)
-		assert.False(t, bytes.Equal(trA.Fields[0], trB.Fields[0]),
-			"different values must produce different filters even under BLIP")
+		require.Len(t, tr.Fields, 1)
+		require.NotNil(t, tr.Fields[0], "a one-rune value must produce a populated filter")
+		assert.Equal(t, 512, popcount(tr.Fields[0]))
 	})
 }
 
-func TestTokenizeProbabilistic_Balanced(t *testing.T) {
+func TestTokenizeProbabilistic_BalancedPopcountExact(t *testing.T) {
 	t.Parallel()
-	givenSpec := sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0}
+	cfg := balancedCfg()
+	fs := bloomFSWithCfg(cfg,
+		sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: false, Weight: 2.0},
+		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 2.5},
+		sriracha.FieldSpec{Path: sriracha.FieldDateBirth, Required: false, Weight: 2.0},
+		sriracha.FieldSpec{Path: sriracha.FieldContactEmail, Required: false, Weight: 2.0},
+	)
+	records := []struct {
+		name string
+		rec  sriracha.RawRecord
+	}{
+		{"FullRecord", sriracha.RawRecord{
+			sriracha.FieldNameGiven:    "alice",
+			sriracha.FieldNameFamily:   "smith",
+			sriracha.FieldDateBirth:    "1990-05-15",
+			sriracha.FieldContactEmail: "alice@example.com",
+		}},
+		{"ShortValues", sriracha.RawRecord{
+			sriracha.FieldNameGiven:  "a",
+			sriracha.FieldNameFamily: "b",
+		}},
+		{"LongValue", sriracha.RawRecord{
+			sriracha.FieldNameGiven: strings.Repeat("abcdefghij", 20),
+		}},
+	}
+	for _, tc := range records {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tok := newTok(t, "secret")
+			tr, err := tok.TokenizeProbabilistic(tc.rec, fs)
+			require.NoError(t, err)
+			for i, f := range tr.Fields {
+				if f == nil {
+					continue
+				}
+				assert.Equalf(t, int(cfg.SizeBits/2), popcount(f),
+					"field %d popcount must be exactly SizeBits/2", i)
+			}
+		})
+	}
+}
 
-	t.Run("Determinism", func(t *testing.T) {
+func TestTokenizeProbabilistic_BalancedDeterminism(t *testing.T) {
+	t.Parallel()
+	fs := bloomFSWithCfg(balancedCfg(), sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
+	rec := sriracha.RawRecord{sriracha.FieldNameGiven: "alice"}
+
+	same1, err := newTok(t, "secret").TokenizeProbabilistic(rec, fs)
+	require.NoError(t, err)
+	same2, err := newTok(t, "secret").TokenizeProbabilistic(rec, fs)
+	require.NoError(t, err)
+	assert.True(t, bytes.Equal(same1.Fields[0], same2.Fields[0]),
+		"identical (secret, value) must yield identical balanced filters")
+
+	other, err := newTok(t, "other-secret").TokenizeProbabilistic(rec, fs)
+	require.NoError(t, err)
+	assert.False(t, bytes.Equal(same1.Fields[0], other.Fields[0]),
+		"different secrets must yield different balanced filters")
+}
+
+func TestTokenizeProbabilistic_FormatStamped(t *testing.T) {
+	t.Parallel()
+	tok := newTok(t, "secret")
+	fs := bloomFSWithCfg(balancedCfg(), sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
+	tr, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: "alice"}, fs)
+	require.NoError(t, err)
+	assert.Equal(t, sriracha.TokenFormatProbabilistic, tr.Format)
+}
+
+func TestPermutation(t *testing.T) {
+	t.Parallel()
+
+	asImpl := func(t *testing.T, tok Tokenizer) *tokenizer {
+		t.Helper()
+		impl, ok := tok.(*tokenizer)
+		require.True(t, ok)
+		return impl
+	}
+
+	t.Run("BijectionAndStability", func(t *testing.T) {
 		t.Parallel()
-		cfg := sriracha.ProbabilisticConfig{
-			SizeBits:       1024,
-			NgramSizes:     []int{2, 3},
-			HashCount:      2,
-			TargetPopcount: 300,
-		}
-		fs := bloomFSWithCfg(cfg, givenSpec)
-		rec := sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}
+		impl := asImpl(t, newTok(t, "secret"))
+		const size = 1024
+		perm := impl.permutation(size)
+		require.Len(t, perm, size)
 
-		trA, err := newTok(t, "secret").TokenizeProbabilistic(rec, fs)
-		require.NoError(t, err)
-		trB, err := newTok(t, "secret").TokenizeProbabilistic(rec, fs)
-		require.NoError(t, err)
-		assert.True(t, bytes.Equal(trA.Fields[0], trB.Fields[0]),
-			"balanced filter must be deterministic across tokenizers")
+		seen := make([]bool, size)
+		for _, p := range perm {
+			require.Less(t, int(p), size)
+			require.False(t, seen[p], "permutation must not repeat position %d", p)
+			seen[p] = true
+		}
+
+		again := impl.permutation(size)
+		assert.Equal(t, perm, again, "permutation must be stable across calls")
 	})
 
-	t.Run("ReachesTargetWhenBelow", func(t *testing.T) {
+	t.Run("DiffersBetweenSecrets", func(t *testing.T) {
 		t.Parallel()
-		cfg := sriracha.ProbabilisticConfig{
-			SizeBits:       1024,
-			NgramSizes:     []int{2, 3},
-			HashCount:      2,
-			TargetPopcount: 300,
-		}
-		fs := bloomFSWithCfg(cfg, givenSpec)
-		tok := newTok(t, "secret")
-
-		// "Alice" produces few ngrams under 2/3; pre-balance popcount is small.
-		basePop := popcount(mustField(t, tok, sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, bloomFSWithCfg(
-			sriracha.ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2, 3}, HashCount: 2}, givenSpec)))
-		require.Less(t, basePop, 300, "test invariant: pre-balance popcount must be below target")
-
-		filter := mustField(t, tok, sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
-		assert.Equal(t, 300, popcount(filter), "balanced filter popcount must equal target")
+		a := asImpl(t, newTok(t, "secret-a")).permutation(1024)
+		b := asImpl(t, newTok(t, "secret-b")).permutation(1024)
+		assert.NotEqual(t, a, b, "different secrets must derive different permutations")
 	})
 
-	t.Run("NoOpWhenAtOrAboveTarget", func(t *testing.T) {
+	t.Run("SameSecretSamePermutation", func(t *testing.T) {
 		t.Parallel()
-		baseCfg := sriracha.ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2, 3}, HashCount: 2}
-		tok := newTok(t, "secret")
-		rec := sriracha.RawRecord{sriracha.FieldNameGiven: "Christopher"}
-
-		baseFilter := mustField(t, tok, rec, bloomFSWithCfg(baseCfg, givenSpec))
-		basePop := popcount(baseFilter)
-		require.Greater(t, basePop, 0)
-
-		// Set target equal to the natural popcount: must be a byte-identical no-op.
-		eqCfg := baseCfg
-		eqCfg.TargetPopcount = uint32(basePop) //nolint:gosec // G115: popcount bounded by 1024-bit filter size
-		eqFilter := mustField(t, tok, rec, bloomFSWithCfg(eqCfg, givenSpec))
-		assert.True(t, bytes.Equal(baseFilter, eqFilter),
-			"TargetPopcount equal to natural popcount must not change the filter")
-
-		// And below natural: also no-op.
-		belowCfg := baseCfg
-		belowCfg.TargetPopcount = uint32(basePop - 1) //nolint:gosec // G115: popcount bounded by 1024-bit filter size
-		belowFilter := mustField(t, tok, rec, bloomFSWithCfg(belowCfg, givenSpec))
-		assert.True(t, bytes.Equal(baseFilter, belowFilter),
-			"TargetPopcount below natural popcount must not change the filter")
-	})
-
-	t.Run("ComposesWithBLIP", func(t *testing.T) {
-		t.Parallel()
-		cfg := sriracha.ProbabilisticConfig{
-			SizeBits:        2048,
-			NgramSizes:      []int{2, 3},
-			HashCount:       3,
-			FlipProbability: 0.02,
-			TargetPopcount:  400,
-		}
-		fs := bloomFSWithCfg(cfg, givenSpec)
-		rec := sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}
-
-		trA, err := newTok(t, "secret").TokenizeProbabilistic(rec, fs)
-		require.NoError(t, err)
-		trB, err := newTok(t, "secret").TokenizeProbabilistic(rec, fs)
-		require.NoError(t, err)
-		assert.True(t, bytes.Equal(trA.Fields[0], trB.Fields[0]),
-			"BLIP+balanced must remain deterministic")
-		assert.Equal(t, 400, popcount(trA.Fields[0]),
-			"composed BLIP+balance must still hit TargetPopcount exactly")
+		a := asImpl(t, newTok(t, "secret")).permutation(512)
+		b := asImpl(t, newTok(t, "secret")).permutation(512)
+		assert.Equal(t, a, b, "the permutation must depend only on (secret, SizeBits)")
 	})
 }
 
-func TestTokenizeProbabilistic_HardenedMatch(t *testing.T) {
+func TestUniformIndex(t *testing.T) {
 	t.Parallel()
 
-	cfg := sriracha.HardenedProbabilisticConfig()
+	t.Run("RejectsBiasedTail", func(t *testing.T) {
+		t.Parallel()
+		// 2^64 mod 3 == 1, so the single sample math.MaxUint64 falls in the
+		// biased tail and must be rejected in favour of the next sample.
+		samples := []uint64{math.MaxUint64, 5}
+		i := 0
+		next := func() uint64 {
+			v := samples[i]
+			i++
+			return v
+		}
+		got := uniformIndex(next, 3)
+		assert.Equal(t, uint64(2), got, "5 mod 3 after rejecting the biased sample")
+		assert.Equal(t, 2, i, "the biased sample must be consumed and discarded")
+	})
+
+	t.Run("PowerOfTwoAcceptsEverything", func(t *testing.T) {
+		t.Parallel()
+		next := func() uint64 { return math.MaxUint64 }
+		assert.Equal(t, uint64(3), uniformIndex(next, 4))
+	})
+}
+
+func TestDiceOrderingPreservedUnderBalancing(t *testing.T) {
+	t.Parallel()
+	fs := bloomFSWithCfg(sriracha.DefaultProbabilisticConfig(),
+		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: true, Weight: 1.0})
+	tok := newTok(t, "secret")
+
+	tokenize := func(family string) sriracha.ProbabilisticToken {
+		tr, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameFamily: family}, fs)
+		require.NoError(t, err)
+		return tr
+	}
+	smith := tokenize("smith")
+	smyth := tokenize("smyth")
+	jones := tokenize("jones")
+
+	typo, err := DicePerField(smith, smyth)
+	require.NoError(t, err)
+	disjoint, err := DicePerField(smith, jones)
+	require.NoError(t, err)
+	self, err := DicePerField(smith, smith)
+	require.NoError(t, err)
+
+	assert.InDelta(t, 1.0, self[0], 1e-9, "identical values must score 1.0 under balancing")
+	assert.Greater(t, typo[0], disjoint[0],
+		"smith vs smyth must score strictly higher than smith vs jones under the balanced default")
+	assert.Less(t, typo[0], 1.0)
+}
+
+func TestTokenizeCLK(t *testing.T) {
+	t.Parallel()
+	cfg := sriracha.DefaultProbabilisticConfig()
 	fs := bloomFSWithCfg(cfg,
 		sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: false, Weight: 2.0},
 		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 2.5},
 	)
-	tok := newTok(t, "secret")
+	full := sriracha.RawRecord{
+		sriracha.FieldNameGiven:  "alice",
+		sriracha.FieldNameFamily: "smith",
+	}
 
-	trA, err := tok.TokenizeProbabilistic(sriracha.RawRecord{
-		sriracha.FieldNameGiven:  "Christopher",
-		sriracha.FieldNameFamily: "Smith",
-	}, fs)
-	require.NoError(t, err)
-	trB, err := tok.TokenizeProbabilistic(sriracha.RawRecord{
-		sriracha.FieldNameGiven:  "Cristopher",
-		sriracha.FieldNameFamily: "Smyth",
-	}, fs)
-	require.NoError(t, err)
+	t.Run("EndToEndOrdering", func(t *testing.T) {
+		t.Parallel()
+		tok := newTok(t, "secret")
+		same1, err := tok.TokenizeCLK(full, fs)
+		require.NoError(t, err)
+		same2, err := tok.TokenizeCLK(full, fs)
+		require.NoError(t, err)
+		typo, err := tok.TokenizeCLK(sriracha.RawRecord{
+			sriracha.FieldNameGiven:  "alice",
+			sriracha.FieldNameFamily: "smyth",
+		}, fs)
+		require.NoError(t, err)
+		disjoint, err := tok.TokenizeCLK(sriracha.RawRecord{
+			sriracha.FieldNameGiven:  "ursula",
+			sriracha.FieldNameFamily: "kroeber",
+		}, fs)
+		require.NoError(t, err)
 
-	// Threshold is intentionally lenient: HardenedProbabilisticConfig adds substantial
-	// noise (BLIP at p=0.02, padded to popcount 400 of 2048 bits), so Dice
-	// scores compress relative to the unhardened baseline. This is a smoke
-	// test that Match still produces a usable signal — not a precision claim.
-	res, err := Match(trA, trB, fs, 0.20)
-	require.NoError(t, err)
-	assert.True(t, res.IsMatch, "similar records under HardenedProbabilisticConfig should match at threshold 0.20, got %v (score %.3f)", res.IsMatch, res.Score)
+		identical, err := MatchCLK(same1, same2, 0.9)
+		require.NoError(t, err)
+		assert.InDelta(t, 1.0, identical.Score, 1e-9, "the same record must score 1.0")
+		assert.True(t, identical.IsMatch)
+
+		typoRes, err := MatchCLK(same1, typo, 0.9)
+		require.NoError(t, err)
+		disjointRes, err := MatchCLK(same1, disjoint, 0.9)
+		require.NoError(t, err)
+		// Balanced filters concentrate unrelated Dice scores near 0.5, so
+		// only the relative ordering is asserted.
+		assert.Less(t, typoRes.Score, 1.0)
+		assert.Greater(t, typoRes.Score, disjointRes.Score,
+			"a typo record must score strictly between identical and disjoint records")
+	})
+
+	t.Run("PopcountExactlyHalf", func(t *testing.T) {
+		t.Parallel()
+		tok := newTok(t, "secret")
+		clk, err := tok.TokenizeCLK(full, fs)
+		require.NoError(t, err)
+		assert.Equal(t, int(cfg.SizeBits/2), popcount(clk.Filter))
+	})
+
+	t.Run("MetadataStamped", func(t *testing.T) {
+		t.Parallel()
+		tok := newTok(t, "secret", WithKeyID("k1"))
+		clk, err := tok.TokenizeCLK(full, fs)
+		require.NoError(t, err)
+		assert.Equal(t, sriracha.TokenFormatCLK, clk.Format)
+		assert.Equal(t, fs.Version, clk.FieldSetVersion)
+		assert.Equal(t, "k1", clk.KeyID)
+		assert.Equal(t, cfg, clk.ProbabilisticParams)
+		assert.Empty(t, clk.FieldSetFingerprint, "token.TokenizeCLK must not populate FieldSetFingerprint")
+	})
+
+	t.Run("ZeroContributingFieldsErrors", func(t *testing.T) {
+		t.Parallel()
+		tok := newTok(t, "secret")
+		cases := []struct {
+			name string
+			rec  sriracha.RawRecord
+		}{
+			{"EmptyRecord", sriracha.RawRecord{}},
+			{"OnlyEmptyValues", sriracha.RawRecord{sriracha.FieldNameGiven: ""}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				_, err := tok.TokenizeCLK(tc.rec, fs)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "contributing")
+			})
+		}
+	})
+
+	t.Run("RequiredMissingErrors", func(t *testing.T) {
+		t.Parallel()
+		tok := newTok(t, "secret")
+		required := bloomFSWithCfg(cfg, sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
+		_, err := tok.TokenizeCLK(sriracha.RawRecord{}, required)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing")
+	})
+
+	t.Run("RequiredEmptyErrors", func(t *testing.T) {
+		t.Parallel()
+		tok := newTok(t, "secret")
+		required := bloomFSWithCfg(cfg, sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
+		_, err := tok.TokenizeCLK(sriracha.RawRecord{sriracha.FieldNameGiven: ""}, required)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "empty")
+	})
+
+	t.Run("NormalizationError", func(t *testing.T) {
+		t.Parallel()
+		tok := newTok(t, "secret")
+		dateFS := bloomFSWithCfg(cfg, sriracha.FieldSpec{Path: sriracha.FieldDateBirth, Required: true, Weight: 1.0})
+		_, err := tok.TokenizeCLK(sriracha.RawRecord{sriracha.FieldDateBirth: "not-a-date"}, dateFS)
+		assert.Error(t, err)
+	})
+
+	t.Run("UnbalancedConfig", func(t *testing.T) {
+		t.Parallel()
+		plain := cfg
+		plain.NgramSizes = append([]int(nil), cfg.NgramSizes...)
+		plain.Balanced = false
+		plainFS := bloomFSWithCfg(plain,
+			sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: false, Weight: 2.0},
+			sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 2.5},
+		)
+		tok := newTok(t, "secret")
+		clk1, err := tok.TokenizeCLK(full, plainFS)
+		require.NoError(t, err)
+		clk2, err := tok.TokenizeCLK(full, plainFS)
+		require.NoError(t, err)
+		assert.True(t, bytes.Equal(clk1.Filter, clk2.Filter))
+		assert.Equal(t, int(plain.SizeBits/2), popcount(clk1.Filter),
+			"CLK filters are balanced regardless of cfg.Balanced")
+	})
+
+	t.Run("FieldPathSeparatesGrams", func(t *testing.T) {
+		t.Parallel()
+		// The same value under two different paths must produce different
+		// CLK filters, because the per-gram preimage includes the path.
+		tok := newTok(t, "secret")
+		givenOnly := bloomFSWithCfg(cfg, sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
+		familyOnly := bloomFSWithCfg(cfg, sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: true, Weight: 1.0})
+		a, err := tok.TokenizeCLK(sriracha.RawRecord{sriracha.FieldNameGiven: "smith"}, givenOnly)
+		require.NoError(t, err)
+		b, err := tok.TokenizeCLK(sriracha.RawRecord{sriracha.FieldNameFamily: "smith"}, familyOnly)
+		require.NoError(t, err)
+		assert.False(t, bytes.Equal(a.Filter, b.Filter))
+	})
 }
 
-// mustField tokenizes rec under fs and returns the first field's bytes.
-// Fails the test on any error or unexpected layout.
-func mustField(t *testing.T, tok Tokenizer, rec sriracha.RawRecord, fs sriracha.FieldSet) []byte {
-	t.Helper()
-	tr, err := tok.TokenizeProbabilistic(rec, fs)
-	require.NoError(t, err)
-	require.NotEmpty(t, tr.Fields)
-	return tr.Fields[0]
-}
-
-// FuzzBloomBLIP verifies that BLIP-enabled tokenization never panics, that
-// the filter retains the expected byte length, and that determinism holds
-// across two calls with the same inputs.
-func FuzzBloomBLIP(f *testing.F) {
+// FuzzBloomBalanced verifies the balanced construction invariants for
+// arbitrary input: tokenization never panics, every present field's filter
+// has the expected byte length and a popcount of exactly SizeBits/2, and
+// two calls with the same inputs produce identical bytes.
+func FuzzBloomBalanced(f *testing.F) {
 	f.Add("Alice")
 	f.Add("Christopher")
 	f.Add("")
+	f.Add("a")
 	f.Add("\x00\xff")
 
 	cfg := sriracha.ProbabilisticConfig{
-		SizeBits:        512,
-		NgramSizes:      []int{2, 3},
-		HashCount:       2,
-		FlipProbability: 0.10,
+		SizeBits:   512,
+		NgramSizes: []int{2, 3},
+		HashCount:  2,
+		Balanced:   true,
 	}
 	fs := bloomFSWithCfg(cfg, sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: false, Weight: 1.0})
 	tok, _ := New([]byte("fuzz-secret"))
@@ -341,71 +588,28 @@ func FuzzBloomBLIP(f *testing.F) {
 		if len(tr1.Fields) != 1 {
 			t.Fatalf("Fields length %d, want 1", len(tr1.Fields))
 		}
-		if got := len(tr1.Fields[0]); got != fieldBytes {
-			t.Fatalf("field byte length %d, want %d", got, fieldBytes)
-		}
-		tr2, err := tok.TokenizeProbabilistic(rec, fs)
-		if err != nil {
-			t.Fatalf("second BLIP tokenization failed: %v", err)
-		}
-		if !bytes.Equal(tr1.Fields[0], tr2.Fields[0]) {
-			t.Fatalf("BLIP non-deterministic: %x vs %x", tr1.Fields[0], tr2.Fields[0])
-		}
-	})
-}
-
-// FuzzBloomBalanced verifies that balanced tokenization never panics and that
-// the post-balance popcount equals TargetPopcount whenever the natural
-// popcount is below the target.
-func FuzzBloomBalanced(f *testing.F) {
-	f.Add("Alice")
-	f.Add("Christopher")
-	f.Add("")
-	f.Add("a")
-
-	const target uint32 = 200
-	balCfg := sriracha.ProbabilisticConfig{
-		SizeBits:       1024,
-		NgramSizes:     []int{2, 3},
-		HashCount:      2,
-		TargetPopcount: target,
-	}
-	rawCfg := balCfg
-	rawCfg.TargetPopcount = 0
-
-	fs := bloomFSWithCfg(balCfg, sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: false, Weight: 1.0})
-	rawFs := bloomFSWithCfg(rawCfg, sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: false, Weight: 1.0})
-
-	tok, _ := New([]byte("fuzz-secret"))
-
-	f.Fuzz(func(t *testing.T, given string) {
-		rec := sriracha.RawRecord{sriracha.FieldNameGiven: given}
-		tr, err := tok.TokenizeProbabilistic(rec, fs)
-		if err != nil {
-			return
-		}
 		norm, err := normalize.Normalize(given, sriracha.FieldNameGiven)
 		if err != nil {
 			return
 		}
 		if norm == "" {
-			// Values normalizing to empty are treated as absent, so no
-			// balance padding is applied.
-			if got := popcount(tr.Fields[0]); got != 0 {
-				t.Fatalf("empty value: popcount %d, want 0", got)
+			if tr1.Fields[0] != nil {
+				t.Fatalf("empty value: field must be nil, got %d bytes", len(tr1.Fields[0]))
 			}
 			return
 		}
-		raw, err := tok.TokenizeProbabilistic(rec, rawFs)
+		if got := len(tr1.Fields[0]); got != fieldBytes {
+			t.Fatalf("field byte length %d, want %d", got, fieldBytes)
+		}
+		if got := popcount(tr1.Fields[0]); got != int(cfg.SizeBits/2) {
+			t.Fatalf("popcount %d, want exactly %d", got, cfg.SizeBits/2)
+		}
+		tr2, err := tok.TokenizeProbabilistic(rec, fs)
 		if err != nil {
-			t.Fatalf("raw tokenization failed: %v", err)
+			t.Fatalf("second balanced tokenization failed: %v", err)
 		}
-		rawPop := popcount(raw.Fields[0])
-		if rawPop >= int(target) {
-			return
-		}
-		if got := popcount(tr.Fields[0]); got != int(target) {
-			t.Fatalf("popcount %d, want %d", got, target)
+		if !bytes.Equal(tr1.Fields[0], tr2.Fields[0]) {
+			t.Fatalf("balanced tokenization non-deterministic: %x vs %x", tr1.Fields[0], tr2.Fields[0])
 		}
 	})
 }

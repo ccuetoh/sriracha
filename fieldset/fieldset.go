@@ -27,7 +27,8 @@ import (
 //   - Any Path is the zero value
 //   - Any Path appears more than once
 //   - Any Weight is negative, NaN, or infinite
-//   - ProbabilisticParams is invalid (zero size, non-positive hash count, or empty/non-positive ngram sizes)
+//   - ProbabilisticParams is invalid (zero size, odd size with Balanced set,
+//     non-positive hash count, or empty/non-positive ngram sizes)
 func Validate(fs sriracha.FieldSet) error {
 	if fs.Version == "" {
 		return errors.New("fieldset: version must not be empty")
@@ -95,10 +96,14 @@ func ValidateRecord(record sriracha.RawRecord, fs sriracha.FieldSet) []error {
 }
 
 // validateProbabilisticParams rejects ProbabilisticConfig values that would crash or produce
-// degenerate (all-zero) filters at tokenization time.
+// degenerate (all-zero) filters at tokenization time. The checks mirror the
+// token package's internal validator.
 func validateProbabilisticParams(cfg sriracha.ProbabilisticConfig) error {
 	if cfg.SizeBits == 0 {
 		return errors.New("fieldset: ProbabilisticParams.SizeBits must be > 0")
+	}
+	if cfg.Balanced && cfg.SizeBits%2 != 0 {
+		return fmt.Errorf("fieldset: ProbabilisticParams.SizeBits must be even when Balanced, got %d", cfg.SizeBits)
 	}
 	if cfg.HashCount <= 0 {
 		return errors.New("fieldset: ProbabilisticParams.HashCount must be > 0")
@@ -110,12 +115,6 @@ func validateProbabilisticParams(cfg sriracha.ProbabilisticConfig) error {
 		if sz <= 0 {
 			return fmt.Errorf("fieldset: ProbabilisticParams.NgramSizes[%d] must be > 0, got %d", i, sz)
 		}
-	}
-	if !(cfg.FlipProbability >= 0 && cfg.FlipProbability < 1) {
-		return fmt.Errorf("fieldset: ProbabilisticParams.FlipProbability must be in [0, 1), got %v", cfg.FlipProbability)
-	}
-	if cfg.TargetPopcount >= cfg.SizeBits {
-		return fmt.Errorf("fieldset: ProbabilisticParams.TargetPopcount must be < SizeBits, got %d (size %d)", cfg.TargetPopcount, cfg.SizeBits)
 	}
 	return nil
 }

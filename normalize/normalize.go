@@ -1,11 +1,12 @@
 // Package normalize implements the Unicode normalization pipeline applied
 // to every field value before tokenization.
 //
-// The pipeline replaces invalid UTF-8 bytes with U+FFFD, applies NFKD
-// decomposition, casefolds with Unicode-aware lowercasing, and then
-// dispatches to a field-specific normalizer chosen by the FieldPath
-// namespace (digits-only for identifiers, RFC 3339 parsing for dates,
-// diacritic-stripping for names, and so on). Calling Normalize directly
+// The pipeline replaces invalid UTF-8 bytes with U+FFFD, strips Unicode
+// format characters (category Cf), applies NFKD decomposition, casefolds
+// with Unicode-aware lowercasing, and then dispatches to a field-specific
+// normalizer chosen by the FieldPath namespace (digits-only for identifiers,
+// RFC 3339 parsing for dates, Latin-scoped diacritic stripping for names,
+// and so on). Calling Normalize directly
 // is rarely needed — token.Tokenizer runs it as the first stage of every
 // tokenize call. The surface is exported so callers can pre-validate
 // input or build custom indexing pipelines that share the canonical form.
@@ -34,16 +35,18 @@ func Normalize(value string, path sriracha.FieldPath) (string, error) {
 	// normalizeIdentifier), producing inconsistent byte representations across
 	// successive calls and breaking idempotency.
 	value = strings.ToValidUTF8(value, "�")
-	// Step 1: NFKD decomposition
+	// Step 1: Strip Unicode format characters (category Cf)
+	value = stripFormatChars(value)
+	// Step 2: NFKD decomposition
 	value = nfkdDecompose(value)
-	// Step 2: Unicode-correct lowercasing (language.Und = deterministic, locale-independent)
+	// Step 3: Unicode-correct lowercasing (language.Und = deterministic, locale-independent)
 	value = unicodeLower(value)
-	// Step 3: Collapse whitespace (handles U+00A0 and other Unicode spaces)
+	// Step 4: Collapse whitespace (handles U+00A0 and other Unicode spaces)
 	value = collapseWhitespace(value)
-	// Step 4: Trim leading/trailing whitespace
+	// Step 5: Trim leading/trailing whitespace
 	value = trimWhitespace(value)
 
-	// Step 5: Field-specific normalization
+	// Step 6: Field-specific normalization
 	switch {
 	case path.InNamespace(sriracha.NamespaceDate):
 		return normalizeDate(value)
@@ -66,6 +69,30 @@ func Normalize(value string, path sriracha.FieldPath) (string, error) {
 	default:
 		return value, nil
 	}
+}
+
+// stripFormatChars removes every Unicode format character (category Cf),
+// which covers zero width spaces and joiners, bidi marks, and soft hyphens.
+// These are invisible, so visually identical values would otherwise tokenize
+// apart. Returns the input unchanged when it contains no Cf rune, so the
+// common case does not allocate.
+func stripFormatChars(s string) string {
+	if !strings.ContainsFunc(s, isFormatChar) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if !isFormatChar(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// isFormatChar reports whether r is a Unicode format character (category Cf).
+func isFormatChar(r rune) bool {
+	return unicode.Is(unicode.Cf, r)
 }
 
 // nfkdDecompose applies Unicode NFKD decomposition.
@@ -116,19 +143,27 @@ func normalizeIdentifier(s string) string {
 	return b.String()
 }
 
-// normalizeName strips Unicode combining marks (category Mn) so that
-// "José" and "Jose" produce the same output. Re-applies NFKD afterwards for
-// the same idempotency reason as normalizeIdentifier, and re-collapses /
-// trims whitespace because stripping a Mn-only run between spaces (e.g.
-// "x ݈" → "x ") would otherwise leave a trailing space that the next
-// call would trim, breaking idempotency.
+// normalizeName strips a combining mark (category Mn) only when the most
+// recent preceding non-mark rune is in the Latin script, so "José" and "Jose"
+// both become "jose" while Thai, Vietnamese-adjacent scripts, Arabic, and
+// Indic marks that carry meaning are preserved. A mark with no preceding base
+// rune is kept. Re-applies NFKD afterwards for the same idempotency reason as
+// normalizeIdentifier, and re-collapses and trims whitespace so stripping can
+// never leave a leading or trailing space for the next call to trim.
 func normalizeName(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
+	latinBase := false
 	for _, r := range s {
-		if !unicode.Is(unicode.Mn, r) {
+		if unicode.Is(unicode.Mn, r) {
+			if latinBase {
+				continue
+			}
 			b.WriteRune(r)
+			continue
 		}
+		latinBase = unicode.Is(unicode.Latin, r)
+		b.WriteRune(r)
 	}
 	out := nfkdDecompose(b.String())
 	return strings.TrimSpace(strings.Join(strings.Fields(out), " "))

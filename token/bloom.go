@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"hash"
+	"math"
 	"sync"
 	"unicode/utf8"
 
@@ -22,27 +23,23 @@ func (t *tokenizer) TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha
 	if err := validateBloomConfig(cfg); err != nil {
 		return sriracha.ProbabilisticToken{}, err
 	}
-	fieldBytes := int(((cfg.SizeBits + 63) / 64) * 8)
+	fieldBytes := filterBytes(cfg.SizeBits)
 	fields := make([][]byte, len(fs.Fields))
-	// One contiguous backing slab per token; each field's bytes is a
-	// sub-slice. Drops the per-field allocation that the previous
-	// implementation paid for both absent and present fields.
-	backing := make([]byte, len(fs.Fields)*fieldBytes)
+	// One contiguous backing slab per token, lazily allocated on the first
+	// present field; each present field's bytes is a sub-slice. Absent
+	// optional fields keep a nil entry and consume no bytes.
+	var backing []byte
 
 	// Reuse a single pooled HMAC across every field/gram in this record.
-	h := t.acquire()
-	defer t.release(h)
+	h := t.acquireBloom()
+	defer t.releaseBloom(h)
 
 	for i, spec := range fs.Fields {
-		out := backing[i*fieldBytes : (i+1)*fieldBytes]
 		raw, ok := record[spec.Path]
 		if !ok {
 			if spec.Required {
 				return sriracha.ProbabilisticToken{}, fmt.Errorf("token: required field %q missing", spec.Path)
 			}
-			// out is zero-initialised by make; absent optional fields
-			// match the previous all-zero-filter convention.
-			fields[i] = out
 			continue
 		}
 
@@ -54,17 +51,19 @@ func (t *tokenizer) TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha
 			if spec.Required {
 				return sriracha.ProbabilisticToken{}, fmt.Errorf("token: required field %q is empty", spec.Path)
 			}
-			// The value is treated as absent. Keep the all-zero filter
-			// and skip tokenizeFieldBloom so BLIP and balance noise are
-			// never applied to an empty value.
-			fields[i] = out
+			// The value is treated as absent and keeps a nil entry.
 			continue
 		}
-		tokenizeFieldBloom(h, out, normalized, spec.Path, cfg)
+		if backing == nil {
+			backing = make([]byte, len(fs.Fields)*fieldBytes)
+		}
+		out := backing[i*fieldBytes : (i+1)*fieldBytes]
+		t.tokenizeFieldBloom(h, out, normalized, spec.Path, cfg)
 		fields[i] = out
 	}
 
 	return sriracha.ProbabilisticToken{
+		Format:              sriracha.TokenFormatProbabilistic,
 		FieldSetVersion:     fs.Version,
 		KeyID:               t.keyID,
 		ProbabilisticParams: cfg,
@@ -72,14 +71,84 @@ func (t *tokenizer) TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha
 	}, nil
 }
 
+// TokenizeCLK folds every present field of record into one shared filter.
+// The per-gram preimage includes the field path, so the same gram from two
+// different fields lands at different positions. CLK filters are always
+// balanced regardless of cfg.Balanced, so the emitted popcount is exactly
+// SizeBits/2 and reveals nothing about the record, and SizeBits must be
+// even. A record where no field contributes returns an error, because an
+// empty CLK would otherwise be indistinguishable from a real filter after
+// balancing.
+func (t *tokenizer) TokenizeCLK(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.CLKToken, error) {
+	if t.destroyed.Load() {
+		return sriracha.CLKToken{}, ErrDestroyed
+	}
+	cfg := fs.ProbabilisticParams
+	if err := validateBloomConfig(cfg); err != nil {
+		return sriracha.CLKToken{}, err
+	}
+	if cfg.SizeBits%2 != 0 {
+		return sriracha.CLKToken{}, fmt.Errorf("token: ProbabilisticParams.SizeBits must be even for CLK, got %d", cfg.SizeBits)
+	}
+	base := cfg.SizeBits / 2
+	bs := acquireBitset(base)
+	defer releaseBitset(base, bs)
+	h := t.acquireBloom()
+	defer t.releaseBloom(h)
+
+	contributing := 0
+	for _, spec := range fs.Fields {
+		raw, ok := record[spec.Path]
+		if !ok {
+			if spec.Required {
+				return sriracha.CLKToken{}, fmt.Errorf("token: required field %q missing", spec.Path)
+			}
+			continue
+		}
+		normalized, err := normalize.Normalize(raw, spec.Path)
+		if err != nil {
+			return sriracha.CLKToken{}, fmt.Errorf("token: normalization failed for field %q: %w", spec.Path, err)
+		}
+		if normalized == "" {
+			if spec.Required {
+				return sriracha.CLKToken{}, fmt.Errorf("token: required field %q is empty", spec.Path)
+			}
+			continue
+		}
+		setGramBits(h, bs, normalized, spec.Path, cfg, base)
+		contributing++
+	}
+	if contributing == 0 {
+		return sriracha.CLKToken{}, errors.New("token: CLK requires at least one contributing field")
+	}
+
+	out := make([]byte, filterBytes(cfg.SizeBits))
+	t.balanceInto(out, bs, cfg.SizeBits)
+	return sriracha.CLKToken{
+		Format:              sriracha.TokenFormatCLK,
+		FieldSetVersion:     fs.Version,
+		KeyID:               t.keyID,
+		ProbabilisticParams: cfg,
+		Filter:              out,
+	}, nil
+}
+
+// filterBytes returns the serialized byte length of a filter with sizeBits
+// bits (whole little-endian uint64 words).
+func filterBytes(sizeBits uint32) int {
+	return int(((sizeBits + 63) / 64) * 8)
+}
+
 // validateBloomConfig rejects ProbabilisticConfig values that would divide
-// by zero at position selection, allocate a negative-size gram buffer, or
-// loop forever in applyBalance. FieldSets built through fieldset.Validate
-// are already checked; this guards direct Tokenizer callers. The
-// FlipProbability check is written so NaN is rejected too.
+// by zero at position selection or allocate a degenerate filter. FieldSets
+// built through fieldset.Validate are already checked; this guards direct
+// Tokenizer callers.
 func validateBloomConfig(cfg sriracha.ProbabilisticConfig) error {
 	if cfg.SizeBits == 0 {
 		return errors.New("token: ProbabilisticParams.SizeBits must be > 0")
+	}
+	if cfg.Balanced && cfg.SizeBits%2 != 0 {
+		return fmt.Errorf("token: ProbabilisticParams.SizeBits must be even when Balanced, got %d", cfg.SizeBits)
 	}
 	if cfg.HashCount <= 0 {
 		return fmt.Errorf("token: ProbabilisticParams.HashCount must be > 0, got %d", cfg.HashCount)
@@ -92,131 +161,161 @@ func validateBloomConfig(cfg sriracha.ProbabilisticConfig) error {
 			return fmt.Errorf("token: ProbabilisticParams.NgramSizes[%d] must be > 0, got %d", i, sz)
 		}
 	}
-	if !(cfg.FlipProbability >= 0 && cfg.FlipProbability < 1) {
-		return fmt.Errorf("token: ProbabilisticParams.FlipProbability must be in [0, 1), got %v", cfg.FlipProbability)
-	}
-	if cfg.TargetPopcount >= cfg.SizeBits {
-		return fmt.Errorf("token: ProbabilisticParams.TargetPopcount must be < SizeBits, got %d (size %d)", cfg.TargetPopcount, cfg.SizeBits)
-	}
 	return nil
 }
 
-// tokenizeFieldBloom writes the serialized Bloom filter bytes for a single
+// tokenizeFieldBloom writes the serialized filter bytes for a single
 // normalized field value into out, using h (which is reset between hashes).
-// out must be exactly ((cfg.SizeBits + 63) / 64) * 8 bytes — the caller
-// owns it and slices into the per-token backing buffer.
+// out must be exactly filterBytes(cfg.SizeBits) bytes — the caller owns it
+// and slices into the per-token backing buffer.
 //
-// Bit positions are derived from HMAC-SHA256 over (gram, path, counter), each
-// component written separately and length-prefixed so distinct (gram, path)
-// or counter values cannot collide via concatenation. Without separators,
-// (gram="ab", path="c.d") and (gram="a", path="bc.d") would hash the same input.
-//
-// If cfg.FlipProbability > 0, each bit of the constructed filter is flipped
-// with that probability (BLIP) using a deterministic HMAC-derived stream
-// keyed by ("blip:", path, normalizedValue). If cfg.TargetPopcount > 0 and
-// the post-BLIP popcount is below the target, additional zero bits are set
-// (chosen via a separate "balance:" stream) until the popcount reaches the
-// target. Both transforms are deterministic — identical inputs produce
-// identical filters.
-func tokenizeFieldBloom(h hash.Hash, out []byte, normalizedValue string, path sriracha.FieldPath, cfg sriracha.ProbabilisticConfig) {
-	bs := acquireBitset(cfg.SizeBits)
-	defer releaseBitset(cfg.SizeBits, bs)
-	pathBytes := []byte(path.String())
-
-	var lp [4]byte
-	var ib [4]byte
-	var sumBuf [32]byte
-	eachNgram(normalizedValue, cfg.NgramSizes, func(gb []byte) {
-		for i := range cfg.HashCount {
-			h.Reset()
-			binary.BigEndian.PutUint32(lp[:], uint32(len(gb))) //nolint:gosec // G115: gram length bounded by ngram size
-			h.Write(lp[:])
-			h.Write(gb)
-			binary.BigEndian.PutUint32(lp[:], uint32(len(pathBytes))) //nolint:gosec // G115: field path length bounded by parser
-			h.Write(lp[:])
-			h.Write(pathBytes)
-			binary.BigEndian.PutUint32(ib[:], uint32(i)) //nolint:gosec // i bounded by cfg.HashCount
-			h.Write(ib[:])
-			sum := h.Sum(sumBuf[:0])
-			pos := binary.BigEndian.Uint64(sum[:8]) % uint64(cfg.SizeBits)
-			bs.Set(uint(pos))
-		}
-	})
-
-	if cfg.FlipProbability > 0 {
-		applyBLIP(h, bs, cfg.SizeBits, cfg.FlipProbability, path, normalizedValue)
+// The base Bloom filter uses cfg.SizeBits bits, or cfg.SizeBits/2 when
+// cfg.Balanced. Balanced filters then append the complement of the base
+// filter and apply the tokenizer's secret permutation, so the emitted
+// popcount is exactly cfg.SizeBits/2 for every present field.
+func (t *tokenizer) tokenizeFieldBloom(h hash.Hash, out []byte, normalizedValue string, path sriracha.FieldPath, cfg sriracha.ProbabilisticConfig) {
+	base := cfg.SizeBits
+	if cfg.Balanced {
+		base = cfg.SizeBits / 2
 	}
-	if cfg.TargetPopcount > 0 {
-		applyBalance(h, bs, cfg.SizeBits, cfg.TargetPopcount, path, normalizedValue)
+	bs := acquireBitset(base)
+	defer releaseBitset(base, bs)
+	setGramBits(h, bs, normalizedValue, path, cfg, base)
+	if cfg.Balanced {
+		t.balanceInto(out, bs, cfg.SizeBits)
+		return
 	}
-
 	bitsetToBytes(bs, out)
 }
 
-// applyBLIP flips each of the first sizeBits bits of bs with probability p,
-// using a deterministic HMAC-keyed stream so the same (secret, path,
-// normalizedValue) always produces the same flip pattern.
-func applyBLIP(h hash.Hash, bs *bitset.BitSet, sizeBits uint32, p float64, path sriracha.FieldPath, normalizedValue string) {
-	threshold := uint64(p * float64(uint64(1)<<53))
-	s := newHMACStream(h, "blip:", path, normalizedValue)
-	for i := uint32(0); i < sizeBits; i++ {
-		if s.uint64()>>11 < threshold {
-			bs.Flip(uint(i))
-		}
-	}
-}
-
-// applyBalance pads bs with additional set bits until its popcount reaches
-// target, drawing bit indices from a deterministic HMAC-keyed stream. If the
-// current popcount is already at or above target, bs is left unchanged.
-func applyBalance(h hash.Hash, bs *bitset.BitSet, sizeBits, target uint32, path sriracha.FieldPath, normalizedValue string) {
-	pop := uint32(bs.Count()) //nolint:gosec // G115: bs has at most cfg.SizeBits set bits, which fits in uint32
-	if pop >= target {
-		return
-	}
-	needed := target - pop
-	s := newHMACStream(h, "balance:", path, normalizedValue)
-	for needed > 0 {
-		idx := uint(s.uint64() % uint64(sizeBits))
-		if !bs.Test(idx) {
-			bs.Set(idx)
-			needed--
-		}
-	}
-}
-
-// hmacStream is a deterministic byte stream produced by HMAC-counter mode
-// over a fixed label. It provides 64-bit samples used for BLIP flipping and
-// balanced-filter index selection. The stream is reproducible from
-// (secret, label, path, normalizedValue) alone.
-type hmacStream struct {
-	h     hash.Hash
-	label []byte
-	buf   [32]byte
-	pos   int
-	ctr   uint32
-}
-
-func newHMACStream(h hash.Hash, prefix string, path sriracha.FieldPath, normalizedValue string) *hmacStream {
+// setGramBits sets the bit positions for every q-gram of normalizedValue
+// into bs, a base filter of baseBits bits. One HMAC runs per gram; the
+// message is len(gram)||gram||len(path)||path with 4-byte big-endian length
+// prefixes so distinct (gram, path) pairs cannot collide via concatenation.
+// HashCount positions are derived from the single digest by double hashing:
+// h1 is the big-endian uint64 of digest bytes 0..8, h2 is the big-endian
+// uint64 of bytes 8..16 with the low bit forced to 1 (so h2 is odd and
+// strides visit distinct positions on power-of-two sizes), and position i is
+// (h1 + i*h2) mod baseBits under wrapping uint64 arithmetic.
+func setGramBits(h hash.Hash, bs *bitset.BitSet, normalizedValue string, path sriracha.FieldPath, cfg sriracha.ProbabilisticConfig, baseBits uint32) {
 	pathBytes := []byte(path.String())
-	nv := []byte(normalizedValue)
-	label := make([]byte, 0, len(prefix)+8+len(pathBytes)+len(nv))
+	eachNgram(normalizedValue, cfg.NgramSizes, func(gb []byte) {
+		h1, h2 := gramDoubleHash(h, gb, pathBytes)
+		for i := range cfg.HashCount {
+			pos := (h1 + uint64(i)*h2) % uint64(baseBits) //nolint:gosec // i bounded by cfg.HashCount
+			bs.Set(uint(pos))
+		}
+	})
+}
+
+// gramDoubleHash runs one HMAC over the length-prefixed (gram, path) message
+// and returns the double-hashing pair (h1, h2) described in setGramBits.
+func gramDoubleHash(h hash.Hash, gram, pathBytes []byte) (h1, h2 uint64) {
+	h.Reset()
 	var lp [4]byte
-	label = append(label, prefix...)
-	binary.BigEndian.PutUint32(lp[:], uint32(len(pathBytes))) //nolint:gosec // G115: path length bounded by parser
-	label = append(label, lp[:]...)
-	label = append(label, pathBytes...)
-	binary.BigEndian.PutUint32(lp[:], uint32(len(nv))) //nolint:gosec // G115: value length bounded by input
-	label = append(label, lp[:]...)
-	label = append(label, nv...)
-	s := &hmacStream{h: h, label: label}
+	binary.BigEndian.PutUint32(lp[:], uint32(len(gram))) //nolint:gosec // G115: gram length bounded by ngram size
+	h.Write(lp[:])
+	h.Write(gram)
+	binary.BigEndian.PutUint32(lp[:], uint32(len(pathBytes))) //nolint:gosec // G115: field path length bounded by parser
+	h.Write(lp[:])
+	h.Write(pathBytes)
+	var sumBuf [32]byte
+	sum := h.Sum(sumBuf[:0])
+	h1 = binary.BigEndian.Uint64(sum[:8])
+	h2 = binary.BigEndian.Uint64(sum[8:16]) | 1
+	return h1, h2
+}
+
+// balanceInto emits the balanced form of the base filter bs into out. The
+// extended filter E doubles bs with its complement (E[j] = B[j],
+// E[half+j] = NOT B[j]), then each extended bit j lands at position perm[j]
+// of the output, where perm is the tokenizer's secret permutation for
+// sizeBits. Exactly one of each (j, half+j) pair is set, so the emitted
+// popcount is exactly sizeBits/2 regardless of the value.
+func (t *tokenizer) balanceInto(out []byte, bs *bitset.BitSet, sizeBits uint32) {
+	perm := t.permutation(sizeBits)
+	half := sizeBits / 2
+	ext := acquireBitset(sizeBits)
+	defer releaseBitset(sizeBits, ext)
+	for j := uint32(0); j < half; j++ {
+		if bs.Test(uint(j)) {
+			ext.Set(uint(perm[j]))
+		} else {
+			ext.Set(uint(perm[half+j]))
+		}
+	}
+	bitsetToBytes(ext, out)
+}
+
+// permutation returns the tokenizer's bijection on [0, sizeBits), generating
+// and caching it on first use for each sizeBits. The permutation is a
+// Fisher-Yates shuffle driven by an HMAC counter stream keyed by the
+// permutation subkey, with message BE32(sizeBits) || BE32(counter), so it is
+// deterministic per (secret, sizeBits) and unbiased via rejection sampling.
+// Concurrent first calls may both generate; the shuffle is deterministic so
+// either result is identical and LoadOrStore keeps one.
+func (t *tokenizer) permutation(sizeBits uint32) []uint32 {
+	if cached, ok := t.perms.Load(sizeBits); ok {
+		return cached.([]uint32) //nolint:forcetypeassert // only []uint32 is ever stored
+	}
+	perm := make([]uint32, sizeBits)
+	for i := range perm {
+		perm[i] = uint32(i) //nolint:gosec // G115: i bounded by sizeBits
+	}
+	s := newPermStream(t.permKey.Bytes(), sizeBits)
+	for i := int(sizeBits) - 1; i >= 1; i-- {
+		j := uniformIndex(s.next64, uint64(i)+1)
+		perm[i], perm[j] = perm[j], perm[i]
+	}
+	stored, _ := t.perms.LoadOrStore(sizeBits, perm)
+	return stored.([]uint32) //nolint:forcetypeassert // only []uint32 is ever stored
+}
+
+// uniformIndex draws an unbiased uniform value in [0, bound) from a stream
+// of uniform uint64 samples via rejection sampling: samples in the partial
+// final multiple of bound are discarded so every residue is equally likely.
+func uniformIndex(next func() uint64, bound uint64) uint64 {
+	// rem is 2^64 mod bound; when it is zero, bound divides 2^64 and every
+	// sample is accepted.
+	rem := (math.MaxUint64%bound + 1) % bound
+	for {
+		v := next()
+		if rem == 0 || v <= math.MaxUint64-rem {
+			return v % bound
+		}
+	}
+}
+
+// permStream is a deterministic uint64 stream produced by HMAC-counter mode
+// under the permutation subkey. Each block hashes
+// BE32(sizeBits) || BE32(counter) and yields four big-endian uint64 samples.
+type permStream struct {
+	h    hash.Hash
+	size [4]byte
+	ctr  uint32
+	buf  [32]byte
+	pos  int
+}
+
+func newPermStream(key []byte, sizeBits uint32) *permStream {
+	s := &permStream{h: newHMACSHA256(key)}
+	binary.BigEndian.PutUint32(s.size[:], sizeBits)
 	s.pos = len(s.buf)
 	return s
 }
 
-func (s *hmacStream) refill() {
+func (s *permStream) next64() uint64 {
+	if s.pos+8 > len(s.buf) {
+		s.refill()
+	}
+	v := binary.BigEndian.Uint64(s.buf[s.pos:])
+	s.pos += 8
+	return v
+}
+
+func (s *permStream) refill() {
 	s.h.Reset()
-	s.h.Write(s.label)
+	s.h.Write(s.size[:])
 	var ctrBuf [4]byte
 	binary.BigEndian.PutUint32(ctrBuf[:], s.ctr)
 	s.h.Write(ctrBuf[:])
@@ -224,15 +323,6 @@ func (s *hmacStream) refill() {
 	s.h.Sum(s.buf[:0])
 	s.pos = 0
 	s.ctr++
-}
-
-func (s *hmacStream) uint64() uint64 {
-	if s.pos+8 > len(s.buf) {
-		s.refill()
-	}
-	v := binary.BigEndian.Uint64(s.buf[s.pos:])
-	s.pos += 8
-	return v
 }
 
 // bitsetToBytes serialises a BitSet as little-endian uint64 words into out.
@@ -244,13 +334,14 @@ func bitsetToBytes(bs *bitset.BitSet, out []byte) {
 	}
 }
 
-// bitsetPools keys a sync.Pool by SizeBits so reuse only matches bitsets
+// bitsetPools keys a sync.Pool by bit size so reuse only matches bitsets
 // of the same word count. The typical workload is one Tokenizer with one
-// FieldSet (a single SizeBits), so a single pool ends up hot.
+// FieldSet (a single SizeBits), so at most two pools end up hot: the base
+// size and, when Balanced, the extended size.
 var bitsetPools sync.Map // map[uint32]*sync.Pool
 
 // acquireBitset returns a zeroed BitSet sized for sizeBits, drawn from a
-// per-SizeBits pool. The caller must hand it back via releaseBitset.
+// per-size pool. The caller must hand it back via releaseBitset.
 // ClearAll runs on acquire (not release) so the caller always sees a
 // zeroed filter regardless of whether the pool returned a freshly-
 // allocated bitset or a reused one whose words were left dirty by the
@@ -283,34 +374,45 @@ func releaseBitset(sizeBits uint32, bs *bitset.BitSet) {
 
 // eachNgram invokes fn for each n-gram (across all sizes in sizes) extracted
 // from s, decoded as runes (not bytes) so multi-byte UTF-8 input produces
-// correct gram boundaries. The byte slice passed to fn aliases an internal
-// scratch buffer; fn must not retain it past the call. Iteration order is:
-// for each size in sizes (in order), all grams of that size left-to-right.
-// No-ops when s has fewer runes than the smallest size, or sizes is empty.
+// correct gram boundaries. For each gram size q the value is padded with
+// q-1 underscore runes on each side before extraction, so boundary
+// characters appear in as many grams as interior characters and even a
+// one-rune value produces grams for every size. The byte slice passed to fn
+// aliases an internal scratch buffer; fn must not retain it past the call.
+// Iteration order is: for each size in sizes (in order), all grams of that
+// size left-to-right over the padded value. No-ops when s is empty or sizes
+// is empty.
 func eachNgram(s string, sizes []int, fn func(gram []byte)) {
 	runes := []rune(s)
 	n := len(runes)
 	if n == 0 || len(sizes) == 0 {
 		return
 	}
-	minSize, maxSize := sizes[0], sizes[0]
+	maxSize := sizes[0]
 	for _, sz := range sizes[1:] {
-		if sz < minSize {
-			minSize = sz
-		}
 		if sz > maxSize {
 			maxSize = sz
 		}
 	}
-	if n < minSize {
-		return
+	// One padded buffer covers every size: maxSize-1 underscores on each
+	// side, with smaller sizes reading a centered sub-slice.
+	maxPad := maxSize - 1
+	padded := make([]rune, 0, n+2*maxPad)
+	for range maxPad {
+		padded = append(padded, '_')
+	}
+	padded = append(padded, runes...)
+	for range maxPad {
+		padded = append(padded, '_')
 	}
 	// Scratch is sized to the worst case (largest gram, all 4-byte runes).
 	scratch := make([]byte, 0, maxSize*utf8.UTFMax)
 	for _, sz := range sizes {
-		for i := 0; i+sz <= n; i++ {
+		pad := sz - 1
+		window := padded[maxPad-pad : maxPad+n+pad]
+		for i := 0; i+sz <= len(window); i++ {
 			scratch = scratch[:0]
-			for _, r := range runes[i : i+sz] {
+			for _, r := range window[i : i+sz] {
 				scratch = utf8.AppendRune(scratch, r)
 			}
 			fn(scratch)

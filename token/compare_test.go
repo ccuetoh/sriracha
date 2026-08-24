@@ -59,6 +59,12 @@ func TestEqual_Cases(t *testing.T) {
 		want bool
 	}{
 		{
+			name: "FormatMismatch",
+			a:    sriracha.DeterministicToken{Format: sriracha.TokenFormatDeterministic, FieldSetVersion: "v1", Fields: [][]byte{{0x01}}},
+			b:    sriracha.DeterministicToken{Format: "sriracha/det/1", FieldSetVersion: "v1", Fields: [][]byte{{0x01}}},
+			want: false,
+		},
+		{
 			name: "VersionMismatch",
 			a:    detTok("v1", []byte{0x01}),
 			b:    detTok("v2", []byte{0x01}),
@@ -167,7 +173,7 @@ func TestDicePerField_PerturbedField(t *testing.T) {
 	assert.InDelta(t, 1.0, scores[1], 1e-9, "unchanged family field should score 1.0")
 }
 
-func TestDicePerField_MissingFieldZero(t *testing.T) {
+func TestDicePerField_AbsentFieldSemantics(t *testing.T) {
 	t.Parallel()
 	tok := newTok(t, "secret")
 	fs := bloomFS(
@@ -175,16 +181,42 @@ func TestDicePerField_MissingFieldZero(t *testing.T) {
 		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 0.5},
 	)
 
-	a, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
+	withFamily, err := tok.TokenizeProbabilistic(sriracha.RawRecord{
+		sriracha.FieldNameGiven:  "Alice",
+		sriracha.FieldNameFamily: "Smith",
+	}, fs)
 	require.NoError(t, err)
-	b, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
+	withoutFamily, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}, fs)
 	require.NoError(t, err)
+	require.Nil(t, withoutFamily.Fields[1], "absent optional field must be nil")
 
-	scores, err := DicePerField(a, b)
-	require.NoError(t, err)
-	require.Len(t, scores, 2)
-	assert.InDelta(t, 1.0, scores[0], 1e-9, "present matching field should score 1.0")
-	assert.Equal(t, 0.0, scores[1], "absent (zero-filter) field should score 0.0")
+	t.Run("BothNilScoresZero", func(t *testing.T) {
+		t.Parallel()
+		scores, err := DicePerField(withoutFamily, withoutFamily)
+		require.NoError(t, err)
+		require.Len(t, scores, 2)
+		assert.InDelta(t, 1.0, scores[0], 1e-9, "present matching field should score 1.0")
+		assert.Equal(t, 0.0, scores[1], "nil-on-both field should score 0.0")
+	})
+
+	t.Run("AsymmetricAbsenceScoresZero", func(t *testing.T) {
+		t.Parallel()
+		scores, err := DicePerField(withFamily, withoutFamily)
+		require.NoError(t, err)
+		require.Len(t, scores, 2)
+		assert.Equal(t, 0.0, scores[1], "nil-vs-populated field should score 0.0")
+	})
+
+	t.Run("LengthCheckSkippedWhenOneSideNil", func(t *testing.T) {
+		t.Parallel()
+		// A nil field on one side never trips the byte-length check, even
+		// against a populated filter of any length.
+		a := withoutFamily
+		b := withFamily
+		require.NotEqual(t, len(a.Fields[1]), len(b.Fields[1]))
+		_, err := DicePerField(a, b)
+		assert.NoError(t, err)
+	})
 }
 
 func TestDicePerField_Errors(t *testing.T) {
@@ -194,6 +226,11 @@ func TestDicePerField_Errors(t *testing.T) {
 		name string
 		a, b sriracha.ProbabilisticToken
 	}{
+		{
+			name: "FormatMismatch",
+			a:    sriracha.ProbabilisticToken{Format: sriracha.TokenFormatProbabilistic, FieldSetVersion: "v1"},
+			b:    sriracha.ProbabilisticToken{Format: "sriracha/bloom/1", FieldSetVersion: "v1"},
+		},
 		{
 			name: "VersionMismatch",
 			a:    sriracha.ProbabilisticToken{FieldSetVersion: "v1"},
@@ -205,19 +242,9 @@ func TestDicePerField_Errors(t *testing.T) {
 			b:    bloomTokWith(sriracha.ProbabilisticConfig{SizeBits: 2048, NgramSizes: []int{2}, HashCount: 2}),
 		},
 		{
-			name: "FlipProbabilityMismatch",
+			name: "BalancedMismatch",
 			a:    bloomTokWith(sriracha.ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2}, HashCount: 2}),
-			b:    bloomTokWith(sriracha.ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2}, HashCount: 2, FlipProbability: 0.02}),
-		},
-		{
-			name: "TargetPopcountMismatch",
-			a:    bloomTokWith(sriracha.ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2}, HashCount: 2}),
-			b:    bloomTokWith(sriracha.ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2}, HashCount: 2, TargetPopcount: 400}),
-		},
-		{
-			name: "BothHardeningParamsMismatch",
-			a:    bloomTokWith(sriracha.ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2}, HashCount: 2}),
-			b:    bloomTokWith(sriracha.ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2}, HashCount: 2, FlipProbability: 0.02, TargetPopcount: 400}),
+			b:    bloomTokWith(sriracha.ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2}, HashCount: 2, Balanced: true}),
 		},
 		{
 			name: "FieldCountMismatch",
@@ -445,6 +472,15 @@ func TestMatch(t *testing.T) {
 		require.Error(t, err)
 	})
 
+	t.Run("FormatMismatchErrors", func(t *testing.T) {
+		t.Parallel()
+		other := identical
+		other.Format = "sriracha/bloom/1"
+		_, err := Match(identical, other, fs, 0.5)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Format mismatch")
+	})
+
 	t.Run("FieldCountMismatchWithFieldSet", func(t *testing.T) {
 		t.Parallel()
 		shorter := sriracha.FieldSet{
@@ -458,24 +494,128 @@ func TestMatch(t *testing.T) {
 	})
 }
 
-func TestAllZero(t *testing.T) {
+func clkTok(mutate func(*sriracha.CLKToken)) sriracha.CLKToken {
+	tok := sriracha.CLKToken{
+		Format:              sriracha.TokenFormatCLK,
+		FieldSetVersion:     "v1",
+		KeyID:               "k1",
+		ProbabilisticParams: sriracha.ProbabilisticConfig{SizeBits: 16, NgramSizes: []int{2}, HashCount: 2, Balanced: true},
+		Filter:              []byte{0xf0, 0x0f},
+	}
+	if mutate != nil {
+		mutate(&tok)
+	}
+	return tok
+}
+
+func TestMatchCLK(t *testing.T) {
 	t.Parallel()
-	cases := []struct {
-		name string
-		in   []byte
-		want bool
-	}{
-		{"Nil", nil, true},
-		{"Empty", []byte{}, true},
-		{"AllZero", []byte{0, 0, 0}, true},
-		{"AnyNonZero", []byte{0, 1, 0}, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tc.want, allZero(tc.in))
-		})
-	}
+
+	t.Run("IdenticalFiltersScoreOne", func(t *testing.T) {
+		t.Parallel()
+		res, err := MatchCLK(clkTok(nil), clkTok(nil), 0.9)
+		require.NoError(t, err)
+		assert.InDelta(t, 1.0, res.Score, 1e-9)
+		assert.True(t, res.IsMatch)
+	})
+
+	t.Run("BelowThresholdIsNotMatch", func(t *testing.T) {
+		t.Parallel()
+		other := clkTok(func(tok *sriracha.CLKToken) { tok.Filter = []byte{0x0f, 0xf0} })
+		res, err := MatchCLK(clkTok(nil), other, 0.9)
+		require.NoError(t, err)
+		assert.Equal(t, 0.0, res.Score, "disjoint filters score 0")
+		assert.False(t, res.IsMatch)
+	})
+
+	t.Run("FingerprintOneSideSetSkipsCheck", func(t *testing.T) {
+		t.Parallel()
+		a := clkTok(func(tok *sriracha.CLKToken) { tok.FieldSetFingerprint = "aa" })
+		_, err := MatchCLK(a, clkTok(nil), 0.5)
+		assert.NoError(t, err, "missing fingerprint on one side must skip the check, not error")
+	})
+
+	t.Run("Errors", func(t *testing.T) {
+		t.Parallel()
+		cases := []struct {
+			name        string
+			a, b        sriracha.CLKToken
+			threshold   float64
+			errContains string
+		}{
+			{
+				name:        "ThresholdNaN",
+				a:           clkTok(nil),
+				b:           clkTok(nil),
+				threshold:   math.NaN(),
+				errContains: "threshold",
+			},
+			{
+				name:        "ThresholdAboveOne",
+				a:           clkTok(nil),
+				b:           clkTok(nil),
+				threshold:   1.5,
+				errContains: "threshold",
+			},
+			{
+				name:        "ThresholdNegative",
+				a:           clkTok(nil),
+				b:           clkTok(nil),
+				threshold:   -0.1,
+				errContains: "threshold",
+			},
+			{
+				name:        "FormatMismatch",
+				a:           clkTok(nil),
+				b:           clkTok(func(tok *sriracha.CLKToken) { tok.Format = "sriracha/clk/1" }),
+				threshold:   0.5,
+				errContains: "Format mismatch",
+			},
+			{
+				name:        "VersionMismatch",
+				a:           clkTok(nil),
+				b:           clkTok(func(tok *sriracha.CLKToken) { tok.FieldSetVersion = "v2" }),
+				threshold:   0.5,
+				errContains: "FieldSetVersion",
+			},
+			{
+				name:        "KeyIDMismatch",
+				a:           clkTok(nil),
+				b:           clkTok(func(tok *sriracha.CLKToken) { tok.KeyID = "k2" }),
+				threshold:   0.5,
+				errContains: "KeyID",
+			},
+			{
+				name:        "FingerprintMismatchBothSet",
+				a:           clkTok(func(tok *sriracha.CLKToken) { tok.FieldSetFingerprint = "aa" }),
+				b:           clkTok(func(tok *sriracha.CLKToken) { tok.FieldSetFingerprint = "bb" }),
+				threshold:   0.5,
+				errContains: "FieldSetFingerprint",
+			},
+			{
+				name:        "ParamsMismatch",
+				a:           clkTok(nil),
+				b:           clkTok(func(tok *sriracha.CLKToken) { tok.ProbabilisticParams.HashCount = 3 }),
+				threshold:   0.5,
+				errContains: "ProbabilisticParams",
+			},
+			{
+				name:        "FilterLengthMismatch",
+				a:           clkTok(nil),
+				b:           clkTok(func(tok *sriracha.CLKToken) { tok.Filter = []byte{0xf0} }),
+				threshold:   0.5,
+				errContains: "filter byte length",
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				_, err := MatchCLK(tc.a, tc.b, tc.threshold)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.errContains)
+			})
+		}
+	})
 }
 
 func TestDice_DirectCases(t *testing.T) {

@@ -2,8 +2,8 @@ package fieldset
 
 import "github.com/ccuetoh/sriracha"
 
-var defaultV01 = sriracha.FieldSet{
-	Version: "0.1",
+var defaultV02 = sriracha.FieldSet{
+	Version: "0.2",
 	Fields: []sriracha.FieldSpec{
 		{Path: sriracha.FieldIdentifierNationalID, Required: false, Weight: 3.0},
 		{Path: sriracha.FieldIdentifierPassport, Required: false, Weight: 3.0},
@@ -26,7 +26,9 @@ var defaultV01 = sriracha.FieldSet{
 }
 
 // DefaultFieldSet returns a deep copy of the canonical Sriracha FieldSet
-// with all 16 standard fields.
+// with all 16 standard fields, versioned "0.2". Its probabilistic
+// parameters come from sriracha.DefaultProbabilisticConfig, so per-field and
+// CLK filters are balanced by default.
 //
 // Weights are unitless relative magnitudes used as the denominator in the
 // weighted average computed by token.Score. They are not probabilities or
@@ -48,14 +50,14 @@ var defaultV01 = sriracha.FieldSet{
 // pair set; the defaults are a reasonable starting point, not a tuned
 // answer.
 func DefaultFieldSet() sriracha.FieldSet {
-	fields := make([]sriracha.FieldSpec, len(defaultV01.Fields))
-	copy(fields, defaultV01.Fields)
+	fields := make([]sriracha.FieldSpec, len(defaultV02.Fields))
+	copy(fields, defaultV02.Fields)
 
-	bp := defaultV01.ProbabilisticParams
-	bp.NgramSizes = append([]int(nil), defaultV01.ProbabilisticParams.NgramSizes...)
+	bp := defaultV02.ProbabilisticParams
+	bp.NgramSizes = append([]int(nil), defaultV02.ProbabilisticParams.NgramSizes...)
 
 	return sriracha.FieldSet{
-		Version:             defaultV01.Version,
+		Version:             defaultV02.Version,
 		Fields:              fields,
 		ProbabilisticParams: bp,
 	}

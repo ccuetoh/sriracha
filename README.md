@@ -20,9 +20,11 @@ that can be compared without exposing the underlying identifiers.
 
 - Deterministic tokenization using HMAC-SHA256
 - Probabilistic tokenization with Sørensen–Dice matching
-- Optional BLIP and balanced filter defenses against frequency analysis
+- Record-level CLK tokens, the recommended form for sharing, always balanced so the filter popcount reveals nothing
+- Optional balanced mode for per-field filters
 - Unicode normalization pipeline
 - Canonical field set with support for extended schemas
+- Wire format specified in [SPEC.md](SPEC.md) and pinned by golden vector tests
 
 ## Installation
 

@@ -3,8 +3,11 @@
 // without exposing the underlying PII.
 //
 // Records are normalized, then tokenized with HMAC-SHA256 (deterministic
-// mode) or Bloom filters (probabilistic mode). How the resulting tokens
-// are stored or compared is left to the caller.
+// mode), per-field Bloom filters (probabilistic mode), or a single
+// record-level balanced Bloom filter (CLK mode). CLK tokens are the
+// recommended form for sharing when per-field scores are not required. How
+// the resulting tokens are stored or compared is left to the caller. The
+// wire format is specified in SPEC.md and pinned by golden vector tests.
 //
 // Import path: github.com/ccuetoh/sriracha
 //

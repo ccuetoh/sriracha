@@ -2,6 +2,7 @@ package token
 
 import (
 	"errors"
+	"fmt"
 	"runtime"
 	"sync"
 	"testing"
@@ -73,11 +74,94 @@ func TestNew(t *testing.T) {
 
 func TestNewTokenizer_AllocFailure(t *testing.T) {
 	t.Parallel()
-	alloc := func([]byte) *memguard.LockedBuffer { panic("mlock failed") }
-	tok, err := newTokenizer([]byte("secret"), alloc)
-	require.Error(t, err)
-	assert.Nil(t, tok)
-	assert.Contains(t, err.Error(), "mlock failed")
+	// The constructor locks four buffers (secret plus three subkeys). Failing
+	// each position in turn exercises the cleanup of previously locked
+	// buffers.
+	for _, failAt := range []int{1, 2, 3, 4} {
+		t.Run(fmt.Sprintf("FailAtAllocation%d", failAt), func(t *testing.T) {
+			t.Parallel()
+			var succeeded []*memguard.LockedBuffer
+			calls := 0
+			alloc := func(b []byte) *memguard.LockedBuffer {
+				calls++
+				if calls == failAt {
+					panic("mlock failed")
+				}
+				locked := memguard.NewBufferFromBytes(b)
+				succeeded = append(succeeded, locked)
+				return locked
+			}
+			tok, err := newTokenizer([]byte("secret"), alloc, hkdfSubkey)
+			require.Error(t, err)
+			assert.Nil(t, tok)
+			assert.Contains(t, err.Error(), "mlock failed")
+			for i, locked := range succeeded {
+				assert.Falsef(t, locked.IsAlive(), "buffer %d must be destroyed after a later allocation failure", i)
+			}
+		})
+	}
+}
+
+func TestNewTokenizer_DeriveFailure(t *testing.T) {
+	t.Parallel()
+	for _, failInfo := range []string{infoDeterministic, infoBloom, infoPermutation} {
+		t.Run(failInfo, func(t *testing.T) {
+			t.Parallel()
+			derive := func(secret []byte, info string) ([]byte, error) {
+				if info == failInfo {
+					return nil, errors.New("derive failed")
+				}
+				return hkdfSubkey(secret, info)
+			}
+			tok, err := newTokenizer([]byte("secret"), memguard.NewBufferFromBytes, derive)
+			require.Error(t, err)
+			assert.Nil(t, tok)
+			assert.Contains(t, err.Error(), "derive failed")
+		})
+	}
+}
+
+func TestHKDFSubkey(t *testing.T) {
+	t.Parallel()
+
+	t.Run("DeterministicAndDomainSeparated", func(t *testing.T) {
+		t.Parallel()
+		a, err := hkdfSubkey([]byte("secret"), infoDeterministic)
+		require.NoError(t, err)
+		require.Len(t, a, subkeySize)
+		again, err := hkdfSubkey([]byte("secret"), infoDeterministic)
+		require.NoError(t, err)
+		assert.Equal(t, a, again, "same (secret, info) must derive the same subkey")
+
+		b, err := hkdfSubkey([]byte("secret"), infoBloom)
+		require.NoError(t, err)
+		assert.NotEqual(t, a, b, "different info strings must derive different subkeys")
+
+		c, err := hkdfSubkey([]byte("other"), infoDeterministic)
+		require.NoError(t, err)
+		assert.NotEqual(t, a, c, "different secrets must derive different subkeys")
+	})
+
+	t.Run("OverlongRequestErrors", func(t *testing.T) {
+		t.Parallel()
+		// HKDF-SHA256 can expand at most 255 blocks of 32 bytes.
+		_, err := hkdfDerive([]byte("secret"), infoDeterministic, 255*32+1)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "subkey derivation failed")
+	})
+}
+
+func TestDestroy_WipesAllBuffers(t *testing.T) {
+	t.Parallel()
+	tok, err := New([]byte("wipe-me"))
+	require.NoError(t, err)
+	impl, ok := tok.(*tokenizer)
+	require.True(t, ok)
+	tok.Destroy()
+	assert.False(t, impl.secret.IsAlive(), "secret buffer must be wiped")
+	assert.False(t, impl.detKey.IsAlive(), "deterministic subkey buffer must be wiped")
+	assert.False(t, impl.bloomKey.IsAlive(), "bloom subkey buffer must be wiped")
+	assert.False(t, impl.permKey.IsAlive(), "permutation subkey buffer must be wiped")
 }
 
 func TestRecoverToError(t *testing.T) {
@@ -124,6 +208,13 @@ func TestTokenize_AfterDestroy(t *testing.T) {
 			name: "Probabilistic",
 			call: func(tok Tokenizer) error {
 				_, err := tok.TokenizeProbabilistic(rec, bloomFS(givenSpec))
+				return err
+			},
+		},
+		{
+			name: "CLK",
+			call: func(tok Tokenizer) error {
+				_, err := tok.TokenizeCLK(rec, bloomFS(givenSpec))
 				return err
 			},
 		},
@@ -424,14 +515,15 @@ func TestTokenizeProbabilistic(t *testing.T) {
 			},
 		},
 		{
-			name: "MissingOptionalZeroFilter",
+			name: "MissingOptionalNilEntry",
 			run: func(t *testing.T) {
 				tok := newTok(t, "secret")
 				fs := bloomFS(givenSpec, familyOptional)
 				tr, err := tok.TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldNameGiven: "John"}, fs)
 				require.NoError(t, err)
 				require.Len(t, tr.Fields, 2)
-				assert.Equal(t, make([]byte, 128), tr.Fields[1], "absent optional field should be all-zero filter")
+				assert.Len(t, tr.Fields[0], 128, "present field should have a 128-byte filter")
+				assert.Nil(t, tr.Fields[1], "absent optional field should be nil")
 			},
 		},
 		{
@@ -531,6 +623,11 @@ func TestTokenizer_Concurrent(t *testing.T) {
 	givenSpec := sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0}
 	dfs := deterministicFS(givenSpec)
 	bfs := bloomFS(givenSpec)
+	balancedFS := sriracha.FieldSet{
+		Version:             "1.0.0-test",
+		Fields:              []sriracha.FieldSpec{givenSpec},
+		ProbabilisticParams: sriracha.DefaultProbabilisticConfig(),
+	}
 
 	cases := []struct {
 		name string
@@ -577,6 +674,30 @@ func TestTokenizer_Concurrent(t *testing.T) {
 				require.NoError(t, err)
 				require.Len(t, scores, 1)
 				assert.InDelta(t, 1.0, scores[0], 1e-9)
+			},
+		},
+		{
+			// Balanced tokenization exercises the concurrent first-use
+			// generation of the cached permutation.
+			name: "BalancedCLK",
+			run: func(t *testing.T) {
+				const n = 64
+				results := make([]sriracha.CLKToken, n)
+				var wg sync.WaitGroup
+				for i := range n {
+					wg.Add(1)
+					go func(i int) {
+						defer wg.Done()
+						clk, err := tok.TokenizeCLK(sriracha.RawRecord{sriracha.FieldNameGiven: "Christopher"}, balancedFS)
+						assert.NoError(t, err)
+						results[i] = clk
+					}(i)
+				}
+				wg.Wait()
+				res, err := MatchCLK(results[0], results[len(results)-1], 0.99)
+				require.NoError(t, err)
+				assert.InDelta(t, 1.0, res.Score, 1e-9)
+				assert.True(t, res.IsMatch)
 			},
 		},
 	}
@@ -660,22 +781,28 @@ func TestNgrams(t *testing.T) {
 		want  []string
 	}{
 		{
-			name:  "Single",
+			name:  "SingleSizePadded",
 			input: "ab",
 			sizes: []int{2},
-			want:  []string{"ab"},
+			want:  []string{"_a", "ab", "b_"},
 		},
 		{
-			name:  "ShorterThanMinSize",
+			name:  "OneRuneStillProducesGrams",
 			input: "a",
 			sizes: []int{2},
-			want:  []string{},
+			want:  []string{"_a", "a_"},
+		},
+		{
+			name:  "UnigramsNeedNoPadding",
+			input: "ab",
+			sizes: []int{1},
+			want:  []string{"a", "b"},
 		},
 		{
 			name:  "Unicode",
 			input: "αβγ",
 			sizes: []int{2},
-			want:  []string{"αβ", "βγ"},
+			want:  []string{"_α", "αβ", "βγ", "γ_"},
 		},
 		{
 			name:  "Empty",
@@ -691,16 +818,16 @@ func TestNgrams(t *testing.T) {
 		},
 		{
 			name: "DescendingOrder",
-			// sizes[0]=3 > sizes[1]=2 — exercises the minSize update branch.
+			// sizes[0]=3 > sizes[1]=2 keeps the max-size scan honest.
 			input: "ab",
 			sizes: []int{3, 2},
-			want:  []string{"ab"},
+			want:  []string{"__a", "_ab", "ab_", "b__", "_a", "ab", "b_"},
 		},
 		{
 			name:  "MultipleSizes",
 			input: "abc",
 			sizes: []int{2, 3},
-			want:  []string{"ab", "bc", "abc"},
+			want:  []string{"_a", "ab", "bc", "c_", "__a", "_ab", "abc", "bc_", "c__"},
 		},
 	}
 	for _, tc := range cases {
@@ -765,8 +892,9 @@ func BenchmarkNgrams(b *testing.B) {
 	}
 }
 
-// FuzzNgrams verifies that ngrams never panics and that every returned gram
-// has the correct rune length.
+// FuzzNgrams verifies that ngrams never panics, that every returned gram has
+// the correct rune length, and that the padded gram count is n + size - 1
+// for any non-empty input.
 func FuzzNgrams(f *testing.F) {
 	f.Add("hello", 2)
 	f.Add("", 3)
@@ -788,8 +916,8 @@ func FuzzNgrams(f *testing.F) {
 		}
 		n := len(runes)
 		want := 0
-		if n >= size {
-			want = n - size + 1
+		if n > 0 {
+			want = n + size - 1
 		}
 		if len(grams) != want {
 			t.Fatalf("ngrams(%q, [%d]): got %d grams, want %d", s, size, len(grams), want)
@@ -832,7 +960,8 @@ func FuzzTokenizeDeterministic(f *testing.F) {
 
 // FuzzTokenizeProbabilistic verifies that TokenizeProbabilistic never panics for
 // arbitrary field values, that its layout is positional (one filter per field
-// of the FieldSet), and that DicePerField scores a token against itself at 1.0.
+// of the FieldSet, nil for absent), and that DicePerField scores a token
+// against itself at 1.0 for present fields and 0 for absent ones.
 func FuzzTokenizeProbabilistic(f *testing.F) {
 	f.Add("Alice", "Smith")
 	f.Add("", "")
@@ -859,7 +988,7 @@ func FuzzTokenizeProbabilistic(f *testing.F) {
 			t.Fatalf("Fields length %d, want %d", len(tr.Fields), len(fs.Fields))
 		}
 		for i, f := range tr.Fields {
-			if len(f) != fieldFilterBytes {
+			if f != nil && len(f) != fieldFilterBytes {
 				t.Fatalf("field %d byte length %d, want %d", i, len(f), fieldFilterBytes)
 			}
 		}
@@ -868,10 +997,14 @@ func FuzzTokenizeProbabilistic(f *testing.F) {
 			t.Fatalf("DicePerField against self: %v", err)
 		}
 		for i, s := range scores {
-			// A token compared against itself scores 1 (any bits set) or 0
-			// (all-zero filter). Anything else indicates a bug.
-			if s != 0 && s != 1 {
-				t.Fatalf("DicePerField self-comparison field %d = %v, want 0 or 1", i, s)
+			// A token compared against itself scores 1 for present fields
+			// and 0 for absent (nil) fields. Anything else indicates a bug.
+			want := 0.0
+			if tr.Fields[i] != nil {
+				want = 1.0
+			}
+			if s != want {
+				t.Fatalf("DicePerField self-comparison field %d = %v, want %v", i, s, want)
 			}
 		}
 	})
