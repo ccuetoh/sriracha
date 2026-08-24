@@ -9,6 +9,8 @@ change in any release.
 
 ## [Unreleased]
 
+## [0.2] - 2026-08-13
+
 ### Added
 
 - **Breaking wire format, token format v2.** Tokens now carry a `format`
