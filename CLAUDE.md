@@ -7,7 +7,7 @@
 
 ## Package layout
 ```
-(root)           # core types, fields, interfaces (github.com/ccuetoh/sriracha)
+(root)           # core types, fields, error sentinels (github.com/ccuetoh/sriracha)
 normalize/       # Unicode normalization pipeline
 token/           # HMAC-SHA256 deterministic + Bloom filter probabilistic tokenizers (uses bits-and-blooms/bitset)
 fieldset/        # FieldSet validation and canonical schema
@@ -33,7 +33,7 @@ test/bench/      # OpenSanctions quality + perf harness, gated by //go:build ben
 - Table-driven tests with named subtests wherever multiple cases test the same function.
 - Never use loop variable capture (`tc := tc`) before subtest closures. (Go 1.22+)
 - Target 100% coverage.
-- No ad-hoc mocks. Use the mocks in ./mock
+- No ad-hoc mocks. The module exports no interfaces, so construct a real `token.Tokenizer` or `session.Session` with a test secret.
 
 ## Running tests
 ```bash

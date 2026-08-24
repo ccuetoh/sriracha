@@ -87,7 +87,8 @@ type Session struct {
 // returns the resulting validation error (if any) before creating the
 // Tokenizer; this lets callers fail fast on a malformed schema without ever
 // allocating locked memory. token.New wipes the secret slice when moving it
-// into locked memory, so the caller must not reuse it.
+// into locked memory, so the caller must not reuse it. Building a second
+// Session from the same slice needs a copy taken before the first call.
 //
 // fs is deep-copied before being stored, so post-construction mutation of
 // the caller's FieldSet (Fields slice or ProbabilisticParams.NgramSizes)

@@ -108,6 +108,15 @@ for the *why* behind a change.
    check, govulncheck, and fuzz.
 5. Keep PRs focused — split unrelated changes into separate PRs.
 
+## Releases
+
+Releases are cut by the maintainer, not by contributors, but the policy affects
+what a PR may change. Version tags are `vMAJOR.MINOR.PATCH`; the supported Go
+versions and the rules for raising the `go` directive live in
+[`RELEASING.md`](RELEASING.md). A PR that moves the `go` directive, changes a
+token format discriminator, or changes `FieldSet.Fingerprint` encoding blocks a
+patch release, so call it out explicitly in the PR description.
+
 ## License
 
 By contributing, you agree that your contributions are licensed under the

@@ -65,8 +65,10 @@ Any output means the release is not a patch.
    bump is minor or larger. See above.
 3. `CHANGELOG.md` has the `[Unreleased]` section renamed to the new version
    with a date, and a fresh empty `[Unreleased]` above it.
-4. `README.md`'s install line names the exact tag being cut, in three-component
-   form. It currently reads `@v0.2`, which does not resolve.
+4. `README.md`'s install line is correct. It currently uses the unversioned
+   `go get github.com/ccuetoh/sriracha`, which always resolves to the newest
+   tag. If it is ever pinned to a version, that version must be the exact tag
+   being cut, in three-component form.
 5. `fieldset.DefaultFieldSet()`'s `Version` matches what the release notes
    claim. It is a schema version, not the module version, and it does not move
    just because the module version moves.

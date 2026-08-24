@@ -1,9 +1,9 @@
 // Package token implements deterministic (HMAC-SHA256) and probabilistic
 // (Bloom filter) tokenization plus the comparison primitives Equal,
-// DicePerField, Score, Match, and MatchCLK.
+// DicePerField, Match, and MatchCLK.
 //
-// Most callers want Match — it wraps DicePerField + Score and returns the
-// thresholded decision in one call. When per-field scores are not required,
+// Most callers want Match. It wraps DicePerField, weights the result by
+// the FieldSet and returns the thresholded decision in one call. When per-field scores are not required,
 // TokenizeCLK plus MatchCLK is the recommended way to share tokens: a CLK
 // folds the whole record into one filter and reveals no per-field structure.
 // Even simpler: package session bundles a Tokenizer with a FieldSet so you
