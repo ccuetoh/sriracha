@@ -79,7 +79,7 @@ func TestRun(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		assert.Equal(t, "0.1", res.FieldSetVersion)
+		assert.Equal(t, "0.2", res.FieldSetVersion)
 		assert.NotEmpty(t, res.FieldSetFingerprint)
 		assert.Equal(t, len(records), res.Counts.Records)
 		assert.Equal(t, 4, res.Counts.Positives)
