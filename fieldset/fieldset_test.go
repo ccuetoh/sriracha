@@ -169,94 +169,57 @@ func TestValidate(t *testing.T) {
 			errContains: "NgramSizes[0]",
 		},
 		{
-			name: "BloomFlipProbabilityNegative",
+			name: "BalancedOddSizeBits",
 			fs: sriracha.FieldSet{
 				Version: "0.1",
 				ProbabilisticParams: sriracha.ProbabilisticConfig{
-					SizeBits:        1024,
-					HashCount:       2,
-					NgramSizes:      []int{2, 3},
-					FlipProbability: -0.01,
+					SizeBits:   1023,
+					HashCount:  2,
+					NgramSizes: []int{2, 3},
+					Balanced:   true,
 				},
 			},
 			wantErr:     true,
-			errContains: "FlipProbability",
+			errContains: "even when Balanced",
 		},
 		{
-			name: "BloomFlipProbabilityOne",
+			name: "UnbalancedOddSizeBitsValid",
 			fs: sriracha.FieldSet{
 				Version: "0.1",
 				ProbabilisticParams: sriracha.ProbabilisticConfig{
-					SizeBits:        1024,
-					HashCount:       2,
-					NgramSizes:      []int{2, 3},
-					FlipProbability: 1.0,
+					SizeBits:   1023,
+					HashCount:  2,
+					NgramSizes: []int{2, 3},
 				},
 			},
-			wantErr:     true,
-			errContains: "FlipProbability",
+			wantErr: false,
 		},
 		{
-			name: "BloomFlipProbabilityAboveOne",
+			name: "BalancedEvenSizeBitsValid",
 			fs: sriracha.FieldSet{
 				Version: "0.1",
 				ProbabilisticParams: sriracha.ProbabilisticConfig{
-					SizeBits:        1024,
-					HashCount:       2,
-					NgramSizes:      []int{2, 3},
-					FlipProbability: 1.5,
+					SizeBits:   1024,
+					HashCount:  2,
+					NgramSizes: []int{2, 3},
+					Balanced:   true,
 				},
 			},
-			wantErr:     true,
-			errContains: "FlipProbability",
+			wantErr: false,
 		},
 		{
-			name: "BloomFlipProbabilityNaN",
-			fs: sriracha.FieldSet{
-				Version: "0.1",
-				ProbabilisticParams: sriracha.ProbabilisticConfig{
-					SizeBits:        1024,
-					HashCount:       2,
-					NgramSizes:      []int{2, 3},
-					FlipProbability: math.NaN(),
-				},
-			},
-			wantErr:     true,
-			errContains: "FlipProbability",
-		},
-		{
-			name: "BloomTargetPopcountEqualsSize",
-			fs: sriracha.FieldSet{
-				Version: "0.1",
-				ProbabilisticParams: sriracha.ProbabilisticConfig{
-					SizeBits:       1024,
-					HashCount:      2,
-					NgramSizes:     []int{2, 3},
-					TargetPopcount: 1024,
-				},
-			},
-			wantErr:     true,
-			errContains: "TargetPopcount",
-		},
-		{
-			name: "BloomTargetPopcountAboveSize",
-			fs: sriracha.FieldSet{
-				Version: "0.1",
-				ProbabilisticParams: sriracha.ProbabilisticConfig{
-					SizeBits:       1024,
-					HashCount:      2,
-					NgramSizes:     []int{2, 3},
-					TargetPopcount: 4096,
-				},
-			},
-			wantErr:     true,
-			errContains: "TargetPopcount",
-		},
-		{
-			name: "BloomHardenedConfigValid",
+			name: "FastPresetValid",
 			fs: sriracha.FieldSet{
 				Version:             "0.1",
-				ProbabilisticParams: sriracha.HardenedProbabilisticConfig(),
+				ProbabilisticParams: sriracha.FastProbabilisticConfig(),
+			},
+			wantErr: false,
+		},
+		{
+			name: "HighPrecisionPresetValid",
+			fs: sriracha.FieldSet{
+				Version:             "0.1",
+				ProbabilisticParams: sriracha.HighPrecisionProbabilisticConfig(),
 			},
 			wantErr: false,
 		},
@@ -299,7 +262,9 @@ func TestDefaultFieldSetContents(t *testing.T) {
 			assert.Equalf(t, want, got, "field %s weight", path)
 		}
 	}
-	assert.Equal(t, uint32(2048), fs.ProbabilisticParams.SizeBits)
+	assert.Equal(t, "0.2", fs.Version)
+	assert.Equal(t, sriracha.DefaultProbabilisticConfig(), fs.ProbabilisticParams)
+	assert.False(t, fs.ProbabilisticParams.Balanced, "the default schema uses unbalanced per-field filters; CLK balances on its own")
 }
 
 func TestDefaultFieldSet_IsCopy(t *testing.T) {

@@ -11,9 +11,57 @@ change in any release.
 
 ### Added
 
+- **Breaking wire format, token format v2.** Tokens now carry a `format`
+  discriminator (`sriracha/det/2`, `sriracha/bloom/2`, `sriracha/clk/2`)
+  that `Equal`, `DicePerField`, `Match`, and `MatchCLK` check before
+  comparing. v0.1 tokens and fingerprints are incompatible with this
+  release and all parties must re-tokenize with the same version.
+- Record-level CLK tokens. `TokenizeCLK` pools every present field into one
+  balanced Bloom filter and `MatchCLK` scores two of them. CLK is the
+  recommended form for sharing tokens when per-field scores are not
+  required, since it exposes no per-field structure, popcounts, or
+  presence pattern.
+- Golden vector tests that fail on any byte-level drift of normalization
+  or token derivation.
 - `token.ErrDestroyed`, returned by all tokenize methods once `Destroy` has
   been called. Previously a destroyed tokenizer could silently emit tokens
   keyed with an empty secret.
+
+### Changed (breaking)
+
+- Balanced filters replace BLIP and popcount padding. A balanced filter is
+  built at `SizeBits/2`, extended with its complement, and permuted with a
+  secret-keyed bijection, so the emitted popcount is exactly `SizeBits/2`
+  and leaks nothing about the value. CLK tokens are always balanced.
+  Per-field filters default to unbalanced, because balancing compresses
+  per-field Dice onto value-dependent baselines and measurably degrades
+  weighted multi-field matching; `ProbabilisticConfig.Balanced` opts a
+  per-field configuration in. `FlipProbability`, `TargetPopcount`, and
+  `HardenedProbabilisticConfig` are removed. Identical values still produce
+  identical filters and remain linkable; no differential privacy is
+  claimed.
+- Presets rebuilt. Fast is 512 bits with 2-grams and 2 hashes, Default is
+  1024 bits with 2- and 3-grams and 3 hashes, HighPrecision is 2048 bits
+  with 2- and 3-grams and 5 hashes.
+- Bloom positions derive from one HMAC per gram using double hashing
+  instead of `HashCount` separate HMAC calls, cutting tokenization crypto
+  cost by roughly the hash count.
+- Q-grams are padded with boundary underscores, so one-rune values now
+  produce grams and edge characters carry positional context.
+- The HMAC secret is expanded with HKDF-SHA256 into per-purpose subkeys
+  for deterministic tokens, Bloom hashing, and the balance permutation.
+- Absent optional fields in probabilistic tokens serialize as null instead
+  of full-size all-zero filters, shrinking typical token JSON by more than
+  half. Asymmetric absence still scores 0 at full weight.
+- Normalization strips Unicode format characters (zero width space and
+  joiner, bidi marks, soft hyphen) in every field, and name-field
+  diacritic stripping now applies only to marks on Latin base characters,
+  so Thai, Vietnamese base runes, Arabic, and Indic names keep their
+  distinguishing marks.
+- `FieldSet.Fingerprint` canonical encoding replaces the hardening
+  trailers with a `Balanced` flag. Persisted fingerprints must be
+  regenerated.
+- The canonical `DefaultFieldSet` version is now `0.2`.
 
 ### Changed
 

@@ -23,6 +23,13 @@ type MatchResult struct {
 	ComparableFields int                  `json:"comparable_fields"`
 }
 
+// CLKMatchResult holds the output of MatchCLK: the Dice score between the
+// two record-level filters and the threshold decision.
+type CLKMatchResult struct {
+	Score   float64 `json:"score"`
+	IsMatch bool    `json:"is_match"`
+}
+
 // ScoreFor returns the per-field Dice score for path along with true if the
 // path appears in the result. Paths with zero or negative weight that were
 // dropped from the weighted average still appear here with their raw Dice
@@ -47,11 +54,14 @@ func (r MatchResult) ByPath() map[sriracha.FieldPath]float64 {
 }
 
 // Equal reports whether a and b are bit-identical across every field.
-// It returns false if FieldSetVersion, KeyID, FieldSetFingerprint (when both
-// sides set it), or field count differ. A field that is nil on one side and
-// non-nil (or differently-sized) on the other compares unequal. Per-field
-// byte comparison is constant-time.
+// It returns false if Format, FieldSetVersion, KeyID, FieldSetFingerprint
+// (when both sides set it), or field count differ. A field that is nil on
+// one side and non-nil (or differently-sized) on the other compares unequal.
+// Per-field byte comparison is constant-time.
 func Equal(a, b sriracha.DeterministicToken) bool {
+	if a.Format != b.Format {
+		return false
+	}
 	if a.FieldSetVersion != b.FieldSetVersion {
 		return false
 	}
@@ -82,15 +92,22 @@ func Equal(a, b sriracha.DeterministicToken) bool {
 
 // DicePerField returns the Sørensen–Dice coefficient between corresponding
 // fields of a and b. The result is one score in [0, 1] per field, in FieldSet
-// order. A field with an all-zero filter on either side scores 0.
+// order. A field that is nil on either side scores 0: nil on both sides means
+// both records lack the field, nil on one side is an asymmetric absence, and
+// either way there is no overlap to score.
 //
-// Returns an error if FieldSetVersion, KeyID, FieldSetFingerprint (when both
-// sides set it), ProbabilisticParams, or field count differ — scores would not be
-// comparable.
+// Returns an error if Format, FieldSetVersion, KeyID, FieldSetFingerprint
+// (when both sides set it), ProbabilisticParams, or field count differ —
+// scores would not be comparable. The Format check runs first, so tokens
+// from a different wire generation fail before any other comparison.
+// Byte lengths are checked only when both sides of a field are non-nil.
 //
 // Most callers want Match — it wraps DicePerField + Score and returns the
 // thresholded decision.
 func DicePerField(a, b sriracha.ProbabilisticToken) ([]float64, error) {
+	if a.Format != b.Format {
+		return nil, fmt.Errorf("token: Format mismatch: %q vs %q", a.Format, b.Format)
+	}
 	if a.FieldSetVersion != b.FieldSetVersion {
 		return nil, fmt.Errorf("token: FieldSetVersion mismatch: %q vs %q", a.FieldSetVersion, b.FieldSetVersion)
 	}
@@ -110,6 +127,9 @@ func DicePerField(a, b sriracha.ProbabilisticToken) ([]float64, error) {
 	scores := make([]float64, len(a.Fields))
 	for i := range a.Fields {
 		ai, bi := a.Fields[i], b.Fields[i]
+		if ai == nil || bi == nil {
+			continue
+		}
 		if len(ai) != len(bi) {
 			return nil, fmt.Errorf("token: field %d byte length mismatch: %d vs %d", i, len(ai), len(bi))
 		}
@@ -120,14 +140,12 @@ func DicePerField(a, b sriracha.ProbabilisticToken) ([]float64, error) {
 
 // bloomParamsEqual reports whether two ProbabilisticConfig values are field-for-field
 // identical. ProbabilisticConfig contains a []int (NgramSizes) and so is not comparable
-// with ==. FlipProbability and TargetPopcount drive the hardening transforms in
-// tokenizeFieldBloom; tokens produced with different values are not statistically
-// comparable, so they must match here.
+// with ==. Balanced changes the filter construction entirely, so tokens
+// produced with different values are not comparable and must match here.
 func bloomParamsEqual(a, b sriracha.ProbabilisticConfig) bool {
 	return a.SizeBits == b.SizeBits &&
 		a.HashCount == b.HashCount &&
-		a.FlipProbability == b.FlipProbability &&
-		a.TargetPopcount == b.TargetPopcount &&
+		a.Balanced == b.Balanced &&
 		slices.Equal(a.NgramSizes, b.NgramSizes)
 }
 
@@ -155,20 +173,22 @@ func Score(perField []float64, fs sriracha.FieldSet) (float64, error) {
 	return sum / totalW, nil
 }
 
-// Match is the canonical entry point for probabilistic comparison: it wraps
-// DicePerField + Score and returns the threshold decision in a single call.
+// Match is the canonical entry point for per-field probabilistic comparison:
+// it wraps DicePerField + Score and returns the threshold decision in a
+// single call. When per-field scores are not required, prefer MatchCLK over
+// CLK tokens, which reveal no per-field structure.
 //
 // Match compares a and b under fs and returns per-field Dice scores, the
-// weighted aggregate, and a threshold decision. Fields with all-zero filters
-// on both sides are treated as absent and drop from the weighted average;
-// asymmetric absence (zero on one side, populated on the other) keeps its
-// score of 0 and counts as a real mismatch signal.
+// weighted aggregate, and a threshold decision. Fields with nil filters on
+// both sides are treated as absent and drop from the weighted average;
+// asymmetric absence (nil on one side, populated on the other) keeps its
+// score of 0 at full weight and counts as a real mismatch signal.
 //
 // If every field is both-absent (or zero-weighted), the returned MatchResult
 // has Score=0, IsMatch=false, ComparableFields=0 — never an error. The error
-// return is reserved for genuine mismatches: threshold out of range, version /
-// key / fingerprint / params drift, or field-count disagreement between the
-// tokens and fs.
+// return is reserved for genuine mismatches: threshold out of range, format /
+// version / key / fingerprint / params drift, or field-count disagreement
+// between the tokens and fs.
 func Match(a, b sriracha.ProbabilisticToken, fs sriracha.FieldSet, threshold float64) (MatchResult, error) {
 	if !(threshold >= 0 && threshold <= 1) {
 		return MatchResult{}, fmt.Errorf("token: threshold must be in [0,1], got %v", threshold)
@@ -187,7 +207,7 @@ func Match(a, b sriracha.ProbabilisticToken, fs sriracha.FieldSet, threshold flo
 	for i, spec := range fs.Fields {
 		paths[i] = spec.Path
 		w := spec.Weight
-		if w <= 0 || (allZero(a.Fields[i]) && allZero(b.Fields[i])) {
+		if w <= 0 || (a.Fields[i] == nil && b.Fields[i] == nil) {
 			continue
 		}
 		sum += w * perField[i]
@@ -208,14 +228,41 @@ func Match(a, b sriracha.ProbabilisticToken, fs sriracha.FieldSet, threshold flo
 	}, nil
 }
 
-// allZero reports whether b is empty or all-zero bytes.
-func allZero(b []byte) bool {
-	for _, v := range b {
-		if v != 0 {
-			return false
-		}
+// MatchCLK compares two record-level CLK tokens and returns the Dice score
+// with a threshold decision. It validates the threshold (NaN and
+// out-of-range values are rejected), then Format, FieldSetVersion, KeyID,
+// FieldSetFingerprint (when both sides set it), ProbabilisticParams, and
+// filter byte length, in that order; any mismatch returns an error because
+// the scores would not be comparable.
+//
+// Note that balanced filters lift the Dice score of unrelated records well
+// above 0, toward a floor of about 0.5, so thresholds calibrated for
+// unbalanced or per-field tokens do not transfer directly.
+func MatchCLK(a, b sriracha.CLKToken, threshold float64) (CLKMatchResult, error) {
+	if !(threshold >= 0 && threshold <= 1) {
+		return CLKMatchResult{}, fmt.Errorf("token: threshold must be in [0,1], got %v", threshold)
 	}
-	return true
+	if a.Format != b.Format {
+		return CLKMatchResult{}, fmt.Errorf("token: Format mismatch: %q vs %q", a.Format, b.Format)
+	}
+	if a.FieldSetVersion != b.FieldSetVersion {
+		return CLKMatchResult{}, fmt.Errorf("token: FieldSetVersion mismatch: %q vs %q", a.FieldSetVersion, b.FieldSetVersion)
+	}
+	if a.KeyID != b.KeyID {
+		return CLKMatchResult{}, fmt.Errorf("token: KeyID mismatch: %q vs %q", a.KeyID, b.KeyID)
+	}
+	if a.FieldSetFingerprint != "" && b.FieldSetFingerprint != "" &&
+		a.FieldSetFingerprint != b.FieldSetFingerprint {
+		return CLKMatchResult{}, fmt.Errorf("token: FieldSetFingerprint mismatch: %q vs %q", a.FieldSetFingerprint, b.FieldSetFingerprint)
+	}
+	if !bloomParamsEqual(a.ProbabilisticParams, b.ProbabilisticParams) {
+		return CLKMatchResult{}, fmt.Errorf("token: ProbabilisticParams mismatch")
+	}
+	if len(a.Filter) != len(b.Filter) {
+		return CLKMatchResult{}, fmt.Errorf("token: filter byte length mismatch: %d vs %d", len(a.Filter), len(b.Filter))
+	}
+	score := dice(a.Filter, b.Filter)
+	return CLKMatchResult{Score: score, IsMatch: score >= threshold}, nil
 }
 
 // dice computes the Sørensen–Dice coefficient over two equal-length bit-packed

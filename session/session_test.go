@@ -67,6 +67,42 @@ func TestSession_TokenizeAndMatch(t *testing.T) {
 	assert.Equal(t, 2, res.ComparableFields)
 }
 
+func TestSession_TokenizeCLKAndMatchCLK(t *testing.T) {
+	t.Parallel()
+	s := newSess(t)
+
+	a, err := s.TokenizeCLK(sriracha.RawRecord{
+		sriracha.FieldNameGiven:  "Christopher",
+		sriracha.FieldNameFamily: "Smith",
+	})
+	require.NoError(t, err)
+	b, err := s.TokenizeCLK(sriracha.RawRecord{
+		sriracha.FieldNameGiven:  "Christopher",
+		sriracha.FieldNameFamily: "Smith",
+	})
+	require.NoError(t, err)
+
+	res, err := s.MatchCLK(a, b, 0.9)
+	require.NoError(t, err)
+	assert.True(t, res.IsMatch)
+	assert.InDelta(t, 1.0, res.Score, 1e-9)
+
+	want := s.FieldSet().Fingerprint()
+	assert.Equal(t, want, a.FieldSetFingerprint,
+		"session.TokenizeCLK must stamp the cached fingerprint")
+}
+
+func TestSession_TokenizeCLKErrorReturnsEmptyToken(t *testing.T) {
+	t.Parallel()
+	s := newSess(t)
+
+	// Missing required field means the underlying tokenizer errors; the
+	// session must not stamp the fingerprint onto an error result.
+	clk, err := s.TokenizeCLK(sriracha.RawRecord{})
+	require.Error(t, err)
+	assert.Empty(t, clk.FieldSetFingerprint, "error path must not stamp fingerprint")
+}
+
 func TestSession_DeterministicEqual(t *testing.T) {
 	t.Parallel()
 	s := newSess(t)

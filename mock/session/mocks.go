@@ -243,6 +243,138 @@ func (_c *MockSession_Match_Call) RunAndReturn(run func(a sriracha.Probabilistic
 	return _c
 }
 
+// MatchCLK provides a mock function for the type MockSession
+func (_mock *MockSession) MatchCLK(a sriracha.CLKToken, b sriracha.CLKToken, threshold float64) (token.CLKMatchResult, error) {
+	ret := _mock.Called(a, b, threshold)
+
+	if len(ret) == 0 {
+		panic("no return value specified for MatchCLK")
+	}
+
+	var r0 token.CLKMatchResult
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(sriracha.CLKToken, sriracha.CLKToken, float64) (token.CLKMatchResult, error)); ok {
+		return returnFunc(a, b, threshold)
+	}
+	if returnFunc, ok := ret.Get(0).(func(sriracha.CLKToken, sriracha.CLKToken, float64) token.CLKMatchResult); ok {
+		r0 = returnFunc(a, b, threshold)
+	} else {
+		r0 = ret.Get(0).(token.CLKMatchResult)
+	}
+	if returnFunc, ok := ret.Get(1).(func(sriracha.CLKToken, sriracha.CLKToken, float64) error); ok {
+		r1 = returnFunc(a, b, threshold)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockSession_MatchCLK_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MatchCLK'
+type MockSession_MatchCLK_Call struct {
+	*mock.Call
+}
+
+// MatchCLK is a helper method to define mock.On call
+//   - a sriracha.CLKToken
+//   - b sriracha.CLKToken
+//   - threshold float64
+func (_e *MockSession_Expecter) MatchCLK(a interface{}, b interface{}, threshold interface{}) *MockSession_MatchCLK_Call {
+	return &MockSession_MatchCLK_Call{Call: _e.mock.On("MatchCLK", a, b, threshold)}
+}
+
+func (_c *MockSession_MatchCLK_Call) Run(run func(a sriracha.CLKToken, b sriracha.CLKToken, threshold float64)) *MockSession_MatchCLK_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 sriracha.CLKToken
+		if args[0] != nil {
+			arg0 = args[0].(sriracha.CLKToken)
+		}
+		var arg1 sriracha.CLKToken
+		if args[1] != nil {
+			arg1 = args[1].(sriracha.CLKToken)
+		}
+		var arg2 float64
+		if args[2] != nil {
+			arg2 = args[2].(float64)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockSession_MatchCLK_Call) Return(cLKMatchResult token.CLKMatchResult, err error) *MockSession_MatchCLK_Call {
+	_c.Call.Return(cLKMatchResult, err)
+	return _c
+}
+
+func (_c *MockSession_MatchCLK_Call) RunAndReturn(run func(a sriracha.CLKToken, b sriracha.CLKToken, threshold float64) (token.CLKMatchResult, error)) *MockSession_MatchCLK_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// TokenizeCLK provides a mock function for the type MockSession
+func (_mock *MockSession) TokenizeCLK(record sriracha.RawRecord) (sriracha.CLKToken, error) {
+	ret := _mock.Called(record)
+
+	if len(ret) == 0 {
+		panic("no return value specified for TokenizeCLK")
+	}
+
+	var r0 sriracha.CLKToken
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(sriracha.RawRecord) (sriracha.CLKToken, error)); ok {
+		return returnFunc(record)
+	}
+	if returnFunc, ok := ret.Get(0).(func(sriracha.RawRecord) sriracha.CLKToken); ok {
+		r0 = returnFunc(record)
+	} else {
+		r0 = ret.Get(0).(sriracha.CLKToken)
+	}
+	if returnFunc, ok := ret.Get(1).(func(sriracha.RawRecord) error); ok {
+		r1 = returnFunc(record)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockSession_TokenizeCLK_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TokenizeCLK'
+type MockSession_TokenizeCLK_Call struct {
+	*mock.Call
+}
+
+// TokenizeCLK is a helper method to define mock.On call
+//   - record sriracha.RawRecord
+func (_e *MockSession_Expecter) TokenizeCLK(record interface{}) *MockSession_TokenizeCLK_Call {
+	return &MockSession_TokenizeCLK_Call{Call: _e.mock.On("TokenizeCLK", record)}
+}
+
+func (_c *MockSession_TokenizeCLK_Call) Run(run func(record sriracha.RawRecord)) *MockSession_TokenizeCLK_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 sriracha.RawRecord
+		if args[0] != nil {
+			arg0 = args[0].(sriracha.RawRecord)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockSession_TokenizeCLK_Call) Return(cLKToken sriracha.CLKToken, err error) *MockSession_TokenizeCLK_Call {
+	_c.Call.Return(cLKToken, err)
+	return _c
+}
+
+func (_c *MockSession_TokenizeCLK_Call) RunAndReturn(run func(record sriracha.RawRecord) (sriracha.CLKToken, error)) *MockSession_TokenizeCLK_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // TokenizeDeterministic provides a mock function for the type MockSession
 func (_mock *MockSession) TokenizeDeterministic(record sriracha.RawRecord) (sriracha.DeterministicToken, error) {
 	ret := _mock.Called(record)

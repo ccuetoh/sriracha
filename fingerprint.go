@@ -11,8 +11,7 @@ import (
 // Fingerprint returns the lowercase hex-encoded SHA-256 of a canonical encoding
 // of fs. Two FieldSets with identical schemas produce identical fingerprints;
 // any change to Version, field path, ordering, Required, Weight, or any
-// ProbabilisticParams component (including the FlipProbability and
-// TargetPopcount hardening parameters) changes it.
+// ProbabilisticParams component (including the Balanced flag) changes it.
 //
 // The canonical encoding (big-endian throughout, matching the length-prefix
 // convention used by the token package) is:
@@ -27,14 +26,13 @@ import (
 //	u32(uint32(ProbabilisticParams.HashCount))
 //	u32(len(ProbabilisticParams.NgramSizes))
 //	for each NgramSize: u32(int32(size))
-//	u64(math.Float64bits(ProbabilisticParams.FlipProbability))
-//	u32(ProbabilisticParams.TargetPopcount)
+//	u8(ProbabilisticParams.Balanced: 0 or 1)
 //
 // This spec is locked: any change to the encoding is a breaking on-the-wire
-// change, must bump the FieldSet Version. The FlipProbability / TargetPopcount
-// trailers were appended in the v0.1 series after the initial release shipped
-// without them; persisted fingerprints from prior versions will not match
-// values produced by this version even for unchanged FieldSets.
+// change, must bump the FieldSet Version. The v0.2 release replaced the
+// FlipProbability and TargetPopcount trailers with the Balanced flag, so
+// fingerprints persisted by the v0.1 series will not match values produced by
+// this version even for unchanged FieldSets.
 func (fs FieldSet) Fingerprint() string {
 	h := sha256.New()
 	var b [8]byte
@@ -65,10 +63,11 @@ func (fs FieldSet) Fingerprint() string {
 		binary.BigEndian.PutUint32(b[:4], uint32(sz)) //nolint:gosec // G115: NgramSizes bounded at validation time
 		h.Write(b[:4])
 	}
-	binary.BigEndian.PutUint64(b[:8], math.Float64bits(fs.ProbabilisticParams.FlipProbability))
-	h.Write(b[:8])
-	binary.BigEndian.PutUint32(b[:4], fs.ProbabilisticParams.TargetPopcount)
-	h.Write(b[:4])
+	if fs.ProbabilisticParams.Balanced {
+		h.Write([]byte{1})
+	} else {
+		h.Write([]byte{0})
+	}
 
 	return hex.EncodeToString(h.Sum(nil))
 }

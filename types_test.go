@@ -12,35 +12,26 @@ func TestProbabilisticConfigs(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name      string
-		cfg       ProbabilisticConfig
-		sizeBits  uint32
-		hashCount int
+		name       string
+		cfg        ProbabilisticConfig
+		sizeBits   uint32
+		ngramSizes []int
+		hashCount  int
 	}{
-		{"Fast", FastProbabilisticConfig(), 1024, 2},
-		{"Default", DefaultProbabilisticConfig(), 2048, 3},
-		{"HighPrecision", HighPrecisionProbabilisticConfig(), 4096, 5},
+		{"Fast", FastProbabilisticConfig(), 512, []int{2}, 2},
+		{"Default", DefaultProbabilisticConfig(), 1024, []int{2, 3}, 3},
+		{"HighPrecision", HighPrecisionProbabilisticConfig(), 2048, []int{2, 3}, 5},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, tc.sizeBits, tc.cfg.SizeBits, "SizeBits")
-			assert.Equal(t, []int{2, 3}, tc.cfg.NgramSizes, "NgramSizes")
+			assert.Equal(t, tc.ngramSizes, tc.cfg.NgramSizes, "NgramSizes")
 			assert.Equal(t, tc.hashCount, tc.cfg.HashCount, "HashCount")
-			assert.Zero(t, tc.cfg.FlipProbability, "preset must not enable BLIP")
-			assert.Zero(t, tc.cfg.TargetPopcount, "preset must not enable balancing")
+			assert.False(t, tc.cfg.Balanced, "presets default to unbalanced per-field filters")
+			assert.Zero(t, tc.cfg.SizeBits%2, "presets must use an even SizeBits so CLK can balance them")
 		})
 	}
-}
-
-func TestHardenedProbabilisticConfig(t *testing.T) {
-	t.Parallel()
-	cfg := HardenedProbabilisticConfig()
-	assert.Equal(t, uint32(2048), cfg.SizeBits, "SizeBits matches Default")
-	assert.Equal(t, []int{2, 3}, cfg.NgramSizes, "NgramSizes matches Default")
-	assert.Equal(t, 3, cfg.HashCount, "HashCount matches Default")
-	assert.InDelta(t, 0.02, cfg.FlipProbability, 1e-12, "FlipProbability=0.02")
-	assert.Equal(t, uint32(400), cfg.TargetPopcount, "TargetPopcount=400")
 }
 
 func TestDeterministicToken_JSON(t *testing.T) {
@@ -54,7 +45,8 @@ func TestDeterministicToken_JSON(t *testing.T) {
 			name: "RoundTrip",
 			run: func(t *testing.T) {
 				orig := DeterministicToken{
-					FieldSetVersion:     "0.1",
+					Format:              TokenFormatDeterministic,
+					FieldSetVersion:     "0.2",
 					KeyID:               "k1",
 					FieldSetFingerprint: "deadbeef",
 					Fields:              [][]byte{{0x01, 0x02}, nil, {}},
@@ -63,6 +55,7 @@ func TestDeterministicToken_JSON(t *testing.T) {
 				require.NoError(t, err)
 				var got DeterministicToken
 				require.NoError(t, json.Unmarshal(data, &got))
+				assert.Equal(t, orig.Format, got.Format)
 				assert.Equal(t, orig.FieldSetVersion, got.FieldSetVersion)
 				assert.Equal(t, orig.KeyID, got.KeyID)
 				assert.Equal(t, orig.FieldSetFingerprint, got.FieldSetFingerprint)
@@ -75,11 +68,12 @@ func TestDeterministicToken_JSON(t *testing.T) {
 		{
 			name: "EmptyKeyOmitted",
 			run: func(t *testing.T) {
-				orig := DeterministicToken{FieldSetVersion: "0.1", Fields: [][]byte{{0x01}}}
+				orig := DeterministicToken{FieldSetVersion: "0.2", Fields: [][]byte{{0x01}}}
 				data, err := json.Marshal(orig)
 				require.NoError(t, err)
 				assert.NotContains(t, string(data), "key_id")
 				assert.NotContains(t, string(data), "field_set_fingerprint")
+				assert.Contains(t, string(data), `"format"`, "format is not omitempty")
 			},
 		},
 		{
@@ -110,7 +104,7 @@ func TestDeterministicToken_JSON(t *testing.T) {
 func TestProbabilisticToken_JSON(t *testing.T) {
 	t.Parallel()
 
-	cfg := ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2, 3}, HashCount: 2}
+	cfg := ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2, 3}, HashCount: 2, Balanced: true}
 	cases := []struct {
 		name string
 		run  func(t *testing.T)
@@ -119,7 +113,8 @@ func TestProbabilisticToken_JSON(t *testing.T) {
 			name: "RoundTrip",
 			run: func(t *testing.T) {
 				orig := ProbabilisticToken{
-					FieldSetVersion:     "0.1",
+					Format:              TokenFormatProbabilistic,
+					FieldSetVersion:     "0.2",
 					KeyID:               "k1",
 					FieldSetFingerprint: "cafebabe",
 					ProbabilisticParams: cfg,
@@ -129,20 +124,32 @@ func TestProbabilisticToken_JSON(t *testing.T) {
 				require.NoError(t, err)
 				var got ProbabilisticToken
 				require.NoError(t, json.Unmarshal(data, &got))
+				assert.Equal(t, orig.Format, got.Format)
 				assert.Equal(t, orig.FieldSetVersion, got.FieldSetVersion)
 				assert.Equal(t, orig.KeyID, got.KeyID)
 				assert.Equal(t, orig.FieldSetFingerprint, got.FieldSetFingerprint)
 				assert.Equal(t, orig.ProbabilisticParams, got.ProbabilisticParams)
+				assert.True(t, got.ProbabilisticParams.Balanced, "Balanced must survive the round trip")
 				require.Len(t, got.Fields, 2)
 				assert.Equal(t, []byte{0xff, 0x00}, got.Fields[0])
-				assert.Nil(t, got.Fields[1])
+				assert.Nil(t, got.Fields[1], "absent fields must stay nil through JSON")
+			},
+		},
+		{
+			name: "UnbalancedOmitsFlag",
+			run: func(t *testing.T) {
+				plain := cfg
+				plain.Balanced = false
+				data, err := json.Marshal(ProbabilisticToken{ProbabilisticParams: plain})
+				require.NoError(t, err)
+				assert.NotContains(t, string(data), "balanced", "Balanced=false must be omitted")
 			},
 		},
 		{
 			name: "BadBase64Rejected",
 			run: func(t *testing.T) {
 				var got ProbabilisticToken
-				err := json.Unmarshal([]byte(`{"field_set_version":"0.1","probabilistic_params":{},"fields":["not!valid!base64!"]}`), &got)
+				err := json.Unmarshal([]byte(`{"field_set_version":"0.2","probabilistic_params":{},"fields":["not!valid!base64!"]}`), &got)
 				require.Error(t, err)
 			},
 		},
@@ -151,6 +158,67 @@ func TestProbabilisticToken_JSON(t *testing.T) {
 			run: func(t *testing.T) {
 				var got ProbabilisticToken
 				err := json.Unmarshal([]byte(`not json`), &got)
+				require.Error(t, err)
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tc.run(t)
+		})
+	}
+}
+
+func TestCLKToken_JSON(t *testing.T) {
+	t.Parallel()
+
+	cfg := ProbabilisticConfig{SizeBits: 1024, NgramSizes: []int{2, 3}, HashCount: 3, Balanced: true}
+	cases := []struct {
+		name string
+		run  func(t *testing.T)
+	}{
+		{
+			name: "RoundTrip",
+			run: func(t *testing.T) {
+				orig := CLKToken{
+					Format:              TokenFormatCLK,
+					FieldSetVersion:     "0.2",
+					KeyID:               "k1",
+					FieldSetFingerprint: "cafebabe",
+					ProbabilisticParams: cfg,
+					Filter:              []byte{0xff, 0x00, 0x2a},
+				}
+				data, err := json.Marshal(orig)
+				require.NoError(t, err)
+				var got CLKToken
+				require.NoError(t, json.Unmarshal(data, &got))
+				assert.Equal(t, orig, got)
+			},
+		},
+		{
+			name: "EmptyKeyOmitted",
+			run: func(t *testing.T) {
+				data, err := json.Marshal(CLKToken{Format: TokenFormatCLK, FieldSetVersion: "0.2"})
+				require.NoError(t, err)
+				assert.NotContains(t, string(data), "key_id")
+				assert.NotContains(t, string(data), "field_set_fingerprint")
+				assert.Contains(t, string(data), `"format"`)
+			},
+		},
+		{
+			name: "BadBase64Rejected",
+			run: func(t *testing.T) {
+				var got CLKToken
+				err := json.Unmarshal([]byte(`{"format":"sriracha/clk/2","filter":"not!valid!base64!"}`), &got)
+				require.Error(t, err)
+			},
+		},
+		{
+			name: "MalformedJSONRejected",
+			run: func(t *testing.T) {
+				var got CLKToken
+				err := json.Unmarshal([]byte(`{broken`), &got)
 				require.Error(t, err)
 			},
 		},
@@ -194,16 +262,16 @@ func TestAnnotate(t *testing.T) {
 		assert.Equal(t, 0, got.Fields[1].ByteCount)
 	})
 
-	t.Run("BloomZeroFilterIsAbsent", func(t *testing.T) {
+	t.Run("BloomNilFilterIsAbsent", func(t *testing.T) {
 		t.Parallel()
 		tr := ProbabilisticToken{
 			FieldSetVersion: "v1",
-			Fields:          [][]byte{{0x01}, {0x00, 0x00}},
+			Fields:          [][]byte{{0x01}, nil},
 		}
 		got := tr.Annotate(fs)
 		require.Len(t, got.Fields, 2)
-		assert.True(t, got.Fields[0].Present, "non-zero filter is present")
-		assert.False(t, got.Fields[1].Present, "all-zero filter must be reported absent")
+		assert.True(t, got.Fields[0].Present, "populated filter is present")
+		assert.False(t, got.Fields[1].Present, "nil filter must be reported absent")
 	})
 
 	t.Run("MismatchedLengths", func(t *testing.T) {

@@ -69,6 +69,72 @@ func (_c *MockTokenizer_Destroy_Call) RunAndReturn(run func()) *MockTokenizer_De
 	return _c
 }
 
+// TokenizeCLK provides a mock function for the type MockTokenizer
+func (_mock *MockTokenizer) TokenizeCLK(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.CLKToken, error) {
+	ret := _mock.Called(record, fs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for TokenizeCLK")
+	}
+
+	var r0 sriracha.CLKToken
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(sriracha.RawRecord, sriracha.FieldSet) (sriracha.CLKToken, error)); ok {
+		return returnFunc(record, fs)
+	}
+	if returnFunc, ok := ret.Get(0).(func(sriracha.RawRecord, sriracha.FieldSet) sriracha.CLKToken); ok {
+		r0 = returnFunc(record, fs)
+	} else {
+		r0 = ret.Get(0).(sriracha.CLKToken)
+	}
+	if returnFunc, ok := ret.Get(1).(func(sriracha.RawRecord, sriracha.FieldSet) error); ok {
+		r1 = returnFunc(record, fs)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockTokenizer_TokenizeCLK_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TokenizeCLK'
+type MockTokenizer_TokenizeCLK_Call struct {
+	*mock.Call
+}
+
+// TokenizeCLK is a helper method to define mock.On call
+//   - record sriracha.RawRecord
+//   - fs sriracha.FieldSet
+func (_e *MockTokenizer_Expecter) TokenizeCLK(record interface{}, fs interface{}) *MockTokenizer_TokenizeCLK_Call {
+	return &MockTokenizer_TokenizeCLK_Call{Call: _e.mock.On("TokenizeCLK", record, fs)}
+}
+
+func (_c *MockTokenizer_TokenizeCLK_Call) Run(run func(record sriracha.RawRecord, fs sriracha.FieldSet)) *MockTokenizer_TokenizeCLK_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 sriracha.RawRecord
+		if args[0] != nil {
+			arg0 = args[0].(sriracha.RawRecord)
+		}
+		var arg1 sriracha.FieldSet
+		if args[1] != nil {
+			arg1 = args[1].(sriracha.FieldSet)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockTokenizer_TokenizeCLK_Call) Return(cLKToken sriracha.CLKToken, err error) *MockTokenizer_TokenizeCLK_Call {
+	_c.Call.Return(cLKToken, err)
+	return _c
+}
+
+func (_c *MockTokenizer_TokenizeCLK_Call) RunAndReturn(run func(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.CLKToken, error)) *MockTokenizer_TokenizeCLK_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // TokenizeDeterministic provides a mock function for the type MockTokenizer
 func (_mock *MockTokenizer) TokenizeDeterministic(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.DeterministicToken, error) {
 	ret := _mock.Called(record, fs)

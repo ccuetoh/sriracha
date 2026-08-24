@@ -33,6 +33,9 @@ func runNormalizeCases(t *testing.T, cases []normalizeCase) {
 			}
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
+			again, err := Normalize(got, tc.path)
+			require.NoError(t, err, "second Normalize call must not error")
+			assert.Equal(t, got, again, "Normalize must be idempotent")
 		})
 	}
 }
@@ -94,6 +97,119 @@ func TestNormalize_Unicode(t *testing.T) {
 			want:  "ab�cd",
 		},
 	})
+}
+
+// TestNormalize_FormatChars covers the stripping of Unicode format
+// characters (category Cf) across field kinds.
+func TestNormalize_FormatChars(t *testing.T) {
+	t.Parallel()
+	runNormalizeCases(t, []normalizeCase{
+		{
+			name:  "ZeroWidthSpaceInName",
+			value: "Jo\u200bse",
+			path:  sriracha.FieldNameGiven,
+			want:  "jose",
+		},
+		{
+			name:  "ZeroWidthJoinerInName",
+			value: "Jo\u200dse",
+			path:  sriracha.FieldNameGiven,
+			want:  "jose",
+		},
+		{
+			name:  "RightToLeftMarkInName",
+			value: "Jose\u200f",
+			path:  sriracha.FieldNameGiven,
+			want:  "jose",
+		},
+		{
+			name:  "SoftHyphenInName",
+			value: "Mu\u00adller",
+			path:  sriracha.FieldNameFamily,
+			want:  "muller",
+		},
+		{
+			name:  "ZeroWidthSpaceInIdentifier",
+			value: "123\u200b456",
+			path:  sriracha.FieldIdentifierNationalID,
+			want:  "123456",
+		},
+		{
+			name:  "OnlyFormatCharsNormalizeToEmpty",
+			value: "\u200b\u200d\u200f\u00ad",
+			path:  sriracha.FieldAddressLocality,
+			want:  "",
+		},
+	})
+}
+
+// TestNormalize_LatinScopedMarks covers the rule that a combining mark is
+// stripped only when its most recent preceding base rune is Latin.
+func TestNormalize_LatinScopedMarks(t *testing.T) {
+	t.Parallel()
+	runNormalizeCases(t, []normalizeCase{
+		{
+			name:  "AccentedLatinStripped",
+			value: "José",
+			path:  sriracha.FieldNameGiven,
+			want:  "jose",
+		},
+		{
+			name:  "PlainLatinUnchanged",
+			value: "Jose",
+			path:  sriracha.FieldNameGiven,
+			want:  "jose",
+		},
+		{
+			name:  "VietnameseLatinStripped",
+			value: "Đặng",
+			path:  sriracha.FieldNameFamily,
+			want:  "đang",
+		},
+		{
+			name:  "ThaiSudaKeepsMarks",
+			value: "สุดา",
+			path:  sriracha.FieldNameGiven,
+			want:  "สุดา",
+		},
+		{
+			name:  "ThaiSidaKeepsMarks",
+			value: "สีดา",
+			path:  sriracha.FieldNameGiven,
+			want:  "สีดา",
+		},
+		{
+			name:  "ArabicKeepsHarakat",
+			value: "عَلِي",
+			path:  sriracha.FieldNameGiven,
+			want:  "عَلِي",
+		},
+		{
+			name:  "MixedLatinThai",
+			value: "José สุดา",
+			path:  sriracha.FieldNameGiven,
+			want:  "jose สุดา",
+		},
+		{
+			name:  "LeadingMarkKept",
+			value: "\u0301abc",
+			path:  sriracha.FieldNameGiven,
+			want:  "\u0301abc",
+		},
+	})
+}
+
+// TestNormalizeThaiDistinct verifies that two Thai names differing only in
+// their vowel marks remain distinct after normalization.
+func TestNormalizeThaiDistinct(t *testing.T) {
+	t.Parallel()
+
+	suda, err := Normalize("สุดา", sriracha.FieldNameGiven)
+	require.NoError(t, err)
+	sida, err := Normalize("สีดา", sriracha.FieldNameGiven)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, suda, sida, "Thai names must keep their combining marks")
 }
 
 // TestNormalize_Date covers the YYYY-MM-DD validator that runs for any date
@@ -297,8 +413,8 @@ func TestNormalize_Phone(t *testing.T) {
 	})
 }
 
-// TestNormalize_Default covers paths with no field-specific transform —
-// only steps 1–4 of the pipeline run.
+// TestNormalize_Default covers paths with no field-specific transform, where
+// only steps 1-5 of the pipeline run.
 func TestNormalize_Default(t *testing.T) {
 	t.Parallel()
 	runNormalizeCases(t, []normalizeCase{
