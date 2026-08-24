@@ -27,11 +27,11 @@ var defaultV02 = sriracha.FieldSet{
 
 // DefaultFieldSet returns a deep copy of the canonical Sriracha FieldSet
 // with all 16 standard fields, versioned "0.2". Its probabilistic
-// parameters come from sriracha.DefaultProbabilisticConfig, so per-field and
-// CLK filters are balanced by default.
+// parameters come from sriracha.DefaultProbabilisticConfig, so per-field
+// filters are unbalanced; CLK tokens are balanced regardless of that setting.
 //
 // Weights are unitless relative magnitudes used as the denominator in the
-// weighted average computed by token.Score. They are not probabilities or
+// weighted average computed by token.Match. They are not probabilities or
 // information-content estimates — only their ratios matter, so doubling
 // every weight produces identical scores. The defaults below are tuned for
 // the typical PPRL trade-off (high-uniqueness identifiers > stable name

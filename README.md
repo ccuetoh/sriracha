@@ -44,10 +44,12 @@ import (
 	"github.com/ccuetoh/sriracha"
 	"github.com/ccuetoh/sriracha/fieldset"
 	"github.com/ccuetoh/sriracha/session"
+	"github.com/ccuetoh/sriracha/token"
 )
 
 func main() {
-	secret := []byte("super-secret-key")
+	// At least token.MinSecretLen (32) bytes, from crypto/rand or a KMS.
+	secret := []byte("demo-secret-32-bytes-of-key-mats")
 
 	s, _ := session.New(secret, fieldset.DefaultFieldSet())
 	defer s.Destroy()
@@ -63,7 +65,7 @@ func main() {
 		sriracha.FieldNameFamily: "Smith",
 	})
 
-	eq := s.Equal(tokA, tokB)
+	eq, _ := s.Equal(tokA, tokB)
 	fmt.Printf("match: %v\n", eq)
 
 	// Probabilistic tokenization
@@ -77,7 +79,7 @@ func main() {
 		sriracha.FieldNameFamily: "Smyth", // typo
 	})
 
-	result, _ := s.Match(bloomA, bloomB, 0.85)
+	result, _ := s.Match(bloomA, bloomB, token.DefaultMatchPolicy(0.85))
 	fmt.Printf("match: %v (score: %.2f)\n", result.IsMatch, result.Score)
 }
 ```

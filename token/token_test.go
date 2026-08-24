@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,12 +15,25 @@ import (
 	"github.com/awnumar/memguard"
 
 	"github.com/ccuetoh/sriracha"
+	"github.com/ccuetoh/sriracha/normalize"
 )
 
-func newTok(t *testing.T, secret string, opts ...Option) Tokenizer {
+// testSecret expands a short label into a secret of MinSecretLen bytes. New
+// rejects anything shorter, and the filler varies with position so distinct
+// labels stay distinct secrets.
+func testSecret(label string) []byte {
+	secret := make([]byte, MinSecretLen)
+	n := copy(secret, label)
+	for i := n; i < len(secret); i++ {
+		secret[i] = byte('a' + (i-n)%26)
+	}
+	return secret
+}
+
+func newTok(t *testing.T, label string, opts ...Option) *Tokenizer {
 	t.Helper()
-	tok, err := New([]byte(secret), opts...)
-	require.NoErrorf(t, err, "New(%q)", secret)
+	tok, err := New(testSecret(label), opts...)
+	require.NoErrorf(t, err, "New(%q)", label)
 	t.Cleanup(tok.Destroy)
 	return tok
 }
@@ -45,25 +59,30 @@ func bloomFS(fields ...sriracha.FieldSpec) sriracha.FieldSet {
 
 func TestNew(t *testing.T) {
 	t.Parallel()
+	shortByOne := testSecret("almost")[:MinSecretLen-1]
 	cases := []struct {
 		name    string
 		secret  []byte
 		opts    []Option
-		wantErr bool
+		wantErr error
 	}{
-		{"NilSecret", nil, nil, true},
-		{"EmptySecret", []byte{}, nil, true},
-		{"AllZeroSecret", make([]byte, 16), nil, true},
-		{"SingleNonZeroByte", []byte{0x01}, nil, false},
-		{"ValidSecret", []byte("secret"), nil, false},
-		{"WithKeyID", []byte("secret"), []Option{WithKeyID("k1")}, false},
+		{"NilSecret", nil, nil, ErrSecretTooShort},
+		{"EmptySecret", []byte{}, nil, ErrSecretTooShort},
+		{"SingleNonZeroByte", []byte{0x01}, nil, ErrSecretTooShort},
+		{"OneByteShort", shortByOne, nil, ErrSecretTooShort},
+		{"AllZeroSecret", make([]byte, MinSecretLen), nil, ErrSecretAllZero},
+		{"AllZeroAndTooShort", make([]byte, 16), nil, ErrSecretTooShort},
+		{"ExactlyMinLen", testSecret("exact"), nil, nil},
+		{"LongerThanMinLen", []byte(strings.Repeat("longer-than-the-minimum", 4)), nil, nil},
+		{"WithKeyID", testSecret("secret"), []Option{WithKeyID("k1")}, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			tok, err := New(tc.secret, tc.opts...)
-			if tc.wantErr {
-				assert.Error(t, err)
+			if tc.wantErr != nil {
+				require.ErrorIs(t, err, tc.wantErr)
+				assert.Nil(t, tok)
 				return
 			}
 			require.NoError(t, err)
@@ -91,7 +110,7 @@ func TestNewTokenizer_AllocFailure(t *testing.T) {
 				succeeded = append(succeeded, locked)
 				return locked
 			}
-			tok, err := newTokenizer([]byte("secret"), alloc, hkdfSubkey)
+			tok, err := newTokenizer(testSecret("secret"), alloc, hkdfSubkey)
 			require.Error(t, err)
 			assert.Nil(t, tok)
 			assert.Contains(t, err.Error(), "mlock failed")
@@ -113,7 +132,7 @@ func TestNewTokenizer_DeriveFailure(t *testing.T) {
 				}
 				return hkdfSubkey(secret, info)
 			}
-			tok, err := newTokenizer([]byte("secret"), memguard.NewBufferFromBytes, derive)
+			tok, err := newTokenizer(testSecret("secret"), memguard.NewBufferFromBytes, derive)
 			require.Error(t, err)
 			assert.Nil(t, tok)
 			assert.Contains(t, err.Error(), "derive failed")
@@ -126,18 +145,18 @@ func TestHKDFSubkey(t *testing.T) {
 
 	t.Run("DeterministicAndDomainSeparated", func(t *testing.T) {
 		t.Parallel()
-		a, err := hkdfSubkey([]byte("secret"), infoDeterministic)
+		a, err := hkdfSubkey(testSecret("secret"), infoDeterministic)
 		require.NoError(t, err)
 		require.Len(t, a, subkeySize)
-		again, err := hkdfSubkey([]byte("secret"), infoDeterministic)
+		again, err := hkdfSubkey(testSecret("secret"), infoDeterministic)
 		require.NoError(t, err)
 		assert.Equal(t, a, again, "same (secret, info) must derive the same subkey")
 
-		b, err := hkdfSubkey([]byte("secret"), infoBloom)
+		b, err := hkdfSubkey(testSecret("secret"), infoBloom)
 		require.NoError(t, err)
 		assert.NotEqual(t, a, b, "different info strings must derive different subkeys")
 
-		c, err := hkdfSubkey([]byte("other"), infoDeterministic)
+		c, err := hkdfSubkey(testSecret("other"), infoDeterministic)
 		require.NoError(t, err)
 		assert.NotEqual(t, a, c, "different secrets must derive different subkeys")
 	})
@@ -145,7 +164,7 @@ func TestHKDFSubkey(t *testing.T) {
 	t.Run("OverlongRequestErrors", func(t *testing.T) {
 		t.Parallel()
 		// HKDF-SHA256 can expand at most 255 blocks of 32 bytes.
-		_, err := hkdfDerive([]byte("secret"), infoDeterministic, 255*32+1)
+		_, err := hkdfDerive(testSecret("secret"), infoDeterministic, 255*32+1)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "subkey derivation failed")
 	})
@@ -153,15 +172,13 @@ func TestHKDFSubkey(t *testing.T) {
 
 func TestDestroy_WipesAllBuffers(t *testing.T) {
 	t.Parallel()
-	tok, err := New([]byte("wipe-me"))
+	tok, err := New(testSecret("wipe-me"))
 	require.NoError(t, err)
-	impl, ok := tok.(*tokenizer)
-	require.True(t, ok)
 	tok.Destroy()
-	assert.False(t, impl.secret.IsAlive(), "secret buffer must be wiped")
-	assert.False(t, impl.detKey.IsAlive(), "deterministic subkey buffer must be wiped")
-	assert.False(t, impl.bloomKey.IsAlive(), "bloom subkey buffer must be wiped")
-	assert.False(t, impl.permKey.IsAlive(), "permutation subkey buffer must be wiped")
+	assert.False(t, tok.secret.IsAlive(), "secret buffer must be wiped")
+	assert.False(t, tok.detKey.IsAlive(), "deterministic subkey buffer must be wiped")
+	assert.False(t, tok.bloomKey.IsAlive(), "bloom subkey buffer must be wiped")
+	assert.False(t, tok.permKey.IsAlive(), "permutation subkey buffer must be wiped")
 }
 
 func TestRecoverToError(t *testing.T) {
@@ -195,32 +212,32 @@ func TestTokenize_AfterDestroy(t *testing.T) {
 
 	cases := []struct {
 		name string
-		call func(tok Tokenizer) error
+		call func(tok *Tokenizer) error
 	}{
 		{
 			name: "Deterministic",
-			call: func(tok Tokenizer) error {
+			call: func(tok *Tokenizer) error {
 				_, err := tok.TokenizeDeterministic(rec, deterministicFS(givenSpec))
 				return err
 			},
 		},
 		{
 			name: "Probabilistic",
-			call: func(tok Tokenizer) error {
+			call: func(tok *Tokenizer) error {
 				_, err := tok.TokenizeProbabilistic(rec, bloomFS(givenSpec))
 				return err
 			},
 		},
 		{
 			name: "CLK",
-			call: func(tok Tokenizer) error {
+			call: func(tok *Tokenizer) error {
 				_, err := tok.TokenizeCLK(rec, bloomFS(givenSpec))
 				return err
 			},
 		},
 		{
 			name: "Field",
-			call: func(tok Tokenizer) error {
+			call: func(tok *Tokenizer) error {
 				_, err := tok.TokenizeField("John", sriracha.FieldNameGiven)
 				return err
 			},
@@ -229,7 +246,7 @@ func TestTokenize_AfterDestroy(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			tok, err := New([]byte("secret"))
+			tok, err := New(testSecret("secret"))
 			require.NoError(t, err)
 			tok.Destroy()
 			err = tc.call(tok)
@@ -262,7 +279,9 @@ func TestTokenizeDeterministic(t *testing.T) {
 				require.NoError(t, err)
 				tr2, err := tok.TokenizeDeterministic(rec, fs)
 				require.NoError(t, err)
-				assert.True(t, Equal(tr1, tr2), "identical inputs should produce equal tokens")
+				eq, err := Equal(tr1, tr2)
+				require.NoError(t, err)
+				assert.True(t, eq, "identical inputs should produce equal tokens")
 			},
 		},
 		{
@@ -291,7 +310,9 @@ func TestTokenizeDeterministic(t *testing.T) {
 				require.NoError(t, err)
 				tr2, err := newTok(t, "secret-b").TokenizeDeterministic(rec, fs)
 				require.NoError(t, err)
-				assert.False(t, Equal(tr1, tr2), "different secrets should produce different tokens")
+				eq, err := Equal(tr1, tr2)
+				require.NoError(t, err)
+				assert.False(t, eq, "different secrets should produce different tokens")
 			},
 		},
 		{
@@ -486,6 +507,83 @@ func TestTokenizeField(t *testing.T) {
 	})
 }
 
+// TestTokenizeDeterministic_ErrorSentinels pins the taxonomy: every failure
+// carries the package prefix, wraps a root sentinel reachable with
+// errors.Is, and names the offending field through a FieldError.
+func TestTokenizeDeterministic_ErrorSentinels(t *testing.T) {
+	t.Parallel()
+	requiredGiven := sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0}
+	requiredBirth := sriracha.FieldSpec{Path: sriracha.FieldDateBirth, Required: true, Weight: 1.0}
+
+	cases := []struct {
+		name     string
+		call     func(tok *Tokenizer) error
+		wantErr  error
+		wantPath sriracha.FieldPath
+	}{
+		{
+			name: "RequiredFieldMissing",
+			call: func(tok *Tokenizer) error {
+				_, err := tok.TokenizeDeterministic(sriracha.RawRecord{}, deterministicFS(requiredGiven))
+				return err
+			},
+			wantErr:  sriracha.ErrRequiredFieldMissing,
+			wantPath: sriracha.FieldNameGiven,
+		},
+		{
+			name: "RequiredFieldEmpty",
+			call: func(tok *Tokenizer) error {
+				rec := sriracha.RawRecord{sriracha.FieldNameGiven: ""}
+				_, err := tok.TokenizeDeterministic(rec, deterministicFS(requiredGiven))
+				return err
+			},
+			wantErr:  sriracha.ErrEmptyValue,
+			wantPath: sriracha.FieldNameGiven,
+		},
+		{
+			name: "NormalizationFailure",
+			call: func(tok *Tokenizer) error {
+				rec := sriracha.RawRecord{sriracha.FieldDateBirth: "not-a-date"}
+				_, err := tok.TokenizeDeterministic(rec, deterministicFS(requiredBirth))
+				return err
+			},
+			wantErr:  normalize.ErrInvalidValue,
+			wantPath: sriracha.FieldDateBirth,
+		},
+		{
+			name: "FieldNormalizationFailure",
+			call: func(tok *Tokenizer) error {
+				_, err := tok.TokenizeField("not-a-date", sriracha.FieldDateBirth)
+				return err
+			},
+			wantErr:  normalize.ErrInvalidValue,
+			wantPath: sriracha.FieldDateBirth,
+		},
+		{
+			name: "FieldNormalizesToEmpty",
+			call: func(tok *Tokenizer) error {
+				_, err := tok.TokenizeField("---", sriracha.FieldIdentifierPassport)
+				return err
+			},
+			wantErr:  sriracha.ErrEmptyValue,
+			wantPath: sriracha.FieldIdentifierPassport,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := tc.call(newTok(t, "secret"))
+			require.Error(t, err)
+			assert.ErrorIs(t, err, tc.wantErr)
+			assert.True(t, strings.HasPrefix(err.Error(), "token: "), "got %q", err.Error())
+
+			var fieldErr sriracha.FieldError
+			require.ErrorAs(t, err, &fieldErr)
+			assert.Equal(t, tc.wantPath, fieldErr.Path)
+		})
+	}
+}
+
 func TestTokenizeProbabilistic(t *testing.T) {
 	t.Parallel()
 	givenSpec := sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0}
@@ -650,7 +748,9 @@ func TestTokenizer_Concurrent(t *testing.T) {
 				}
 				wg.Wait()
 				for i := 1; i < n; i++ {
-					assert.True(t, Equal(results[0], results[i]), "result %d not equal to result 0", i)
+					eq, err := Equal(results[0], results[i])
+					require.NoError(t, err)
+					assert.True(t, eq, "result %d not equal to result 0", i)
 				}
 			},
 		},
@@ -720,14 +820,12 @@ func TestNew_FinalizerWipesOnGC(t *testing.T) {
 
 	var buf *memguard.LockedBuffer
 	func() {
-		tok, err := New([]byte("forget-to-destroy"))
+		tok, err := New(testSecret("forget-to-destroy"))
 		require.NoError(t, err)
-		// Reach into the implementation to grab the locked buffer; this is
-		// the only way to observe the post-GC cleanup. We deliberately do
-		// NOT call tok.Destroy().
-		impl, ok := tok.(*tokenizer)
-		require.True(t, ok)
-		buf = impl.secret
+		// Reach into the locked buffer directly; this is the only way to
+		// observe the post-GC cleanup. We deliberately do NOT call
+		// tok.Destroy().
+		buf = tok.secret
 	}()
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -755,11 +853,9 @@ func TestDestroy_ClearsFinalizer(t *testing.T) {
 
 	var buf *memguard.LockedBuffer
 	func() {
-		tok, err := New([]byte("explicit-destroy"))
+		tok, err := New(testSecret("explicit-destroy"))
 		require.NoError(t, err)
-		impl, ok := tok.(*tokenizer)
-		require.True(t, ok)
-		buf = impl.secret
+		buf = tok.secret
 		tok.Destroy()
 		require.False(t, buf.IsAlive(), "explicit Destroy must wipe the locked buffer immediately")
 	}()
@@ -844,7 +940,7 @@ func TestNgrams(t *testing.T) {
 }
 
 func BenchmarkTokenizeDeterministic(b *testing.B) {
-	tok, _ := New([]byte("bench-secret-32-bytes-long!!!!!"))
+	tok, _ := New(testSecret("bench-secret"))
 	rec := sriracha.RawRecord{
 		sriracha.FieldNameGiven:    "Alice",
 		sriracha.FieldNameFamily:   "Smith",
@@ -864,7 +960,7 @@ func BenchmarkTokenizeDeterministic(b *testing.B) {
 }
 
 func BenchmarkTokenizeProbabilistic(b *testing.B) {
-	tok, _ := New([]byte("bench-secret-32-bytes-long!!!!!"))
+	tok, _ := New(testSecret("bench-secret"))
 	rec := sriracha.RawRecord{
 		sriracha.FieldNameGiven:    "Alice",
 		sriracha.FieldNameFamily:   "Smith",
@@ -936,7 +1032,7 @@ func FuzzTokenizeDeterministic(f *testing.F) {
 		sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: false, Weight: 1.0},
 		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 1.0},
 	)
-	tok, _ := New([]byte("fuzz-secret"))
+	tok, _ := New(testSecret("fuzz-secret"))
 
 	f.Fuzz(func(t *testing.T, given, family string) {
 		rec := sriracha.RawRecord{
@@ -952,7 +1048,16 @@ func FuzzTokenizeDeterministic(f *testing.F) {
 		if err != nil {
 			t.Fatalf("second TokenizeDeterministic call failed: %v", err)
 		}
-		if !Equal(tr1, tr2) {
+		eq, err := Equal(tr1, tr2)
+		if err != nil {
+			// Both fields absent leaves nothing to compare, which is a
+			// result state, not a failure.
+			if !errors.Is(err, ErrNoComparableFields) {
+				t.Fatalf("Equal returned an unexpected error: %v", err)
+			}
+			return
+		}
+		if !eq {
 			t.Fatalf("Equal returned false for identical inputs")
 		}
 	})
@@ -971,7 +1076,7 @@ func FuzzTokenizeProbabilistic(f *testing.F) {
 		sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: false, Weight: 1.0},
 		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 1.0},
 	)
-	tok, _ := New([]byte("fuzz-secret"))
+	tok, _ := New(testSecret("fuzz-secret"))
 	fieldFilterBytes := int((fs.ProbabilisticParams.SizeBits + 63) / 64 * 8)
 
 	f.Fuzz(func(t *testing.T, given, family string) {

@@ -1,6 +1,7 @@
 package normalize
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -446,6 +447,108 @@ func TestNormalizeNFKDEquivalence(t *testing.T) {
 	require.NoError(t, err2)
 
 	assert.Equal(t, got1, got2, "NFKD equivalence failed: precomposed → %q (%x), decomposed → %q (%x)", got1, []byte(got1), got2, []byte(got2))
+}
+
+// Paths outside the canonical org, shaped like canonical ones so the tests
+// below prove the org gate and not a namespace mismatch.
+var (
+	customIdentifier = sriracha.MustParseFieldPath("acme::identifier::mrn")
+	customDate       = sriracha.MustParseFieldPath("acme::date::hired")
+	customName       = sriracha.MustParseFieldPath("acme::name::given")
+	customEmail      = sriracha.MustParseFieldPath("acme::contact::email")
+	customPhone      = sriracha.MustParseFieldPath("acme::contact::phone")
+	customCountry    = sriracha.MustParseFieldPath("acme::address::country")
+)
+
+// TestNormalize_CustomOrgGate covers the rule that only canonical paths get
+// field-specific normalization. A custom org's paths run the shared pipeline
+// and nothing else, however closely their namespace resembles a canonical
+// one.
+func TestNormalize_CustomOrgGate(t *testing.T) {
+	t.Parallel()
+	runNormalizeCases(t, []normalizeCase{
+		{
+			name:  "IdentifierSeparatorsKept",
+			value: "MRN-000.12 345",
+			path:  customIdentifier,
+			want:  "mrn-000.12 345",
+		},
+		{
+			name:  "DateNotValidated",
+			value: "15/06/2024",
+			path:  customDate,
+			want:  "15/06/2024",
+		},
+		{
+			name:  "NameMarksKept",
+			value: "José",
+			path:  customName,
+			want:  "jose\u0301",
+		},
+		{
+			name:  "EmailNotCanonicalised",
+			value: "Foo@Bar.COM.",
+			path:  customEmail,
+			want:  "foo@bar.com.",
+		},
+		{
+			name:  "EmailWithoutAtAccepted",
+			value: "missing-at-sign",
+			path:  customEmail,
+			want:  "missing-at-sign",
+		},
+		{
+			name:  "PhoneFormattingKept",
+			value: "+1 (555) 123-4567",
+			path:  customPhone,
+			want:  "+1 (555) 123-4567",
+		},
+		{
+			name:  "CountryNotUppercased",
+			value: "usa",
+			path:  customCountry,
+			want:  "usa",
+		},
+		{
+			name:  "SharedPipelineStillRuns",
+			value: "  Jo\u200bSE\u00a0Ltd  ",
+			path:  customIdentifier,
+			want:  "jose ltd",
+		},
+	})
+}
+
+// TestNormalize_ErrorSentinels pins the sentinel each failure wraps and the
+// package prefix every message carries.
+func TestNormalize_ErrorSentinels(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		value  string
+		path   sriracha.FieldPath
+		wantIs error
+	}{
+		{"DateEmpty", "", sriracha.FieldDateBirth, sriracha.ErrEmptyValue},
+		{"DateFormat", "15/06/2024", sriracha.FieldDateBirth, ErrInvalidValue},
+		{"EmailWhitespace", "alice @example.com", sriracha.FieldContactEmail, ErrInvalidValue},
+		{"EmailNoAt", "missing-at-sign", sriracha.FieldContactEmail, ErrInvalidValue},
+		{"EmailEmptyPart", "alice@", sriracha.FieldContactEmail, ErrInvalidValue},
+		{"PhoneTooShort", "12345", sriracha.FieldContactPhone, ErrInvalidValue},
+		{"CountryLength", "USA", sriracha.FieldAddressCountry, ErrInvalidValue},
+		{"CountryNonAlpha", "1A", sriracha.FieldAddressCountry, ErrInvalidValue},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := Normalize(tc.value, tc.path)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, tc.wantIs)
+			assert.True(t, strings.HasPrefix(err.Error(), "normalize: "), "message must carry the package prefix, got %q", err.Error())
+		})
+	}
 }
 
 func BenchmarkNormalizeName(b *testing.B) {

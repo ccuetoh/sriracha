@@ -13,11 +13,12 @@
 //
 // # Recommended entry point
 //
-// Most callers want session.Session — it bundles a token.Tokenizer with a
+// Most callers want session.Session. It bundles a token.Tokenizer with a
 // FieldSet so you don't have to thread the schema through every tokenize /
-// match call:
+// match call, and it checks the FieldSet fingerprint on both sides of every
+// comparison:
 //
-//	s, err := session.New(secret, fieldset.DefaultFieldSet(), token.WithKeyID("k1"))
+//	s, err := session.New(secret, fieldset.DefaultFieldSet(), session.WithKeyID("k1"))
 //	if err != nil { ... }
 //	defer s.Destroy()
 //	tok, err := s.TokenizeProbabilistic(record)
@@ -27,7 +28,7 @@
 //   - (module root)       — core types (FieldPath, RawRecord, tokens, FieldSet) and canonical field constants
 //   - normalize           — Unicode normalization pipeline
 //   - fieldset            — FieldSet validation, record validation, and the canonical schema
-//   - token               — deterministic and probabilistic tokenization, Equal, DicePerField, Score, Match, Calibrate
+//   - token               — deterministic and probabilistic tokenization, Equal, DicePerField, Match, MatchCLK, Calibrate
 //   - session             — recommended high-level facade bundling a Tokenizer with a FieldSet
 //
 // Bloom filters are implemented on top of github.com/bits-and-blooms/bitset.

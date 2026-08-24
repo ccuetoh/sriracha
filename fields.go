@@ -30,22 +30,28 @@ func (f FieldPath) LocalName() string { return f.localName }
 // InNamespace reports whether the field belongs to the given namespace.
 func (f FieldPath) InNamespace(ns string) bool { return f.namespace == ns }
 
+// IsCanonical reports whether the field is part of the canonical Sriracha
+// schema, that is whether its org component is OrgSriracha. Paths scoped to
+// another organisation are not canonical and carry no guarantee about how
+// their namespace or local name is interpreted.
+func (f FieldPath) IsCanonical() bool { return f.org == OrgSriracha }
+
 // ParseFieldPath parses and validates a field path string.
 // Valid paths have the form <org>::<namespace>::<name> with all three
 // components non-empty. Returns an error for malformed paths.
 func ParseFieldPath(s string) (FieldPath, error) {
 	parts := strings.SplitN(s, "::", 3)
 	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
-		return FieldPath{}, fmt.Errorf("fieldpath: invalid path %q: must be <org>::<namespace>::<name>", s)
+		return FieldPath{}, fmt.Errorf("%w %q: must be <org>::<namespace>::<name>", ErrInvalidFieldPath, s)
 	}
 
 	return FieldPath{raw: s, org: parts[0], namespace: parts[1], localName: parts[2]}, nil
 }
 
-// MustParsePath parses a field path string and panics if it is invalid.
+// MustParseFieldPath parses a field path string and panics if it is invalid.
 // Intended for package-level variable declarations where the path is a
 // compile-time constant. Use ParseFieldPath for runtime input.
-func MustParsePath(s string) FieldPath {
+func MustParseFieldPath(s string) FieldPath {
 	fp, err := ParseFieldPath(s)
 	if err != nil {
 		panic(err)
@@ -77,6 +83,10 @@ func (f *FieldPath) UnmarshalText(data []byte) error {
 	return nil
 }
 
+// OrgSriracha is the org component of every canonical field path. Paths
+// carrying any other org belong to the declaring organisation.
+const OrgSriracha = "sriracha"
+
 // Canonical namespace identifiers.
 const (
 	NamespaceName       = "name"
@@ -88,20 +98,20 @@ const (
 
 // Canonical field path variables.
 var (
-	FieldIdentifierNationalID = MustParsePath("sriracha::identifier::national_id")
-	FieldIdentifierPassport   = MustParsePath("sriracha::identifier::passport")
-	FieldIdentifierTaxID      = MustParsePath("sriracha::identifier::tax_id")
-	FieldNameGiven            = MustParsePath("sriracha::name::given")
-	FieldNameFamily           = MustParsePath("sriracha::name::family")
-	FieldNameFull             = MustParsePath("sriracha::name::full")
-	FieldNameMiddle           = MustParsePath("sriracha::name::middle")
-	FieldDateBirth            = MustParsePath("sriracha::date::birth")
-	FieldDateDeath            = MustParsePath("sriracha::date::death")
-	FieldDateRegistration     = MustParsePath("sriracha::date::registration")
-	FieldAddressCountry       = MustParsePath("sriracha::address::country")
-	FieldAddressAdminArea     = MustParsePath("sriracha::address::admin_area")
-	FieldAddressLocality      = MustParsePath("sriracha::address::locality")
-	FieldAddressPostalCode    = MustParsePath("sriracha::address::postal_code")
-	FieldContactEmail         = MustParsePath("sriracha::contact::email")
-	FieldContactPhone         = MustParsePath("sriracha::contact::phone")
+	FieldIdentifierNationalID = MustParseFieldPath("sriracha::identifier::national_id")
+	FieldIdentifierPassport   = MustParseFieldPath("sriracha::identifier::passport")
+	FieldIdentifierTaxID      = MustParseFieldPath("sriracha::identifier::tax_id")
+	FieldNameGiven            = MustParseFieldPath("sriracha::name::given")
+	FieldNameFamily           = MustParseFieldPath("sriracha::name::family")
+	FieldNameFull             = MustParseFieldPath("sriracha::name::full")
+	FieldNameMiddle           = MustParseFieldPath("sriracha::name::middle")
+	FieldDateBirth            = MustParseFieldPath("sriracha::date::birth")
+	FieldDateDeath            = MustParseFieldPath("sriracha::date::death")
+	FieldDateRegistration     = MustParseFieldPath("sriracha::date::registration")
+	FieldAddressCountry       = MustParseFieldPath("sriracha::address::country")
+	FieldAddressAdminArea     = MustParseFieldPath("sriracha::address::admin_area")
+	FieldAddressLocality      = MustParseFieldPath("sriracha::address::locality")
+	FieldAddressPostalCode    = MustParseFieldPath("sriracha::address::postal_code")
+	FieldContactEmail         = MustParseFieldPath("sriracha::contact::email")
+	FieldContactPhone         = MustParseFieldPath("sriracha::contact::phone")
 )

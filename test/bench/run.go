@@ -67,7 +67,14 @@ type result struct {
 // run loads records → tokenizes → samples pairs → matches → reports.
 // The session is borrowed, never destroyed by run; the caller owns its
 // lifecycle (and the locked secret buffer behind it).
-func run(sess session.Session, records []record, opts options) (result, error) {
+//
+// sess is a concrete *session.Session, so the nil check below is a plain
+// nil-pointer check. It earns its place: every method call on a nil
+// Session dereferences the tokenizer field, and the harness returns an
+// error rather than panicking. calibrate carries the same guard for the
+// same reason; tokenizeAll and matchAll are only reached through those
+// two, or from tests that hand them a live session.
+func run(sess *session.Session, records []record, opts options) (result, error) {
 	if sess == nil {
 		return result{}, errors.New("bench: session must not be nil")
 	}
@@ -149,7 +156,7 @@ func run(sess session.Session, records []record, opts options) (result, error) {
 // tokenises every record once, samples calibration pairs under opts, then
 // hands the labeled pairs to token.Calibrate. Used by TestQualityCalibrated
 // to derive an F1-optimal threshold before the evaluation pass.
-func calibrate(sess session.Session, records []record, opts pairOptions) (token.Calibration, error) {
+func calibrate(sess *session.Session, records []record, opts pairOptions) (token.Calibration, error) {
 	if sess == nil {
 		return token.Calibration{}, errors.New("bench: session must not be nil")
 	}
@@ -165,14 +172,20 @@ func calibrate(sess session.Session, records []record, opts pairOptions) (token.
 	for i, p := range pairs {
 		labeled[i] = token.LabeledPair{A: tokens[p.A], B: tokens[p.B], Match: p.Match}
 	}
-	return token.Calibrate(labeled, sess.FieldSet())
+	// The zero MatchPolicy is load-bearing and must stay zero. Do not
+	// change it to token.DefaultMatchPolicy. A non-zero evidence floor
+	// excludes low-evidence pairs from Calibrate's sweep, which moves the
+	// calibrated threshold and therefore every metric the calibrated run
+	// ships to Bencher. Zero means no pair is excluded and the sweep sees
+	// exactly the pairs the historical series was built from.
+	return token.Calibrate(labeled, sess.FieldSet(), token.MatchPolicy{})
 }
 
 // tokenizeAll converts every record to a ProbabilisticToken under sess and times
 // each call. Sanitisation drops fields the normalizer rejects (common in
 // real-world corpora) so a single bad country code does not abort the
 // run; the per-path drop counts are returned alongside.
-func tokenizeAll(sess session.Session, records []record) ([]sriracha.ProbabilisticToken, performance, map[sriracha.FieldPath]int, error) {
+func tokenizeAll(sess *session.Session, records []record) ([]sriracha.ProbabilisticToken, performance, map[sriracha.FieldPath]int, error) {
 	tokens := make([]sriracha.ProbabilisticToken, len(records))
 	durs := make([]time.Duration, len(records))
 	drops := make(map[sriracha.FieldPath]int)
@@ -201,11 +214,17 @@ func tokenizeAll(sess session.Session, records []record) ([]sriracha.Probabilist
 	}, drops, nil
 }
 
-// matchAll runs Match over every sampled pair. We call Match with
-// threshold=0 because we only care about the aggregate Score here — the
-// thresholded IsMatch decision is recomputed by sweep across the full
-// 101-point grid.
-func matchAll(sess session.Session, pairs []pair, tokens []sriracha.ProbabilisticToken) ([]float64, []bool, performance, error) {
+// matchAll runs Match over every sampled pair and keeps only res.Score.
+// Every decision the harness reports is recomputed from those scores by
+// sweep across the full 101-point grid, so MatchResult.IsMatch is never
+// read here.
+//
+// The zero MatchPolicy at the call site below is load-bearing and must
+// stay zero. Do not change it to token.DefaultMatchPolicy. Threshold 0
+// with no evidence floor means no pair is excluded and every score is
+// identical to the one the historical benchmark series recorded, which is
+// what keeps the Bencher metrics comparable across releases.
+func matchAll(sess *session.Session, pairs []pair, tokens []sriracha.ProbabilisticToken) ([]float64, []bool, performance, error) {
 	scores := make([]float64, len(pairs))
 	labels := make([]bool, len(pairs))
 	durs := make([]time.Duration, len(pairs))
@@ -217,7 +236,8 @@ func matchAll(sess session.Session, pairs []pair, tokens []sriracha.Probabilisti
 				i, p.A, p.B, len(tokens))
 		}
 		callStart := time.Now()
-		res, err := sess.Match(tokens[p.A], tokens[p.B], 0)
+		// Zero policy: no threshold, no evidence floor. See the doc above.
+		res, err := sess.Match(tokens[p.A], tokens[p.B], token.MatchPolicy{})
 		if err != nil {
 			return nil, nil, performance{}, fmt.Errorf("bench: match pair %d (a=%d b=%d): %w", i, p.A, p.B, err)
 		}

@@ -18,9 +18,9 @@ import (
 // FieldSet for unit tests of run / tokenizeAll / matchAll. Each test gets
 // its own — sessions hold a locked secret buffer and Destroy invalidates
 // them, so sharing across t.Parallel subtests is risky.
-func newRunSession(t *testing.T) session.Session {
+func newRunSession(t *testing.T) *session.Session {
 	t.Helper()
-	sess, err := session.New([]byte("run-unit-test-secret"), fieldset.DefaultFieldSet())
+	sess, err := session.New([]byte("run-unit-test-secret-32-bytes-ok!"), fieldset.DefaultFieldSet())
 	require.NoError(t, err)
 	t.Cleanup(sess.Destroy)
 	return sess
@@ -190,7 +190,7 @@ func TestCalibrate(t *testing.T) {
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, cal.OptimalThreshold, 0.0)
 		assert.LessOrEqual(t, cal.OptimalThreshold, 1.0)
-		assert.Len(t, cal.ROC, 101)
+		assert.Len(t, cal.PR, 101)
 	})
 
 	t.Run("RejectsNilSession", func(t *testing.T) {
@@ -228,7 +228,7 @@ func TestTokenizeAllSurfacesRequiredFieldError(t *testing.T) {
 			fs.Fields[i].Required = true
 		}
 	}
-	sess, err := session.New([]byte("required-field-secret"), fs)
+	sess, err := session.New([]byte("required-field-secret-32-bytes-ok"), fs)
 	require.NoError(t, err)
 	t.Cleanup(sess.Destroy)
 
@@ -251,4 +251,59 @@ func TestMatchAllSurfacesIncompatibleTokens(t *testing.T) {
 	tokens[1].FieldSetVersion = "different-version"
 	_, _, _, err = matchAll(sess, []pair{{A: 0, B: 1}}, tokens)
 	require.Error(t, err)
+}
+
+// sparseCorpus gives every record exactly one field, so every pair has
+// exactly one comparable field. It is the corpus that fails if the
+// harness ever stops passing a zero token.MatchPolicy: any evidence floor
+// above one field excludes every pair.
+func sparseCorpus() []record {
+	return []record{
+		{CanonicalID: "alice", EntityID: "a1", Dataset: "ds1", Fields: sriracha.RawRecord{
+			sriracha.FieldNameFamily: "Smith",
+		}},
+		{CanonicalID: "alice", EntityID: "a2", Dataset: "ds2", Fields: sriracha.RawRecord{
+			sriracha.FieldNameFamily: "Smyth",
+		}},
+		{CanonicalID: "bob", EntityID: "b1", Dataset: "ds1", Fields: sriracha.RawRecord{
+			sriracha.FieldNameFamily: "Jones",
+		}},
+		{CanonicalID: "bob", EntityID: "b2", Dataset: "ds2", Fields: sriracha.RawRecord{
+			sriracha.FieldNameFamily: "Jonas",
+		}},
+	}
+}
+
+// TestCalibrateAppliesNoEvidenceFloor pins the zero MatchPolicy that
+// calibrate hands to token.Calibrate. With any floor above one field this
+// corpus loses every pair, so Calibrate would fail outright instead of
+// quietly shifting the calibrated threshold and every metric derived from
+// it.
+func TestCalibrateAppliesNoEvidenceFloor(t *testing.T) {
+	t.Parallel()
+	sess := newRunSession(t)
+
+	cal, err := calibrate(sess, sparseCorpus(), pairOptions{Positives: 1, Negatives: 1, Seed: 1})
+	require.NoError(t, err)
+	assert.Zero(t, cal.ExcludedPairs)
+}
+
+// TestMatchAllScoresLowEvidencePairs pins that a pair with a single
+// comparable field still reaches the score slice. The harness reads only
+// MatchResult.Score and recomputes every decision in sweep, so no pair may
+// be dropped or zeroed before it gets there.
+func TestMatchAllScoresLowEvidencePairs(t *testing.T) {
+	t.Parallel()
+	sess := newRunSession(t)
+	records := sparseCorpus()
+
+	tokens, _, _, err := tokenizeAll(sess, records)
+	require.NoError(t, err)
+
+	scores, labels, perf, err := matchAll(sess, []pair{{A: 0, B: 1, Match: true}}, tokens)
+	require.NoError(t, err)
+	require.Len(t, scores, 1)
+	assert.Greater(t, scores[0], 0.0)
+	assert.Equal(t, []bool{true}, labels)
+	assert.Equal(t, 1, perf.Latency.Count)
 }
