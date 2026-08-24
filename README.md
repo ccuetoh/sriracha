@@ -24,7 +24,7 @@ that can be compared without exposing the underlying identifiers.
 - Optional balanced mode for per-field filters
 - Unicode normalization pipeline
 - Canonical field set with support for extended schemas
-- Wire format specified in [SPEC.md](SPEC.md) and pinned by golden vector tests
+- Token derivation pinned by golden vector tests
 
 ## Installation
 

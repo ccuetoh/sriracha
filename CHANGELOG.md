@@ -21,9 +21,8 @@ change in any release.
   recommended form for sharing tokens when per-field scores are not
   required, since it exposes no per-field structure, popcounts, or
   presence pattern.
-- `SPEC.md`, a normative wire format specification, and golden vector
-  tests that fail on any byte-level drift of normalization or token
-  derivation.
+- Golden vector tests that fail on any byte-level drift of normalization
+  or token derivation.
 - `token.ErrDestroyed`, returned by all tokenize methods once `Destroy` has
   been called. Previously a destroyed tokenizer could silently emit tokens
   keyed with an empty secret.

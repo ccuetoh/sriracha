@@ -11,10 +11,10 @@ import (
 	"github.com/ccuetoh/sriracha"
 )
 
-// The golden vectors below pin the v2 wire format described in SPEC.md.
-// A failure here means emitted token bytes drifted; that requires a new
-// format version, updated vectors, and a SPEC.md change in the same
-// commit, never a silent update.
+// The golden vectors below pin the v2 token derivation. A failure here
+// means emitted token bytes drifted, which breaks matching against stored
+// tokens. That requires a new format version and updated vectors in the
+// same commit, never a silent update.
 
 func goldenSecret() []byte {
 	secret := make([]byte, 32)

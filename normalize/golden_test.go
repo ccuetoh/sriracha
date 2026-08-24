@@ -10,8 +10,8 @@ import (
 )
 
 // TestGoldenNormalize pins the normalization outputs that the token golden
-// vectors depend on. A failure means normalized bytes drifted, which is a
-// wire format change; see SPEC.md.
+// vectors depend on. A failure means normalized bytes drifted, which breaks
+// matching against previously issued tokens.
 func TestGoldenNormalize(t *testing.T) {
 	t.Parallel()
 
