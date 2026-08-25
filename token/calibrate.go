@@ -66,8 +66,11 @@ type Calibration struct {
 // policy.MinComparableFields or policy.MinComparableWeight is excluded from
 // the sweep and counted in Calibration.ExcludedPairs. Production will decide
 // those pairs on the floor rather than on the threshold, so fitting the
-// threshold on them would tune it against a population it never sees. A zero
-// MatchPolicy excludes nothing.
+// threshold on them would tune it against a population it never sees.
+//
+// Pairs with no comparable field at all are excluded under every policy,
+// including the zero one, because Match reports them as non-matches at every
+// threshold. Otherwise a zero MatchPolicy excludes nothing.
 //
 // The returned threshold is the midpoint of the longest run of thresholds that
 // all reach the maximum F1, rounded up on an even-length run, with the lowest
@@ -101,7 +104,12 @@ func Calibrate(pairs []LabeledPair, fs sriracha.FieldSet, policy MatchPolicy) (C
 		if err != nil {
 			return Calibration{}, fmt.Errorf("token: Calibrate pair %d: %w", i, err)
 		}
-		if res.ComparableFields < policy.MinComparableFields ||
+		// A pair with nothing comparable is IsMatch=false at every threshold,
+		// so it is excluded whatever the policy says. Leaving it in would let
+		// the sweep count it as a match at threshold 0, where 0 >= 0 holds,
+		// and fit the threshold against a decision Match never makes.
+		if res.ComparableFields == 0 ||
+			res.ComparableFields < policy.MinComparableFields ||
 			res.ComparableWeight < policy.MinComparableWeight {
 			excluded++
 			continue
@@ -131,10 +139,7 @@ func Calibrate(pairs []LabeledPair, fs sriracha.FieldSet, policy MatchPolicy) (C
 		}
 		precision := safeRatio(tp, tp+fp)
 		recall := safeRatio(tp, tp+fn)
-		f1 := 0.0
-		if precision+recall > 0 {
-			f1 = 2 * precision * recall / (precision + recall)
-		}
+		f1 := f1Score(tp, fp, fn)
 		pr = append(pr, PRPoint{Threshold: threshold, Precision: precision, Recall: recall, F1: f1})
 	}
 
@@ -183,6 +188,20 @@ func plateauMidpoint(pr []PRPoint) (PRPoint, error) {
 		runStart = -1
 	}
 	return pr[bestStart+bestLen/2], nil
+}
+
+// f1Score returns the F1 of the given counts, or 0 when there is neither a
+// true positive nor any error to weigh.
+//
+// It divides the counts directly instead of taking the harmonic mean of
+// precision and recall. Two count triples that are mathematically equal can
+// leave that harmonic mean a unit in the last place apart, and plateauMidpoint
+// compares F1 values for equality: the difference splits one plateau into
+// several and returns an edge of a fragment instead of the midpoint of the
+// whole. Dividing the exact integers is correctly rounded, so equal ratios
+// compare equal.
+func f1Score(tp, fp, fn int) float64 {
+	return safeRatio(2*tp, 2*tp+fp+fn)
 }
 
 // safeRatio returns num/den, or 0 if den is zero. Used by Calibrate to avoid

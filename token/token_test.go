@@ -1114,3 +1114,44 @@ func FuzzTokenizeProbabilistic(f *testing.F) {
 		}
 	})
 }
+
+// TestUsableRejectsDestroyedKeyMaterial pins that a Tokenizer whose locked
+// buffers were destroyed without going through Destroy refuses to tokenize.
+// The pooled HMACs read their key lazily, so a destroyed buffer would key
+// them with nil and emit tokens derived under an empty secret. memguard's
+// Purge and its interrupt handler both destroy buffers this way.
+func TestUsableRejectsDestroyedKeyMaterial(t *testing.T) {
+	t.Parallel()
+
+	fs := bloomFS(sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Weight: 1})
+	rec := sriracha.RawRecord{sriracha.FieldNameGiven: "Alice"}
+
+	cases := []struct {
+		name string
+		kill func(tok *Tokenizer)
+	}{
+		{"Secret", func(tok *Tokenizer) { tok.secret.Destroy() }},
+		{"DetKey", func(tok *Tokenizer) { tok.detKey.Destroy() }},
+		{"BloomKey", func(tok *Tokenizer) { tok.bloomKey.Destroy() }},
+		{"PermKey", func(tok *Tokenizer) { tok.permKey.Destroy() }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tok := newTok(t, "liveness-"+tc.name)
+			require.True(t, tok.usable(), "fresh tokenizer must be usable")
+			tc.kill(tok)
+			assert.False(t, tok.usable())
+
+			_, err := tok.TokenizeDeterministic(rec, fs)
+			assert.ErrorIs(t, err, ErrDestroyed)
+			_, err = tok.TokenizeProbabilistic(rec, fs)
+			assert.ErrorIs(t, err, ErrDestroyed)
+			_, err = tok.TokenizeCLK(rec, fs)
+			assert.ErrorIs(t, err, ErrDestroyed)
+			_, err = tok.TokenizeField("Alice", sriracha.FieldNameGiven)
+			assert.ErrorIs(t, err, ErrDestroyed)
+		})
+	}
+}

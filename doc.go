@@ -70,8 +70,12 @@
 // An error carrying a field path is wrapped in a FieldError, which keeps the
 // sentinel reachable through errors.Is and the path through errors.As.
 // RecordFromMap and fieldset.ValidateRecord report every problem in one pass
-// via errors.Join, so range over the joined error or use errors.Is on it
-// directly.
+// via errors.Join. Use errors.Is or errors.As on the joined error directly,
+// or reach the individual leaves through the Unwrap method the join carries:
+//
+//	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+//		for _, e := range joined.Unwrap() { ... }
+//	}
 //
 // # Package layout
 //

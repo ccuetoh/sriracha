@@ -267,6 +267,27 @@ func (t *Tokenizer) Destroy() {
 	runtime.SetFinalizer(t, nil)
 }
 
+// usable reports whether this Tokenizer still holds live key material.
+//
+// The destroyed flag alone is not enough. The pooled HMACs read their key
+// through lockedDet.Bytes() the first time the pool has to build one, and a
+// destroyed LockedBuffer returns nil there, which would key the HMAC with
+// nothing and emit tokens anyone could reproduce. Destroy sets the flag, but
+// memguard also destroys every locked buffer in the process on Purge and on
+// its interrupt handler, neither of which goes through Destroy. Checking the
+// buffers themselves turns that into ErrDestroyed instead of a silent
+// unkeyed token.
+//
+// A purge racing a tokenize call that has already passed this check can still
+// lose the key mid-call. Closing that window would mean holding a lock across
+// every HMAC, which costs more than the race is worth; the check covers the
+// ordinary case, where the purge precedes the call.
+func (t *Tokenizer) usable() bool {
+	return !t.destroyed.Load() &&
+		t.secret.IsAlive() && t.detKey.IsAlive() &&
+		t.bloomKey.IsAlive() && t.permKey.IsAlive()
+}
+
 // newHMACSHA256 returns an HMAC-SHA256 instance keyed by key.
 func newHMACSHA256(key []byte) hash.Hash {
 	return hmac.New(sha256.New, key)
@@ -308,7 +329,7 @@ func (t *Tokenizer) releaseBloom(h hash.Hash) {
 // every tokenize call. session.Session.TokenizeDeterministic stamps the
 // cached value automatically.
 func (t *Tokenizer) TokenizeDeterministic(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.DeterministicToken, error) {
-	if t.destroyed.Load() {
+	if !t.usable() {
 		return sriracha.DeterministicToken{}, ErrDestroyed
 	}
 	fields := make([][]byte, len(fs.Fields))
@@ -359,7 +380,7 @@ func (t *Tokenizer) TokenizeDeterministic(record sriracha.RawRecord, fs sriracha
 // outside the FieldSet flow. A value that normalizes to the empty string
 // returns an error wrapping sriracha.ErrEmptyValue.
 func (t *Tokenizer) TokenizeField(value string, path sriracha.FieldPath) ([]byte, error) {
-	if t.destroyed.Load() {
+	if !t.usable() {
 		return nil, ErrDestroyed
 	}
 	normalized, err := normalize.Normalize(value, path)

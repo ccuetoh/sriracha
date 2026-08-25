@@ -36,7 +36,7 @@ var ErrNoContributingFields = errors.New("token: CLK requires at least one contr
 // As with TokenizeDeterministic, FieldSetFingerprint is left empty on the
 // returned token; the caller (typically session.Session) stamps it.
 func (t *Tokenizer) TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.ProbabilisticToken, error) {
-	if t.destroyed.Load() {
+	if !t.usable() {
 		return sriracha.ProbabilisticToken{}, ErrDestroyed
 	}
 	cfg := fs.ProbabilisticParams
@@ -110,7 +110,7 @@ func (t *Tokenizer) TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha
 // required, because per-field tokens reveal per-field structure.
 // FieldSetFingerprint is left empty; the caller stamps it.
 func (t *Tokenizer) TokenizeCLK(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.CLKToken, error) {
-	if t.destroyed.Load() {
+	if !t.usable() {
 		return sriracha.CLKToken{}, ErrDestroyed
 	}
 	cfg := fs.ProbabilisticParams

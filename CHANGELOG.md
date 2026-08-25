@@ -100,10 +100,17 @@ Every signature that moved is listed below with what a v0.2 caller has to do.
   to floor.
 - `token.Equal` and `session.Session.Equal` return `(bool, error)` instead of
   `bool`. Tokens that are not comparable at all (format, `FieldSetVersion`,
-  `KeyID`, fingerprint, or field count disagreement, or no present fields on
-  either side) used to report a plain `false`; they now return
-  `(false, <sentinel>)`. A genuine value mismatch is still `(false, nil)`.
-  Callers that only want the verdict write `eq, _ := ...`.
+  `KeyID`, fingerprint, or field count disagreement) used to report a plain
+  `false`; they now return `(false, <sentinel>)`. A genuine value mismatch is
+  still `(false, nil)`. Callers that only want the verdict write
+  `eq, _ := ...`.
+- `token.Equal` now reports two tokens with no present field on either side as
+  `(false, ErrNoComparableFields)`. v0.2 reported `true`, which said any two
+  empty records are the same person. This is the one case in the release where
+  the bool itself changes, and `eq, _ := ...` absorbs it silently: a token from
+  an empty record under `DefaultFieldSet` hits it, since every canonical field
+  is optional. Call sites that compare possibly-empty records should check
+  `errors.Is(err, token.ErrNoComparableFields)` rather than discard the error.
 - `token.Score` is deleted. It had no non-test callers and treated absent
   fields differently from `Match`. Use `token.Match(...)` and read
   `MatchResult.Score`.
@@ -195,7 +202,9 @@ Every signature that moved is listed below with what a v0.2 caller has to do.
   `DicePerField` and `Match`.
 - `RecordFromMap` and `ValidateRecord` reported problems in map iteration
   order, so the same bad input produced different messages on different runs.
-  Both now report in sorted path order.
+  Both are deterministic now: `RecordFromMap` reports in sorted key order, and
+  `ValidateRecord` reports schema problems in `FieldSet` declaration order
+  followed by unknown paths in sorted order.
 - `examples/deterministic` re-tokenized its records and discarded the errors,
   then printed results in map order. `examples/tokenizer` emitted
   probabilistic tokens with no `FieldSetFingerprint`; a direct

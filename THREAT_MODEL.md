@@ -119,9 +119,14 @@ the raw identifiers.
 - A recipient without the secret reading tokens at rest or in transit.
 - A recipient without the secret correlating tokens across batches or across
   institutions.
-- Accidental schema drift between the two sides. `FieldSetFingerprint` and
-  `FieldSetVersion` are stamped on every token and comparison helpers refuse to
-  compare tokens that disagree.
+- Accidental schema drift between the two sides. `FieldSetVersion` is stamped
+  on every token and compared strictly. `FieldSetFingerprint` is stamped only
+  by `session.Session`, which also refuses any token whose fingerprint differs
+  from its own (`ErrFingerprintDrift`); `token.Tokenizer` leaves it empty and
+  the comparison helpers check it only when both sides carry one, so two
+  unstamped tokens are compared on version alone. A recipient that wants the
+  stronger guarantee should go through a `Session`, and
+  `session.WithStrictFingerprint` additionally rejects unstamped tokens.
 - Accidental key rotation drift. `KeyID` is stamped on every token and
   comparison helpers refuse to compare tokens that disagree, so a post-rotation
   mismatch surfaces as an error instead of silently scoring zero.

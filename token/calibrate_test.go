@@ -197,3 +197,109 @@ func TestPlateauMidpoint(t *testing.T) {
 		})
 	}
 }
+
+// TestF1ScoreEqualRatiosCompareEqual pins the arithmetic plateauMidpoint
+// depends on: count triples that are mathematically the same F1 must produce
+// the same float, or one plateau splits into several.
+func TestF1ScoreEqualRatiosCompareEqual(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name          string
+		aTP, aFP, aFN int
+		bTP, bFP, bFN int
+	}{
+		{"OneThird", 2, 8, 0, 1, 3, 1},
+		{"OneHalf", 3, 6, 0, 1, 2, 0},
+		{"TwoThirds", 2, 2, 0, 4, 4, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, f1Score(tc.aTP, tc.aFP, tc.aFN), f1Score(tc.bTP, tc.bFP, tc.bFN))
+		})
+	}
+}
+
+// TestF1ScoreAvoidsHarmonicDrift records why f1Score divides the counts
+// directly. The harmonic mean of precision and recall puts these two triples
+// one unit in the last place apart despite both being exactly 1/3.
+func TestF1ScoreAvoidsHarmonicDrift(t *testing.T) {
+	t.Parallel()
+
+	harmonic := func(tp, fp, fn int) float64 {
+		precision, recall := safeRatio(tp, tp+fp), safeRatio(tp, tp+fn)
+		if precision+recall == 0 {
+			return 0
+		}
+		return 2 * precision * recall / (precision + recall)
+	}
+
+	assert.NotEqual(t, harmonic(2, 8, 0), harmonic(1, 3, 1), "the harmonic route is what f1Score exists to avoid")
+	assert.Equal(t, f1Score(2, 8, 0), f1Score(1, 3, 1))
+}
+
+// TestF1ScoreZeroCounts covers the empty case.
+func TestF1ScoreZeroCounts(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, 0.0, f1Score(0, 0, 0))
+}
+
+// TestCalibrateExcludesZeroEvidencePairs pins that pairs with nothing
+// comparable stay out of the sweep even under a zero policy. Match reports
+// them as non-matches at every threshold, so counting them as predicted
+// matches at threshold 0 would fit the threshold against a decision Match
+// never makes.
+func TestCalibrateExcludesZeroEvidencePairs(t *testing.T) {
+	t.Parallel()
+
+	tok := newTok(t, "secret")
+	fs := bloomFS(
+		sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: false, Weight: 2.0},
+		sriracha.FieldSpec{Path: sriracha.FieldNameFamily, Required: false, Weight: 1.0},
+	)
+	tokenize := func(t *testing.T, rec sriracha.RawRecord) sriracha.ProbabilisticToken {
+		t.Helper()
+		tr, err := tok.TokenizeProbabilistic(rec, fs)
+		require.NoError(t, err)
+		return tr
+	}
+
+	present := tokenize(t, sriracha.RawRecord{
+		sriracha.FieldNameGiven:  "Christopher",
+		sriracha.FieldNameFamily: "Smith",
+	})
+	other := tokenize(t, sriracha.RawRecord{
+		sriracha.FieldNameGiven:  "Maria",
+		sriracha.FieldNameFamily: "Lopez",
+	})
+	empty := tokenize(t, sriracha.RawRecord{})
+
+	blank := LabeledPair{A: empty, B: empty, Match: true}
+
+	t.Run("ExcludedUnderZeroPolicy", func(t *testing.T) {
+		t.Parallel()
+
+		res, err := Match(empty, empty, fs, MatchPolicy{})
+		require.NoError(t, err)
+		require.Equal(t, 0, res.ComparableFields, "fixture must have nothing comparable")
+		require.False(t, res.IsMatch, "Match never calls a zero-evidence pair a match")
+
+		cal, err := Calibrate([]LabeledPair{
+			{A: present, B: present, Match: true},
+			{A: present, B: other, Match: false},
+			blank,
+		}, fs, MatchPolicy{})
+		require.NoError(t, err)
+		assert.Equal(t, 1, cal.ExcludedPairs)
+	})
+
+	t.Run("AllBlankPairsLeaveNothingToFit", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := Calibrate([]LabeledPair{blank, blank}, fs, MatchPolicy{})
+		require.ErrorIs(t, err, ErrAllPairsExcluded)
+	})
+}
