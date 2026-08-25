@@ -1,241 +1,18 @@
 package fieldset
 
 import (
-	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ccuetoh/sriracha"
+	"github.com/ccuetoh/sriracha/normalize"
 )
 
-func TestValidate_DefaultFieldSet(t *testing.T) {
+func TestDefaultFieldSet_Valid(t *testing.T) {
 	t.Parallel()
-	require.NoError(t, Validate(DefaultFieldSet()), "DefaultFieldSet() should be valid")
-}
-
-func TestValidate(t *testing.T) {
-	t.Parallel()
-	validBloom := sriracha.DefaultProbabilisticConfig()
-	cases := []struct {
-		name        string
-		fs          sriracha.FieldSet
-		wantErr     bool
-		errContains string
-	}{
-		{
-			name: "EmptyVersion",
-			fs: sriracha.FieldSet{
-				Version:             "",
-				Fields:              []sriracha.FieldSpec{{Path: sriracha.FieldNameGiven, Weight: 1.0}},
-				ProbabilisticParams: validBloom,
-			},
-			wantErr:     true,
-			errContains: "version",
-		},
-		{
-			name: "DuplicatePath",
-			fs: sriracha.FieldSet{
-				Version: "0.1",
-				Fields: []sriracha.FieldSpec{
-					{Path: sriracha.FieldNameGiven, Weight: 1.0},
-					{Path: sriracha.FieldNameGiven, Weight: 2.0},
-				},
-				ProbabilisticParams: validBloom,
-			},
-			wantErr:     true,
-			errContains: "duplicate",
-		},
-		{
-			name: "NegativeWeight",
-			fs: sriracha.FieldSet{
-				Version: "0.1",
-				Fields: []sriracha.FieldSpec{
-					{Path: sriracha.FieldNameGiven, Weight: -1.0},
-				},
-				ProbabilisticParams: validBloom,
-			},
-			wantErr:     true,
-			errContains: "negative",
-		},
-		{
-			name: "EmptyPath",
-			fs: sriracha.FieldSet{
-				Version: "0.1",
-				Fields: []sriracha.FieldSpec{
-					{Path: sriracha.FieldPath{}, Weight: 1.0},
-				},
-				ProbabilisticParams: validBloom,
-			},
-			wantErr:     true,
-			errContains: "empty path",
-		},
-		{
-			name: "NaNWeight",
-			fs: sriracha.FieldSet{
-				Version: "0.1",
-				Fields: []sriracha.FieldSpec{
-					{Path: sriracha.FieldNameGiven, Weight: math.NaN()},
-				},
-				ProbabilisticParams: validBloom,
-			},
-			wantErr:     true,
-			errContains: "non-finite",
-		},
-		{
-			name: "PositiveInfWeight",
-			fs: sriracha.FieldSet{
-				Version: "0.1",
-				Fields: []sriracha.FieldSpec{
-					{Path: sriracha.FieldNameGiven, Weight: math.Inf(1)},
-				},
-				ProbabilisticParams: validBloom,
-			},
-			wantErr:     true,
-			errContains: "non-finite",
-		},
-		{
-			name: "NegativeInfWeight",
-			fs: sriracha.FieldSet{
-				Version: "0.1",
-				Fields: []sriracha.FieldSpec{
-					{Path: sriracha.FieldNameGiven, Weight: math.Inf(-1)},
-				},
-				ProbabilisticParams: validBloom,
-			},
-			wantErr:     true,
-			errContains: "weight",
-		},
-		{
-			name: "ZeroWeightIsValid",
-			fs: sriracha.FieldSet{
-				Version: "0.1",
-				Fields: []sriracha.FieldSpec{
-					{Path: sriracha.FieldNameGiven, Weight: 0.0},
-				},
-				ProbabilisticParams: validBloom,
-			},
-			wantErr: false,
-		},
-		{
-			name:    "EmptyFields",
-			fs:      sriracha.FieldSet{Version: "0.1", Fields: nil, ProbabilisticParams: validBloom},
-			wantErr: false,
-		},
-		{
-			name: "BloomZeroSizeBits",
-			fs: sriracha.FieldSet{
-				Version:             "0.1",
-				ProbabilisticParams: sriracha.ProbabilisticConfig{SizeBits: 0, HashCount: 2, NgramSizes: []int{2}},
-			},
-			wantErr:     true,
-			errContains: "SizeBits",
-		},
-		{
-			name: "BloomZeroHashCount",
-			fs: sriracha.FieldSet{
-				Version:             "0.1",
-				ProbabilisticParams: sriracha.ProbabilisticConfig{SizeBits: 1024, HashCount: 0, NgramSizes: []int{2}},
-			},
-			wantErr:     true,
-			errContains: "HashCount",
-		},
-		{
-			name: "BloomNegativeHashCount",
-			fs: sriracha.FieldSet{
-				Version:             "0.1",
-				ProbabilisticParams: sriracha.ProbabilisticConfig{SizeBits: 1024, HashCount: -1, NgramSizes: []int{2}},
-			},
-			wantErr:     true,
-			errContains: "HashCount",
-		},
-		{
-			name: "BloomEmptyNgramSizes",
-			fs: sriracha.FieldSet{
-				Version:             "0.1",
-				ProbabilisticParams: sriracha.ProbabilisticConfig{SizeBits: 1024, HashCount: 2, NgramSizes: nil},
-			},
-			wantErr:     true,
-			errContains: "NgramSizes",
-		},
-		{
-			name: "BloomNonPositiveNgramSize",
-			fs: sriracha.FieldSet{
-				Version:             "0.1",
-				ProbabilisticParams: sriracha.ProbabilisticConfig{SizeBits: 1024, HashCount: 2, NgramSizes: []int{0, 2}},
-			},
-			wantErr:     true,
-			errContains: "NgramSizes[0]",
-		},
-		{
-			name: "BalancedOddSizeBits",
-			fs: sriracha.FieldSet{
-				Version: "0.1",
-				ProbabilisticParams: sriracha.ProbabilisticConfig{
-					SizeBits:   1023,
-					HashCount:  2,
-					NgramSizes: []int{2, 3},
-					Balanced:   true,
-				},
-			},
-			wantErr:     true,
-			errContains: "even when Balanced",
-		},
-		{
-			name: "UnbalancedOddSizeBitsValid",
-			fs: sriracha.FieldSet{
-				Version: "0.1",
-				ProbabilisticParams: sriracha.ProbabilisticConfig{
-					SizeBits:   1023,
-					HashCount:  2,
-					NgramSizes: []int{2, 3},
-				},
-			},
-			wantErr: false,
-		},
-		{
-			name: "BalancedEvenSizeBitsValid",
-			fs: sriracha.FieldSet{
-				Version: "0.1",
-				ProbabilisticParams: sriracha.ProbabilisticConfig{
-					SizeBits:   1024,
-					HashCount:  2,
-					NgramSizes: []int{2, 3},
-					Balanced:   true,
-				},
-			},
-			wantErr: false,
-		},
-		{
-			name: "FastPresetValid",
-			fs: sriracha.FieldSet{
-				Version:             "0.1",
-				ProbabilisticParams: sriracha.FastProbabilisticConfig(),
-			},
-			wantErr: false,
-		},
-		{
-			name: "HighPrecisionPresetValid",
-			fs: sriracha.FieldSet{
-				Version:             "0.1",
-				ProbabilisticParams: sriracha.HighPrecisionProbabilisticConfig(),
-			},
-			wantErr: false,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			err := Validate(tc.fs)
-			if tc.wantErr {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tc.errContains)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
+	require.NoError(t, DefaultFieldSet().Validate(), "DefaultFieldSet() should be valid")
 }
 
 const expectedDefaultFieldCount = 16
@@ -288,56 +65,140 @@ func TestValidateRecord(t *testing.T) {
 		ProbabilisticParams: sriracha.DefaultProbabilisticConfig(),
 	}
 
-	t.Run("Valid", func(t *testing.T) {
-		t.Parallel()
-		errs := ValidateRecord(sriracha.RawRecord{
-			sriracha.FieldNameGiven:  "Alice",
-			sriracha.FieldNameFamily: "Smith",
-			sriracha.FieldDateBirth:  "1990-01-01",
-		}, fs)
-		assert.Empty(t, errs)
-	})
+	cases := []struct {
+		name string
+		// record is validated against fs.
+		record sriracha.RawRecord
+		// wantLeaves is the number of joined leaves expected, 0 for a valid
+		// record.
+		wantLeaves int
+		// wantIs lists the sentinels every leaf set must contain.
+		wantIs []error
+		// wantPaths lists the paths recoverable from the leaves, in order.
+		wantPaths []sriracha.FieldPath
+	}{
+		{
+			name: "Valid",
+			record: sriracha.RawRecord{
+				sriracha.FieldNameGiven:  "Alice",
+				sriracha.FieldNameFamily: "Smith",
+				sriracha.FieldDateBirth:  "1990-01-01",
+			},
+		},
+		{
+			name: "OptionalAbsent",
+			record: sriracha.RawRecord{
+				sriracha.FieldNameGiven: "Alice",
+			},
+		},
+		{
+			name: "OptionalNormalizesToEmpty",
+			record: sriracha.RawRecord{
+				sriracha.FieldNameGiven:  "Alice",
+				sriracha.FieldNameFamily: "",
+			},
+		},
+		{
+			name: "ReportsEveryProblemInOnePass",
+			record: sriracha.RawRecord{
+				sriracha.FieldNameFamily:   "Smith",
+				sriracha.FieldDateBirth:    "not-a-date",
+				sriracha.FieldContactEmail: "alice@example.com",
+			},
+			wantLeaves: 3,
+			wantIs: []error{
+				sriracha.ErrRequiredFieldMissing,
+				normalize.ErrInvalidValue,
+				sriracha.ErrUnknownField,
+			},
+			wantPaths: []sriracha.FieldPath{
+				sriracha.FieldNameGiven,
+				sriracha.FieldDateBirth,
+				sriracha.FieldContactEmail,
+			},
+		},
+		{
+			name: "RequiredMissing",
+			record: sriracha.RawRecord{
+				sriracha.FieldNameFamily: "Smith",
+			},
+			wantLeaves: 1,
+			wantIs:     []error{sriracha.ErrRequiredFieldMissing},
+			wantPaths:  []sriracha.FieldPath{sriracha.FieldNameGiven},
+		},
+		{
+			name: "RequiredNormalizesToEmpty",
+			record: sriracha.RawRecord{
+				sriracha.FieldNameGiven: "",
+			},
+			wantLeaves: 1,
+			wantIs:     []error{sriracha.ErrEmptyValue},
+			wantPaths:  []sriracha.FieldPath{sriracha.FieldNameGiven},
+		},
+		{
+			name: "UnknownPathsSorted",
+			record: sriracha.RawRecord{
+				sriracha.FieldNameGiven:    "Alice",
+				sriracha.FieldContactPhone: "+1 800 555 1234",
+				sriracha.FieldContactEmail: "alice@example.com",
+			},
+			wantLeaves: 2,
+			wantIs:     []error{sriracha.ErrUnknownField},
+			wantPaths: []sriracha.FieldPath{
+				sriracha.FieldContactEmail,
+				sriracha.FieldContactPhone,
+			},
+		},
+	}
 
-	t.Run("ReturnsAllErrors", func(t *testing.T) {
-		t.Parallel()
-		// Required missing + bad date + unknown path: must surface all three.
-		errs := ValidateRecord(sriracha.RawRecord{
-			sriracha.FieldNameFamily:   "Smith",
-			sriracha.FieldDateBirth:    "not-a-date",
-			sriracha.FieldContactEmail: "alice@example.com",
-		}, fs)
-		require.Len(t, errs, 3)
-		joined := errs[0].Error() + "|" + errs[1].Error() + "|" + errs[2].Error()
-		assert.Contains(t, joined, "required")
-		assert.Contains(t, joined, "ISO 8601")
-		assert.Contains(t, joined, "unknown field")
-	})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	t.Run("OptionalAbsent", func(t *testing.T) {
-		t.Parallel()
-		errs := ValidateRecord(sriracha.RawRecord{
-			sriracha.FieldNameGiven: "Alice",
-		}, fs)
-		assert.Empty(t, errs, "absent optional fields must not be flagged")
-	})
+			err := ValidateRecord(tc.record, fs)
+			if tc.wantLeaves == 0 {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
 
-	t.Run("RequiredNormalizesToEmpty", func(t *testing.T) {
-		t.Parallel()
-		errs := ValidateRecord(sriracha.RawRecord{
-			sriracha.FieldNameGiven: "",
-		}, fs)
-		require.Len(t, errs, 1)
-		assert.Contains(t, errs[0].Error(), "is empty")
-	})
+			joined, ok := err.(interface{ Unwrap() []error })
+			require.True(t, ok, "ValidateRecord must return a joined error")
+			leaves := joined.Unwrap()
+			require.Len(t, leaves, tc.wantLeaves)
 
-	t.Run("OptionalNormalizesToEmpty", func(t *testing.T) {
-		t.Parallel()
-		errs := ValidateRecord(sriracha.RawRecord{
-			sriracha.FieldNameGiven:  "Alice",
-			sriracha.FieldNameFamily: "",
-		}, fs)
-		assert.Empty(t, errs, "optional fields that normalize to empty must not be flagged")
-	})
+			for _, sentinel := range tc.wantIs {
+				assert.ErrorIsf(t, err, sentinel, "sentinel %v must stay reachable through the join", sentinel)
+			}
+
+			paths := make([]sriracha.FieldPath, 0, len(leaves))
+			for _, leaf := range leaves {
+				var fieldErr sriracha.FieldError
+				require.ErrorAs(t, leaf, &fieldErr, "every leaf must be a FieldError")
+				paths = append(paths, fieldErr.Path)
+			}
+			assert.Equal(t, tc.wantPaths, paths)
+		})
+	}
+}
+
+func TestValidateRecord_NormalizationErrorPropagates(t *testing.T) {
+	t.Parallel()
+
+	fs := sriracha.FieldSet{
+		Version:             "v1",
+		Fields:              []sriracha.FieldSpec{{Path: sriracha.FieldDateBirth, Weight: 1.0}},
+		ProbabilisticParams: sriracha.DefaultProbabilisticConfig(),
+	}
+
+	err := ValidateRecord(sriracha.RawRecord{sriracha.FieldDateBirth: "15/06/2024"}, fs)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, normalize.ErrInvalidValue)
+	assert.Contains(t, err.Error(), "ISO 8601")
+
+	var fieldErr sriracha.FieldError
+	require.ErrorAs(t, err, &fieldErr)
+	assert.Equal(t, sriracha.FieldDateBirth, fieldErr.Path)
 }
 
 func TestDefaultFieldSet_NgramSizesIndependent(t *testing.T) {

@@ -51,7 +51,7 @@ var corpora = []corpus{
 }
 
 var (
-	sharedSession session.Session
+	sharedSession *session.Session
 	sharedCorpora map[string][]record
 
 	bmfMu      sync.Mutex

@@ -10,11 +10,16 @@
 > **API is unstable**. Not production-ready.
 
 
-Sriracha is a Go library for privacy-preserving record linkage. It enables institutions
-to share person records across organizational boundaries without transmitting raw PII.
-Sriracha provides the building blocks for building privacy-first transports.
-Records are normalized and tokenized with a shared secret, producing tokens
-that can be compared without exposing the underlying identifiers.
+Sriracha is a Go library for privacy-preserving record linkage. It lets institutions
+link person records across organizational boundaries without transmitting the raw
+identifiers. Records are normalized and tokenized under a shared secret, and the
+resulting tokens are compared instead of the source values. Sriracha provides the
+building blocks for privacy-first transports; it is not a transport itself.
+
+Tokens are pseudonymous, not anonymous. The shared secret is the whole privacy
+barrier: anyone holding it can re-derive the token for any candidate value, so
+tokens remain personal data and must be handled as such. Read
+[`THREAT_MODEL.md`](THREAT_MODEL.md) before deploying.
 
 ## Features
 
@@ -22,8 +27,12 @@ that can be compared without exposing the underlying identifiers.
 - Probabilistic tokenization with Sørensen–Dice matching
 - Record-level CLK tokens, the recommended form for sharing, always balanced so the filter popcount reveals nothing
 - Optional balanced mode for per-field filters
+- Match policies that pair a threshold with an evidence floor, so a pair agreeing on one field alone is not reported as a match
+- Threshold calibration from labeled pairs, reported with the full precision-recall curve
+- Schema drift detection: a `Session` refuses tokens minted under a different `FieldSet`
 - Unicode normalization pipeline
 - Canonical field set with support for extended schemas
+- Errors wrap sentinels and carry the field path, so callers branch with `errors.Is` / `errors.As`
 - Token derivation pinned by golden vector tests
 
 ## Installation
@@ -31,7 +40,7 @@ that can be compared without exposing the underlying identifiers.
 Requires Go 1.25+
 
 ```bash
-go get github.com/ccuetoh/sriracha@v0.2
+go get github.com/ccuetoh/sriracha
 ```
 
 ## Quickstart
@@ -44,10 +53,12 @@ import (
 	"github.com/ccuetoh/sriracha"
 	"github.com/ccuetoh/sriracha/fieldset"
 	"github.com/ccuetoh/sriracha/session"
+	"github.com/ccuetoh/sriracha/token"
 )
 
 func main() {
-	secret := []byte("super-secret-key")
+	// At least token.MinSecretLen (32) bytes, from crypto/rand or a KMS.
+	secret := []byte("demo-secret-32-bytes-of-key-mats")
 
 	s, _ := session.New(secret, fieldset.DefaultFieldSet())
 	defer s.Destroy()
@@ -63,7 +74,7 @@ func main() {
 		sriracha.FieldNameFamily: "Smith",
 	})
 
-	eq := s.Equal(tokA, tokB)
+	eq, _ := s.Equal(tokA, tokB)
 	fmt.Printf("match: %v\n", eq)
 
 	// Probabilistic tokenization
@@ -77,7 +88,7 @@ func main() {
 		sriracha.FieldNameFamily: "Smyth", // typo
 	})
 
-	result, _ := s.Match(bloomA, bloomB, 0.85)
+	result, _ := s.Match(bloomA, bloomB, token.DefaultMatchPolicy(0.85))
 	fmt.Printf("match: %v (score: %.2f)\n", result.IsMatch, result.Score)
 }
 ```

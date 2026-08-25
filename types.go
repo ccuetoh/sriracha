@@ -1,6 +1,9 @@
 package sriracha
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 // RawRecord is the input type institutions populate before tokenization.
 // Keys are FieldPath values; values are the raw string for that field.
@@ -159,6 +162,66 @@ type FieldSet struct {
 	ProbabilisticParams ProbabilisticConfig `json:"probabilistic_params"`
 }
 
+// Validate checks that fs is a well-formed FieldSet. It returns an error
+// wrapping ErrMissingVersion if Version is empty, ErrInvalidFieldPath if a
+// FieldSpec has no path, ErrDuplicateField if a path repeats,
+// ErrInvalidWeight if a weight is negative, NaN, or infinite, and whatever
+// ProbabilisticConfig.Validate reports for ProbabilisticParams. Field-scoped
+// failures are wrapped in a FieldError, so errors.As recovers the path.
+//
+// The first failure stops the walk; this is a configuration check, not a
+// record check, and a malformed FieldSet is not usable in part.
+func (fs FieldSet) Validate() error {
+	if fs.Version == "" {
+		return ErrMissingVersion
+	}
+
+	seen := make(map[FieldPath]struct{}, len(fs.Fields))
+	for i, f := range fs.Fields {
+		if f.Path.String() == "" {
+			return fmt.Errorf("field %d has empty path: %w", i, ErrInvalidFieldPath)
+		}
+		if _, dup := seen[f.Path]; dup {
+			return FieldError{Path: f.Path, Err: ErrDuplicateField}
+		}
+
+		seen[f.Path] = struct{}{}
+		if f.Weight < 0 {
+			return FieldError{Path: f.Path, Err: fmt.Errorf("%w: %v is negative", ErrInvalidWeight, f.Weight)}
+		}
+		if math.IsNaN(f.Weight) || math.IsInf(f.Weight, 0) {
+			return FieldError{Path: f.Path, Err: fmt.Errorf("%w: %v is non-finite", ErrInvalidWeight, f.Weight)}
+		}
+	}
+
+	return fs.ProbabilisticParams.Validate()
+}
+
+// Validate rejects ProbabilisticConfig values that would crash or produce
+// degenerate (all-zero) filters at tokenization time: a zero size, an odd
+// size with Balanced set, a non-positive hash count, or empty or
+// non-positive ngram sizes. Every error wraps ErrInvalidConfig.
+func (c ProbabilisticConfig) Validate() error {
+	if c.SizeBits == 0 {
+		return fmt.Errorf("%w: SizeBits must be > 0", ErrInvalidConfig)
+	}
+	if c.Balanced && c.SizeBits%2 != 0 {
+		return fmt.Errorf("%w: SizeBits must be even when Balanced, got %d", ErrInvalidConfig, c.SizeBits)
+	}
+	if c.HashCount <= 0 {
+		return fmt.Errorf("%w: HashCount must be > 0, got %d", ErrInvalidConfig, c.HashCount)
+	}
+	if len(c.NgramSizes) == 0 {
+		return fmt.Errorf("%w: NgramSizes must not be empty", ErrInvalidConfig)
+	}
+	for i, sz := range c.NgramSizes {
+		if sz <= 0 {
+			return fmt.Errorf("%w: NgramSizes[%d] must be > 0, got %d", ErrInvalidConfig, i, sz)
+		}
+	}
+	return nil
+}
+
 // String returns a redacted summary of the token: counts and metadata only,
 // never any byte from Fields. Safe for logging.
 func (t DeterministicToken) String() string {
@@ -196,7 +259,7 @@ type AnnotatedField struct {
 // AnnotatedToken is a safe-to-log view of a token: token-level metadata plus
 // per-field presence and byte counts, with the raw HMAC / Bloom bytes stripped.
 type AnnotatedToken struct {
-	Version             string           `json:"version"`
+	FieldSetVersion     string           `json:"field_set_version"`
 	KeyID               string           `json:"key_id,omitempty"`
 	FieldSetFingerprint string           `json:"field_set_fingerprint,omitempty"`
 	Fields              []AnnotatedField `json:"fields"`
@@ -241,17 +304,21 @@ func annotateFields(version, keyID, fingerprint string, fields [][]byte, fs Fiel
 		}
 	}
 	return AnnotatedToken{
-		Version:             version,
+		FieldSetVersion:     version,
 		KeyID:               keyID,
 		FieldSetFingerprint: fingerprint,
 		Fields:              annotated,
 	}
 }
 
+// summariseFields counts the present fields, the total fields, and the total
+// bytes. Presence is len(field) > 0, the same predicate Annotate uses, so a
+// token that lost its nil slices to a JSON round trip still reports the same
+// counts.
 func summariseFields(fields [][]byte) (present, total, totalBytes int) {
 	total = len(fields)
 	for _, f := range fields {
-		if f != nil {
+		if presentByLength(f) {
 			present++
 		}
 		totalBytes += len(f)

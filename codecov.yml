@@ -1,5 +1,4 @@
 ignore:
-  - "mock"
   - "test/bench"
   - "examples"
 

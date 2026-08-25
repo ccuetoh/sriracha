@@ -15,8 +15,28 @@ import (
 	"github.com/ccuetoh/sriracha/normalize"
 )
 
-func (t *tokenizer) TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.ProbabilisticToken, error) {
-	if t.destroyed.Load() {
+// ErrNoContributingFields reports a CLK request where no field contributed
+// any q-gram, so the filter would carry no information about the record.
+var ErrNoContributingFields = errors.New("token: CLK requires at least one contributing field")
+
+// TokenizeProbabilistic tokenizes a RawRecord in probabilistic (Bloom
+// filter) mode. The returned token's Fields slice is aligned with fs.Fields:
+// present fields contain the populated filter, absent optional fields
+// contain a nil entry. fs.ProbabilisticParams is validated first and an
+// invalid config returns an error wrapping sriracha.ErrInvalidConfig. A
+// missing required field returns an error wrapping
+// sriracha.ErrRequiredFieldMissing. A value that normalizes to the empty
+// string is treated as absent, so an optional field keeps a nil entry and a
+// required field returns an error wrapping sriracha.ErrEmptyValue.
+//
+// Per-field tokens reveal per-field structure: which fields the record
+// carries and how similar each one is. When per-field scores are not
+// required, prefer TokenizeCLK.
+//
+// As with TokenizeDeterministic, FieldSetFingerprint is left empty on the
+// returned token; the caller (typically session.Session) stamps it.
+func (t *Tokenizer) TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.ProbabilisticToken, error) {
+	if !t.usable() {
 		return sriracha.ProbabilisticToken{}, ErrDestroyed
 	}
 	cfg := fs.ProbabilisticParams
@@ -38,18 +58,18 @@ func (t *tokenizer) TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha
 		raw, ok := record[spec.Path]
 		if !ok {
 			if spec.Required {
-				return sriracha.ProbabilisticToken{}, fmt.Errorf("token: required field %q missing", spec.Path)
+				return sriracha.ProbabilisticToken{}, fieldErr(spec.Path, sriracha.ErrRequiredFieldMissing)
 			}
 			continue
 		}
 
 		normalized, err := normalize.Normalize(raw, spec.Path)
 		if err != nil {
-			return sriracha.ProbabilisticToken{}, fmt.Errorf("token: normalization failed for field %q: %w", spec.Path, err)
+			return sriracha.ProbabilisticToken{}, fieldErr(spec.Path, err)
 		}
 		if normalized == "" {
 			if spec.Required {
-				return sriracha.ProbabilisticToken{}, fmt.Errorf("token: required field %q is empty", spec.Path)
+				return sriracha.ProbabilisticToken{}, fieldErr(spec.Path, sriracha.ErrEmptyValue)
 			}
 			// The value is treated as absent and keeps a nil entry.
 			continue
@@ -71,16 +91,26 @@ func (t *tokenizer) TokenizeProbabilistic(record sriracha.RawRecord, fs sriracha
 	}, nil
 }
 
-// TokenizeCLK folds every present field of record into one shared filter.
-// The per-gram preimage includes the field path, so the same gram from two
-// different fields lands at different positions. CLK filters are always
-// balanced regardless of cfg.Balanced, so the emitted popcount is exactly
-// SizeBits/2 and reveals nothing about the record, and SizeBits must be
-// even. A record where no field contributes returns an error, because an
-// empty CLK would otherwise be indistinguishable from a real filter after
-// balancing.
-func (t *tokenizer) TokenizeCLK(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.CLKToken, error) {
-	if t.destroyed.Load() {
+// TokenizeCLK tokenizes a RawRecord into a single record-level CLK filter.
+// Every present field contributes its q-grams (with the field path in each
+// gram's preimage) to one shared filter, so the same gram from two different
+// fields lands at different positions. The filter then receives the same
+// balanced and permutation treatment as per-field filters. CLK filters are
+// always balanced regardless of cfg.Balanced, so the emitted popcount is
+// exactly SizeBits/2 and reveals nothing about the record, and SizeBits must
+// be even.
+//
+// Missing required fields and required fields that normalize to the empty
+// string return an error, as in TokenizeProbabilistic; absent optional
+// fields simply do not contribute. A record where no field contributes
+// returns ErrNoContributingFields, because an empty CLK would otherwise be
+// indistinguishable from a real filter after balancing.
+//
+// CLK is the recommended way to share tokens when per-field scores are not
+// required, because per-field tokens reveal per-field structure.
+// FieldSetFingerprint is left empty; the caller stamps it.
+func (t *Tokenizer) TokenizeCLK(record sriracha.RawRecord, fs sriracha.FieldSet) (sriracha.CLKToken, error) {
+	if !t.usable() {
 		return sriracha.CLKToken{}, ErrDestroyed
 	}
 	cfg := fs.ProbabilisticParams
@@ -88,7 +118,7 @@ func (t *tokenizer) TokenizeCLK(record sriracha.RawRecord, fs sriracha.FieldSet)
 		return sriracha.CLKToken{}, err
 	}
 	if cfg.SizeBits%2 != 0 {
-		return sriracha.CLKToken{}, fmt.Errorf("token: ProbabilisticParams.SizeBits must be even for CLK, got %d", cfg.SizeBits)
+		return sriracha.CLKToken{}, fmt.Errorf("token: %w: SizeBits must be even for CLK, got %d", sriracha.ErrInvalidConfig, cfg.SizeBits)
 	}
 	base := cfg.SizeBits / 2
 	bs := acquireBitset(base)
@@ -101,17 +131,17 @@ func (t *tokenizer) TokenizeCLK(record sriracha.RawRecord, fs sriracha.FieldSet)
 		raw, ok := record[spec.Path]
 		if !ok {
 			if spec.Required {
-				return sriracha.CLKToken{}, fmt.Errorf("token: required field %q missing", spec.Path)
+				return sriracha.CLKToken{}, fieldErr(spec.Path, sriracha.ErrRequiredFieldMissing)
 			}
 			continue
 		}
 		normalized, err := normalize.Normalize(raw, spec.Path)
 		if err != nil {
-			return sriracha.CLKToken{}, fmt.Errorf("token: normalization failed for field %q: %w", spec.Path, err)
+			return sriracha.CLKToken{}, fieldErr(spec.Path, err)
 		}
 		if normalized == "" {
 			if spec.Required {
-				return sriracha.CLKToken{}, fmt.Errorf("token: required field %q is empty", spec.Path)
+				return sriracha.CLKToken{}, fieldErr(spec.Path, sriracha.ErrEmptyValue)
 			}
 			continue
 		}
@@ -119,7 +149,7 @@ func (t *tokenizer) TokenizeCLK(record sriracha.RawRecord, fs sriracha.FieldSet)
 		contributing++
 	}
 	if contributing == 0 {
-		return sriracha.CLKToken{}, errors.New("token: CLK requires at least one contributing field")
+		return sriracha.CLKToken{}, ErrNoContributingFields
 	}
 
 	out := make([]byte, filterBytes(cfg.SizeBits))
@@ -141,25 +171,12 @@ func filterBytes(sizeBits uint32) int {
 
 // validateBloomConfig rejects ProbabilisticConfig values that would divide
 // by zero at position selection or allocate a degenerate filter. FieldSets
-// built through fieldset.Validate are already checked; this guards direct
-// Tokenizer callers.
+// built through FieldSet.Validate are already checked; this guards direct
+// Tokenizer callers. The rules live on the config itself, so this only adds
+// the package prefix; every error wraps sriracha.ErrInvalidConfig.
 func validateBloomConfig(cfg sriracha.ProbabilisticConfig) error {
-	if cfg.SizeBits == 0 {
-		return errors.New("token: ProbabilisticParams.SizeBits must be > 0")
-	}
-	if cfg.Balanced && cfg.SizeBits%2 != 0 {
-		return fmt.Errorf("token: ProbabilisticParams.SizeBits must be even when Balanced, got %d", cfg.SizeBits)
-	}
-	if cfg.HashCount <= 0 {
-		return fmt.Errorf("token: ProbabilisticParams.HashCount must be > 0, got %d", cfg.HashCount)
-	}
-	if len(cfg.NgramSizes) == 0 {
-		return errors.New("token: ProbabilisticParams.NgramSizes must not be empty")
-	}
-	for i, sz := range cfg.NgramSizes {
-		if sz <= 0 {
-			return fmt.Errorf("token: ProbabilisticParams.NgramSizes[%d] must be > 0, got %d", i, sz)
-		}
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("token: %w", err)
 	}
 	return nil
 }
@@ -173,7 +190,7 @@ func validateBloomConfig(cfg sriracha.ProbabilisticConfig) error {
 // cfg.Balanced. Balanced filters then append the complement of the base
 // filter and apply the tokenizer's secret permutation, so the emitted
 // popcount is exactly cfg.SizeBits/2 for every present field.
-func (t *tokenizer) tokenizeFieldBloom(h hash.Hash, out []byte, normalizedValue string, path sriracha.FieldPath, cfg sriracha.ProbabilisticConfig) {
+func (t *Tokenizer) tokenizeFieldBloom(h hash.Hash, out []byte, normalizedValue string, path sriracha.FieldPath, cfg sriracha.ProbabilisticConfig) {
 	base := cfg.SizeBits
 	if cfg.Balanced {
 		base = cfg.SizeBits / 2
@@ -232,7 +249,7 @@ func gramDoubleHash(h hash.Hash, gram, pathBytes []byte) (h1, h2 uint64) {
 // of the output, where perm is the tokenizer's secret permutation for
 // sizeBits. Exactly one of each (j, half+j) pair is set, so the emitted
 // popcount is exactly sizeBits/2 regardless of the value.
-func (t *tokenizer) balanceInto(out []byte, bs *bitset.BitSet, sizeBits uint32) {
+func (t *Tokenizer) balanceInto(out []byte, bs *bitset.BitSet, sizeBits uint32) {
 	perm := t.permutation(sizeBits)
 	half := sizeBits / 2
 	ext := acquireBitset(sizeBits)
@@ -254,7 +271,7 @@ func (t *tokenizer) balanceInto(out []byte, bs *bitset.BitSet, sizeBits uint32) 
 // deterministic per (secret, sizeBits) and unbiased via rejection sampling.
 // Concurrent first calls may both generate; the shuffle is deterministic so
 // either result is identical and LoadOrStore keeps one.
-func (t *tokenizer) permutation(sizeBits uint32) []uint32 {
+func (t *Tokenizer) permutation(sizeBits uint32) []uint32 {
 	if cached, ok := t.perms.Load(sizeBits); ok {
 		return cached.([]uint32) //nolint:forcetypeassert // only []uint32 is ever stored
 	}

@@ -7,7 +7,7 @@
 
 ## Package layout
 ```
-(root)           # core types, fields, interfaces (github.com/ccuetoh/sriracha)
+(root)           # core types, fields, error sentinels (github.com/ccuetoh/sriracha)
 normalize/       # Unicode normalization pipeline
 token/           # HMAC-SHA256 deterministic + Bloom filter probabilistic tokenizers (uses bits-and-blooms/bitset)
 fieldset/        # FieldSet validation and canonical schema
@@ -16,14 +16,14 @@ test/bench/      # OpenSanctions quality + perf harness, gated by //go:build ben
 ```
 
 ## Hard rules
-- **No panics** anywhere except `MustParsePath` (init-time field path declarations only).
+- **No panics** anywhere except `MustParseFieldPath` (init-time field path declarations only).
 - **All error paths must return `error`** — bounds checks, type assertions, I/O all return errors.
 - **No comment separators** like `// --- Section name ---`.
 - **No `unsafe`** — importing the `unsafe` package is forbidden (enforced by `depguard` in `.golangci.yml`).
 
 ## Key design decisions
 - `FieldPath` is a struct with precomputed `org`, `namespace`, `localName` fields — never split the string at call time.
-- `ParseFieldPath(s)` is the validated constructor (returns error); `MustParsePath(s)` panics and is only for package-level `var` declarations.
+- `ParseFieldPath(s)` is the validated constructor (returns error); `MustParseFieldPath(s)` panics and is only for package-level `var` declarations.
 - `DefaultFieldSet()` returns a deep copy — the internal `defaultV01` is unexported.
 - `TokenizeDeterministic` is deterministic-only; `TokenizeProbabilistic` is probabilistic-only — no internal mode dispatch.
 
@@ -33,7 +33,7 @@ test/bench/      # OpenSanctions quality + perf harness, gated by //go:build ben
 - Table-driven tests with named subtests wherever multiple cases test the same function.
 - Never use loop variable capture (`tc := tc`) before subtest closures. (Go 1.22+)
 - Target 100% coverage.
-- No ad-hoc mocks. Use the mocks in ./mock
+- No ad-hoc mocks. The module exports no interfaces, so construct a real `token.Tokenizer` or `session.Session` with a test secret.
 
 ## Running tests
 ```bash

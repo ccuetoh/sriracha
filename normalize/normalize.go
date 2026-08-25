@@ -1,19 +1,42 @@
 // Package normalize implements the Unicode normalization pipeline applied
 // to every field value before tokenization.
 //
-// The pipeline replaces invalid UTF-8 bytes with U+FFFD, strips Unicode
-// format characters (category Cf), applies NFKD decomposition, casefolds
-// with Unicode-aware lowercasing, and then dispatches to a field-specific
-// normalizer chosen by the FieldPath namespace (digits-only for identifiers,
-// RFC 3339 parsing for dates, Latin-scoped diacritic stripping for names,
-// and so on). Calling Normalize directly
-// is rarely needed — token.Tokenizer runs it as the first stage of every
-// tokenize call. The surface is exported so callers can pre-validate
-// input or build custom indexing pipelines that share the canonical form.
+// Every value runs the shared pipeline first. Invalid UTF-8 bytes are
+// replaced with U+FFFD, Unicode format characters (category Cf) are
+// stripped, NFKD decomposition is applied, the value is lowercased with
+// language.Und, and whitespace is collapsed and trimmed.
+//
+// A value on a canonical path (org sriracha) then runs one field-specific
+// normalizer, chosen by namespace first and exact path second:
+//
+//	identifier::*     hyphens, dots and spaces stripped
+//	name::*           combining marks stripped after a Latin base rune
+//	date::*           must already be ISO 8601 YYYY-MM-DD, error otherwise
+//	contact::email    exactly one '@' required, trailing domain dots stripped
+//	contact::phone    digits plus a single leading '+', at least 7 digits
+//	address::country  2-letter ISO 3166-1 alpha-2, uppercased
+//	address::*        shared pipeline only
+//
+// A path carrying any other org gets the shared pipeline and nothing else.
+// Sriracha does not know what a custom org means by its namespaces, so
+// applying the canonical rules would silently rewrite values (separator
+// stripping on an identifier-shaped path, ISO 8601 rejection on a
+// date-shaped one). A custom org that wants identifier or date handling
+// should normalize before calling.
+//
+// Both institutions in a linkage must normalize identically for their tokens
+// to match, so these rules are part of the wire contract. Changing them
+// changes every token derived from them.
+//
+// Calling Normalize directly is rarely needed. token.Tokenizer runs it as
+// the first stage of every tokenize call. The surface is exported so callers
+// can pre-validate input or build custom indexing pipelines that share the
+// canonical form.
 package normalize
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 	"unicode"
@@ -24,6 +47,13 @@ import (
 	"golang.org/x/text/language"
 	"golang.org/x/text/unicode/norm"
 )
+
+// ErrInvalidValue reports a value that does not match the format its field
+// requires. Every format failure Normalize returns wraps it, so callers can
+// branch with errors.Is instead of matching message text. A field that
+// requires a value but receives an empty one wraps sriracha.ErrEmptyValue
+// instead.
+var ErrInvalidValue = errors.New("invalid value")
 
 // Normalize applies the standard Sriracha normalization pipeline to value
 // for the given field path. Returns an error if the value is invalid for
@@ -46,7 +76,13 @@ func Normalize(value string, path sriracha.FieldPath) (string, error) {
 	// Step 5: Trim leading/trailing whitespace
 	value = trimWhitespace(value)
 
-	// Step 6: Field-specific normalization
+	// Step 6: Field-specific normalization, canonical paths only. A custom
+	// org's namespaces mean whatever that org decided, so inheriting the
+	// canonical rules would silently rewrite its values.
+	if !path.IsCanonical() {
+		return value, nil
+	}
+
 	switch {
 	case path.InNamespace(sriracha.NamespaceDate):
 		return normalizeDate(value)
@@ -121,11 +157,11 @@ func trimWhitespace(s string) string {
 // Any other format returns an error to preserve determinism.
 func normalizeDate(s string) (string, error) {
 	if s == "" {
-		return "", errors.New("date value is empty")
+		return "", fmt.Errorf("normalize: date %w", sriracha.ErrEmptyValue)
 	}
 	_, err := time.Parse("2006-01-02", s)
 	if err != nil {
-		return "", errors.New("date must be ISO 8601 YYYY-MM-DD")
+		return "", fmt.Errorf("normalize: %w: date must be ISO 8601 YYYY-MM-DD", ErrInvalidValue)
 	}
 	return s, nil
 }
@@ -175,16 +211,16 @@ func normalizeName(s string) string {
 // NFKD-decomposed, and trimmed leading/trailing whitespace.
 func normalizeEmail(s string) (string, error) {
 	if strings.ContainsAny(s, " \t\r\n") {
-		return "", errors.New("email must not contain whitespace")
+		return "", fmt.Errorf("normalize: %w: email must not contain whitespace", ErrInvalidValue)
 	}
 	at := strings.IndexByte(s, '@')
 	if at < 0 || strings.IndexByte(s[at+1:], '@') >= 0 {
-		return "", errors.New("email must contain exactly one '@'")
+		return "", fmt.Errorf("normalize: %w: email must contain exactly one '@'", ErrInvalidValue)
 	}
 	local, domain := s[:at], s[at+1:]
 	domain = strings.TrimRight(domain, ".")
 	if local == "" || domain == "" {
-		return "", errors.New("email must have non-empty local and domain parts")
+		return "", fmt.Errorf("normalize: %w: email must have non-empty local and domain parts", ErrInvalidValue)
 	}
 	return local + "@" + domain, nil
 }
@@ -206,7 +242,7 @@ func normalizePhone(s string) (string, error) {
 		}
 	}
 	if digits < 7 {
-		return "", errors.New("phone must contain at least 7 digits")
+		return "", fmt.Errorf("normalize: %w: phone must contain at least 7 digits", ErrInvalidValue)
 	}
 	return b.String(), nil
 }
@@ -215,12 +251,12 @@ func normalizePhone(s string) (string, error) {
 func normalizeCountry(s string) (string, error) {
 	upper := strings.ToUpper(s)
 	if utf8.RuneCountInString(upper) != 2 {
-		return "", errors.New("country code must be 2 characters")
+		return "", fmt.Errorf("normalize: %w: country code must be 2 characters", ErrInvalidValue)
 	}
 
 	for _, r := range upper {
 		if r > 127 || !unicode.IsLetter(r) {
-			return "", errors.New("country code must be 2 ASCII letters")
+			return "", fmt.Errorf("normalize: %w: country code must be 2 ASCII letters", ErrInvalidValue)
 		}
 	}
 

@@ -40,15 +40,15 @@ func TestFieldPathInNamespace(t *testing.T) {
 	assert.False(t, FieldNameGiven.InNamespace(NamespaceDate), "FieldNameGiven should not be in namespace 'date'")
 }
 
-func TestMustParsePath_Panics(t *testing.T) {
+func TestMustParseFieldPath_Panics(t *testing.T) {
 	t.Parallel()
 
 	defer func() {
 		if r := recover(); r == nil {
-			t.Error("MustParsePath with invalid input should panic")
+			t.Error("MustParseFieldPath with invalid input should panic")
 		}
 	}()
-	MustParsePath("not-a-valid-path")
+	MustParseFieldPath("not-a-valid-path")
 }
 
 func TestParseFieldPath(t *testing.T) {
@@ -83,6 +83,40 @@ func TestParseFieldPath(t *testing.T) {
 			assert.Equal(t, tc.wantLocal, fp.LocalName(), "LocalName()")
 		})
 	}
+}
+
+func TestFieldPathIsCanonical(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		path FieldPath
+		want bool
+	}{
+		{"CanonicalField", FieldNameGiven, true},
+		{"CustomOrg", MustParseFieldPath("acme-health::identifier::mrn"), false},
+		{"ZeroPath", FieldPath{}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, tc.path.IsCanonical())
+		})
+	}
+}
+
+func TestOrgSriracha(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, OrgSriracha, FieldNameGiven.Org(), "canonical paths must carry OrgSriracha")
+}
+
+func TestParseFieldPathWrapsSentinel(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseFieldPath("not-a-path")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidFieldPath)
+	assert.Contains(t, err.Error(), "not-a-path", "the rejected input stays in the message")
 }
 
 func TestFieldPath_JSON(t *testing.T) {

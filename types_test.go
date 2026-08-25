@@ -2,6 +2,7 @@ package sriracha
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -251,7 +252,7 @@ func TestAnnotate(t *testing.T) {
 			Fields:              [][]byte{{0xde, 0xad}, nil},
 		}
 		got := tr.Annotate(fs)
-		assert.Equal(t, "v1", got.Version)
+		assert.Equal(t, "v1", got.FieldSetVersion)
 		assert.Equal(t, "k1", got.KeyID)
 		assert.Equal(t, "abcd", got.FieldSetFingerprint)
 		require.Len(t, got.Fields, 2)
@@ -318,6 +319,18 @@ func TestToken_String(t *testing.T) {
 		assert.Contains(t, tr.String(), "fp=abc")
 	})
 
+	t.Run("EmptyFieldCountsAsAbsent", func(t *testing.T) {
+		t.Parallel()
+		// A JSON round trip can turn an absent field into an empty non-nil
+		// slice. Presence is len(field) > 0 everywhere, so both forms are
+		// absent and the counts match Annotate.
+		tr := ProbabilisticToken{
+			FieldSetVersion: "0.2",
+			Fields:          [][]byte{make([]byte, 8), {}, nil},
+		}
+		assert.Contains(t, tr.String(), "fields=1/3")
+	})
+
 	t.Run("BloomPopulated", func(t *testing.T) {
 		t.Parallel()
 		tr := ProbabilisticToken{
@@ -331,4 +344,216 @@ func TestToken_String(t *testing.T) {
 		assert.Contains(t, s, "fields=1/1")
 		assert.Contains(t, s, "bytes=128")
 	})
+}
+
+func TestAnnotatedToken_JSON(t *testing.T) {
+	t.Parallel()
+
+	at := AnnotatedToken{
+		FieldSetVersion: "0.2",
+		KeyID:           "k1",
+		Fields:          []AnnotatedField{{Path: FieldNameGiven, Present: true, ByteCount: 32}},
+	}
+	data, err := json.Marshal(at)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"field_set_version":"0.2"`,
+		"the version tag must match the one on the token types")
+	assert.NotContains(t, string(data), `"version"`)
+
+	var got AnnotatedToken
+	require.NoError(t, json.Unmarshal(data, &got))
+	assert.Equal(t, at, got)
+}
+
+func TestProbabilisticConfigValidate(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		cfg         ProbabilisticConfig
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "Default",
+			cfg:  DefaultProbabilisticConfig(),
+		},
+		{
+			name: "Fast",
+			cfg:  FastProbabilisticConfig(),
+		},
+		{
+			name: "HighPrecision",
+			cfg:  HighPrecisionProbabilisticConfig(),
+		},
+		{
+			name:        "ZeroSizeBits",
+			cfg:         ProbabilisticConfig{SizeBits: 0, HashCount: 2, NgramSizes: []int{2}},
+			wantErr:     true,
+			errContains: "SizeBits must be > 0",
+		},
+		{
+			name:        "BalancedOddSizeBits",
+			cfg:         ProbabilisticConfig{SizeBits: 1023, HashCount: 2, NgramSizes: []int{2}, Balanced: true},
+			wantErr:     true,
+			errContains: "even when Balanced",
+		},
+		{
+			name: "UnbalancedOddSizeBits",
+			cfg:  ProbabilisticConfig{SizeBits: 1023, HashCount: 2, NgramSizes: []int{2}},
+		},
+		{
+			name:        "ZeroHashCount",
+			cfg:         ProbabilisticConfig{SizeBits: 1024, HashCount: 0, NgramSizes: []int{2}},
+			wantErr:     true,
+			errContains: "HashCount",
+		},
+		{
+			name:        "NegativeHashCount",
+			cfg:         ProbabilisticConfig{SizeBits: 1024, HashCount: -1, NgramSizes: []int{2}},
+			wantErr:     true,
+			errContains: "HashCount",
+		},
+		{
+			name:        "EmptyNgramSizes",
+			cfg:         ProbabilisticConfig{SizeBits: 1024, HashCount: 2},
+			wantErr:     true,
+			errContains: "NgramSizes must not be empty",
+		},
+		{
+			name:        "NonPositiveNgramSize",
+			cfg:         ProbabilisticConfig{SizeBits: 1024, HashCount: 2, NgramSizes: []int{0, 2}},
+			wantErr:     true,
+			errContains: "NgramSizes[0]",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := tc.cfg.Validate()
+			if !tc.wantErr {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrInvalidConfig)
+			assert.Contains(t, err.Error(), tc.errContains)
+		})
+	}
+}
+
+func TestFieldSetValidate(t *testing.T) {
+	t.Parallel()
+
+	validParams := DefaultProbabilisticConfig()
+	cases := []struct {
+		name     string
+		fs       FieldSet
+		wantErr  error
+		wantPath FieldPath
+	}{
+		{
+			name: "Valid",
+			fs: FieldSet{
+				Version:             "v1",
+				Fields:              []FieldSpec{{Path: FieldNameGiven, Weight: 1.0}, {Path: FieldNameFamily, Weight: 0}},
+				ProbabilisticParams: validParams,
+			},
+		},
+		{
+			name: "NoFields",
+			fs:   FieldSet{Version: "v1", ProbabilisticParams: validParams},
+		},
+		{
+			name:    "EmptyVersion",
+			fs:      FieldSet{Fields: []FieldSpec{{Path: FieldNameGiven, Weight: 1.0}}, ProbabilisticParams: validParams},
+			wantErr: ErrMissingVersion,
+		},
+		{
+			name: "EmptyPath",
+			fs: FieldSet{
+				Version:             "v1",
+				Fields:              []FieldSpec{{Path: FieldPath{}, Weight: 1.0}},
+				ProbabilisticParams: validParams,
+			},
+			wantErr: ErrInvalidFieldPath,
+		},
+		{
+			name: "DuplicatePath",
+			fs: FieldSet{
+				Version:             "v1",
+				Fields:              []FieldSpec{{Path: FieldNameGiven, Weight: 1.0}, {Path: FieldNameGiven, Weight: 2.0}},
+				ProbabilisticParams: validParams,
+			},
+			wantErr:  ErrDuplicateField,
+			wantPath: FieldNameGiven,
+		},
+		{
+			name: "NegativeWeight",
+			fs: FieldSet{
+				Version:             "v1",
+				Fields:              []FieldSpec{{Path: FieldNameGiven, Weight: -1.0}},
+				ProbabilisticParams: validParams,
+			},
+			wantErr:  ErrInvalidWeight,
+			wantPath: FieldNameGiven,
+		},
+		{
+			name: "NaNWeight",
+			fs: FieldSet{
+				Version:             "v1",
+				Fields:              []FieldSpec{{Path: FieldNameGiven, Weight: math.NaN()}},
+				ProbabilisticParams: validParams,
+			},
+			wantErr:  ErrInvalidWeight,
+			wantPath: FieldNameGiven,
+		},
+		{
+			name: "PositiveInfWeight",
+			fs: FieldSet{
+				Version:             "v1",
+				Fields:              []FieldSpec{{Path: FieldNameGiven, Weight: math.Inf(1)}},
+				ProbabilisticParams: validParams,
+			},
+			wantErr:  ErrInvalidWeight,
+			wantPath: FieldNameGiven,
+		},
+		{
+			name: "NegativeInfWeight",
+			fs: FieldSet{
+				Version:             "v1",
+				Fields:              []FieldSpec{{Path: FieldNameGiven, Weight: math.Inf(-1)}},
+				ProbabilisticParams: validParams,
+			},
+			wantErr:  ErrInvalidWeight,
+			wantPath: FieldNameGiven,
+		},
+		{
+			name: "BadProbabilisticParams",
+			fs: FieldSet{
+				Version:             "v1",
+				Fields:              []FieldSpec{{Path: FieldNameGiven, Weight: 1.0}},
+				ProbabilisticParams: ProbabilisticConfig{SizeBits: 0, HashCount: 2, NgramSizes: []int{2}},
+			},
+			wantErr: ErrInvalidConfig,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := tc.fs.Validate()
+			if tc.wantErr == nil {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.ErrorIs(t, err, tc.wantErr)
+			if tc.wantPath.String() == "" {
+				return
+			}
+			var fieldErr FieldError
+			require.ErrorAs(t, err, &fieldErr)
+			assert.Equal(t, tc.wantPath, fieldErr.Path)
+		})
+	}
 }

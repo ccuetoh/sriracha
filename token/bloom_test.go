@@ -77,14 +77,15 @@ func TestValidateBloomConfig(t *testing.T) {
 			_, err := tok.TokenizeProbabilistic(rec, fs)
 			_, clkErr := tok.TokenizeCLK(rec, fs)
 			if tc.wantErr {
-				assert.Error(t, err)
-				assert.Error(t, clkErr, "TokenizeCLK must reject the same configs")
+				require.ErrorIs(t, err, sriracha.ErrInvalidConfig)
+				require.ErrorIs(t, clkErr, sriracha.ErrInvalidConfig, "TokenizeCLK must reject the same configs")
+				assert.True(t, strings.HasPrefix(err.Error(), "token: "), "got %q", err.Error())
 			} else {
 				assert.NoError(t, err)
 				// CLK is always balanced, so it additionally requires an
 				// even SizeBits.
 				if cfg.SizeBits%2 != 0 {
-					assert.Error(t, clkErr)
+					require.ErrorIs(t, clkErr, sriracha.ErrInvalidConfig)
 				} else {
 					assert.NoError(t, clkErr)
 				}
@@ -97,13 +98,14 @@ func TestTokenizeProbabilistic_AbsentAndEmptyValues(t *testing.T) {
 	t.Parallel()
 	cfg := balancedCfg()
 	cases := []struct {
-		name   string
-		record sriracha.RawRecord
-		path   sriracha.FieldPath
+		name    string
+		record  sriracha.RawRecord
+		path    sriracha.FieldPath
+		wantErr error
 	}{
-		{"MissingKey", sriracha.RawRecord{}, sriracha.FieldNameGiven},
-		{"EmptyName", sriracha.RawRecord{sriracha.FieldNameGiven: ""}, sriracha.FieldNameGiven},
-		{"IdentifierNormalizesToEmpty", sriracha.RawRecord{sriracha.FieldIdentifierPassport: "---"}, sriracha.FieldIdentifierPassport},
+		{"MissingKey", sriracha.RawRecord{}, sriracha.FieldNameGiven, sriracha.ErrRequiredFieldMissing},
+		{"EmptyName", sriracha.RawRecord{sriracha.FieldNameGiven: ""}, sriracha.FieldNameGiven, sriracha.ErrEmptyValue},
+		{"IdentifierNormalizesToEmpty", sriracha.RawRecord{sriracha.FieldIdentifierPassport: "---"}, sriracha.FieldIdentifierPassport, sriracha.ErrEmptyValue},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -118,9 +120,28 @@ func TestTokenizeProbabilistic_AbsentAndEmptyValues(t *testing.T) {
 
 			required := bloomFSWithCfg(cfg, sriracha.FieldSpec{Path: tc.path, Required: true, Weight: 1.0})
 			_, err = tok.TokenizeProbabilistic(tc.record, required)
-			assert.Error(t, err)
+			require.ErrorIs(t, err, tc.wantErr)
+
+			var fieldErr sriracha.FieldError
+			require.ErrorAs(t, err, &fieldErr)
+			assert.Equal(t, tc.path, fieldErr.Path)
 		})
 	}
+}
+
+// TestTokenizeProbabilistic_NormalizationErrorSentinel pins that a
+// normalization failure reaches the caller with the normalize sentinel and
+// the offending path intact.
+func TestTokenizeProbabilistic_NormalizationErrorSentinel(t *testing.T) {
+	t.Parallel()
+	fs := bloomFSWithCfg(balancedCfg(), sriracha.FieldSpec{Path: sriracha.FieldDateBirth, Required: true, Weight: 1.0})
+	_, err := newTok(t, "secret").TokenizeProbabilistic(sriracha.RawRecord{sriracha.FieldDateBirth: "not-a-date"}, fs)
+	require.ErrorIs(t, err, normalize.ErrInvalidValue)
+	assert.True(t, strings.HasPrefix(err.Error(), "token: "), "got %q", err.Error())
+
+	var fieldErr sriracha.FieldError
+	require.ErrorAs(t, err, &fieldErr)
+	assert.Equal(t, sriracha.FieldDateBirth, fieldErr.Path)
 }
 
 func TestGramDoubleHash_KnownDigest(t *testing.T) {
@@ -318,18 +339,11 @@ func TestTokenizeProbabilistic_FormatStamped(t *testing.T) {
 func TestPermutation(t *testing.T) {
 	t.Parallel()
 
-	asImpl := func(t *testing.T, tok Tokenizer) *tokenizer {
-		t.Helper()
-		impl, ok := tok.(*tokenizer)
-		require.True(t, ok)
-		return impl
-	}
-
 	t.Run("BijectionAndStability", func(t *testing.T) {
 		t.Parallel()
-		impl := asImpl(t, newTok(t, "secret"))
+		tok := newTok(t, "secret")
 		const size = 1024
-		perm := impl.permutation(size)
+		perm := tok.permutation(size)
 		require.Len(t, perm, size)
 
 		seen := make([]bool, size)
@@ -339,21 +353,21 @@ func TestPermutation(t *testing.T) {
 			seen[p] = true
 		}
 
-		again := impl.permutation(size)
+		again := tok.permutation(size)
 		assert.Equal(t, perm, again, "permutation must be stable across calls")
 	})
 
 	t.Run("DiffersBetweenSecrets", func(t *testing.T) {
 		t.Parallel()
-		a := asImpl(t, newTok(t, "secret-a")).permutation(1024)
-		b := asImpl(t, newTok(t, "secret-b")).permutation(1024)
+		a := newTok(t, "secret-a").permutation(1024)
+		b := newTok(t, "secret-b").permutation(1024)
 		assert.NotEqual(t, a, b, "different secrets must derive different permutations")
 	})
 
 	t.Run("SameSecretSamePermutation", func(t *testing.T) {
 		t.Parallel()
-		a := asImpl(t, newTok(t, "secret")).permutation(512)
-		b := asImpl(t, newTok(t, "secret")).permutation(512)
+		a := newTok(t, "secret").permutation(512)
+		b := newTok(t, "secret").permutation(512)
 		assert.Equal(t, a, b, "the permutation must depend only on (secret, SizeBits)")
 	})
 }
@@ -492,8 +506,7 @@ func TestTokenizeCLK(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				_, err := tok.TokenizeCLK(tc.rec, fs)
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), "contributing")
+				require.ErrorIs(t, err, ErrNoContributingFields)
 			})
 		}
 	})
@@ -503,8 +516,7 @@ func TestTokenizeCLK(t *testing.T) {
 		tok := newTok(t, "secret")
 		required := bloomFSWithCfg(cfg, sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
 		_, err := tok.TokenizeCLK(sriracha.RawRecord{}, required)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "missing")
+		require.ErrorIs(t, err, sriracha.ErrRequiredFieldMissing)
 	})
 
 	t.Run("RequiredEmptyErrors", func(t *testing.T) {
@@ -512,8 +524,7 @@ func TestTokenizeCLK(t *testing.T) {
 		tok := newTok(t, "secret")
 		required := bloomFSWithCfg(cfg, sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: true, Weight: 1.0})
 		_, err := tok.TokenizeCLK(sriracha.RawRecord{sriracha.FieldNameGiven: ""}, required)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "empty")
+		require.ErrorIs(t, err, sriracha.ErrEmptyValue)
 	})
 
 	t.Run("NormalizationError", func(t *testing.T) {
@@ -521,7 +532,26 @@ func TestTokenizeCLK(t *testing.T) {
 		tok := newTok(t, "secret")
 		dateFS := bloomFSWithCfg(cfg, sriracha.FieldSpec{Path: sriracha.FieldDateBirth, Required: true, Weight: 1.0})
 		_, err := tok.TokenizeCLK(sriracha.RawRecord{sriracha.FieldDateBirth: "not-a-date"}, dateFS)
-		assert.Error(t, err)
+		require.ErrorIs(t, err, normalize.ErrInvalidValue)
+
+		var fieldErr sriracha.FieldError
+		require.ErrorAs(t, err, &fieldErr)
+		assert.Equal(t, sriracha.FieldDateBirth, fieldErr.Path)
+	})
+
+	t.Run("OddSizeBitsRejected", func(t *testing.T) {
+		t.Parallel()
+		// CLK is always balanced, so an odd SizeBits is rejected even when
+		// cfg.Balanced is false and ProbabilisticConfig.Validate accepts it.
+		odd := cfg
+		odd.NgramSizes = append([]int(nil), cfg.NgramSizes...)
+		odd.Balanced = false
+		odd.SizeBits = 1023
+		oddFS := bloomFSWithCfg(odd, sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: false, Weight: 1.0})
+		require.NoError(t, odd.Validate(), "the config itself must be valid")
+		_, err := newTok(t, "secret").TokenizeCLK(full, oddFS)
+		require.ErrorIs(t, err, sriracha.ErrInvalidConfig)
+		assert.Contains(t, err.Error(), "even for CLK")
 	})
 
 	t.Run("UnbalancedConfig", func(t *testing.T) {
@@ -576,7 +606,7 @@ func FuzzBloomBalanced(f *testing.F) {
 		Balanced:   true,
 	}
 	fs := bloomFSWithCfg(cfg, sriracha.FieldSpec{Path: sriracha.FieldNameGiven, Required: false, Weight: 1.0})
-	tok, _ := New([]byte("fuzz-secret"))
+	tok, _ := New(testSecret("fuzz-secret"))
 	fieldBytes := int((cfg.SizeBits + 63) / 64 * 8)
 
 	f.Fuzz(func(t *testing.T, given string) {
